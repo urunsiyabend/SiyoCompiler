@@ -48,13 +48,24 @@ public final class UnaryExpressionSyntax extends ExpressionSyntax {
         this._operator = operator;
     }
 
+    /**
+     * Gets the operand of the unary expression.
+     *
+     * @return The operand of the unary expression.
+     */
     public ExpressionSyntax getOperand() {
         return _operand;
     }
 
+    /**
+     * Sets the operand of the unary expression.
+     *
+     * @param operand The new operand to set.
+     */
     public void setOperand(ExpressionSyntax operand) {
         this._operand = operand;
     }
+
 
     /**
      * Gets the type of the syntax node.
