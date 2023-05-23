@@ -76,9 +76,10 @@ public class Binder {
      */
     private BoundExpression bindUnaryExpression(UnaryExpressionSyntax syntax) throws Exception {
         BoundExpression boundOperand = bindExpression(syntax.getOperand());
-        BoundUnaryOperatorType boundOperatorType = bindUnaryOperatorType(syntax.getOperand().getType(), boundOperand.getClassType());
+        BoundUnaryOperatorType boundOperatorType = bindUnaryOperatorType(syntax.getOperator().getType(), boundOperand.getClassType());
         if (boundOperatorType == null) {
             _diagnostics.add(String.format("Unary operator '%s' is not defined for type %s", syntax.getOperator(), boundOperand.getClassType()));
+            return boundOperand;
         }
         return new BoundUnaryExpression(boundOperatorType, boundOperand);
     }
@@ -95,6 +96,7 @@ public class Binder {
         BoundBinaryOperatorType boundOperatorType = bindBinaryOperatorType(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
         if (boundOperatorType == null) {
             _diagnostics.add(String.format("Binary operator '%s' is not defined for types %s and %s", syntax.getOperator(), boundLeft.getClassType(), boundRight.getClassType()));
+            return boundLeft;
         }
         return new BoundBinaryExpression(boundLeft, boundOperatorType, boundRight);
     }
@@ -108,14 +110,21 @@ public class Binder {
      * @throws Exception if the unary operator type is unexpected.
      */
     private BoundUnaryOperatorType bindUnaryOperatorType(SyntaxType type, Class<?> operandType) throws Exception {
-        if (operandType != int.class) {
-            return null;
+        if (operandType == Integer.class) {
+            return switch (type) {
+                case PlusToken -> BoundUnaryOperatorType.Identity;
+                case MinusToken -> BoundUnaryOperatorType.Negation;
+                default -> throw new Exception(String.format("Unexpected unary operator <%s> for type <%s>", type, operandType));
+            };
         }
-        return switch (type) {
-            case PlusToken -> BoundUnaryOperatorType.Identity;
-            case MinusToken -> BoundUnaryOperatorType.Negation;
-            default -> throw new Exception(String.format("Unexpected unary operator <%s>", type));
-        };
+        if (operandType == Boolean.class) {
+            return switch (type) {
+                case BangToken -> BoundUnaryOperatorType.LogicalNegation;
+                default -> throw new Exception(String.format("Unexpected unary operator <%s> for type <%s>", type, operandType));
+            };
+        }
+
+        return null;
     }
 
     /**
@@ -128,17 +137,25 @@ public class Binder {
      * @throws Exception if the binary operator type is unexpected.
      */
     private BoundBinaryOperatorType bindBinaryOperatorType(SyntaxType type, Class<?> leftType, Class<?> rightType) throws Exception {
-        if (leftType != int.class || rightType != int.class) {
-            return null;
+        if (leftType == Integer.class && rightType == Integer.class) {
+            return switch (type) {
+                case PlusToken -> BoundBinaryOperatorType.Addition;
+                case MinusToken -> BoundBinaryOperatorType.Subtraction;
+                case AsteriskToken -> BoundBinaryOperatorType.Multiplication;
+                case SlashToken -> BoundBinaryOperatorType.Division;
+                default -> throw new Exception(String.format("Unexpected binary operator <%s>", type));
+            };
         }
 
-        return switch (type) {
-            case PlusToken -> BoundBinaryOperatorType.Addition;
-            case MinusToken -> BoundBinaryOperatorType.Subtraction;
-            case AsteriskToken -> BoundBinaryOperatorType.Multiplication;
-            case SlashToken -> BoundBinaryOperatorType.Division;
-            default -> throw new Exception(String.format("Unexpected binary operator <%s>", type));
-        };
+        if (leftType == Boolean.class && rightType == Boolean.class) {
+            return switch (type) {
+                case DoubleAmpersandToken -> BoundBinaryOperatorType.LogicalAnd;
+                case DoublePipeToken -> BoundBinaryOperatorType.LogicalOr;
+                default -> throw new Exception(String.format("Unexpected binary operator <%s>", type));
+            };
+        }
+        return null;
+
     }
 
 }

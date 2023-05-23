@@ -52,24 +52,27 @@ public class Evaluator {
         }
 
         if (node instanceof BoundUnaryExpression u) {
-            int operand = (int) evaluateExpression(u.getOperand());
+            Object operand = evaluateExpression(u.getOperand());
             return switch (u.getOperatorType()) {
-                case Identity -> operand;
-                case Negation -> -operand;
+                case Identity -> (int) operand;
+                case Negation -> -(int)operand;
+                case LogicalNegation -> !(boolean)operand;
                 default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperatorType()));
             };
         }
 
 
         if (node instanceof BoundBinaryExpression b) {
-            int left = (int) evaluateExpression(b.getLeft());
-            int right = (int) evaluateExpression(b.getRight());
+            Object left = evaluateExpression(b.getLeft());
+            Object right = evaluateExpression(b.getRight());
 
             return switch (b.getOperatorType()) {
-                case Addition -> left + right;
-                case Subtraction -> left - right;
-                case Multiplication -> left * right;
-                case Division -> left / right;
+                case Addition -> (int) left + (int) right;
+                case Subtraction -> (int) left - (int) right;
+                case Multiplication -> (int) left * (int) right;
+                case Division -> (int) left / (int) right;
+                case LogicalAnd -> (boolean) left && (boolean) right;
+                case LogicalOr -> (boolean) left || (boolean) right;
                 default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperatorType()));
             };
         }

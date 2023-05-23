@@ -39,7 +39,7 @@ public class BoundUnaryExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        return getOperand().getClassType();
+        return getOperand().getClass();
     }
 
     /**

@@ -36,8 +36,7 @@ public class BoundLiteralExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        // FIXME: class java.lang.Boolean cannot be cast to class java.lang.Class (java.lang.Boolean and java.lang.Class are in module java.base of loader 'bootstrap')
-        return (Class<?>) getValue();
+        return getValue().getClass();
     }
 
     /**

@@ -40,10 +40,15 @@ public class Lexer {
      * @return The current character being analyzed.
      */
     public char currentChar() {
-        if (getPosition() >= _text.length()) {
+        return peek(0);
+    }
+
+    private char peek(int offset) {
+        int index = _position + offset;
+        if (index >= _text.length()) {
             return '\0';
         }
-        return _text.charAt(_position);
+        return _text.charAt(index);
     }
 
     /**
@@ -59,7 +64,16 @@ public class Lexer {
      * Advances the lexer to the next character in the text.
      */
     private void next() {
-        _position++;
+        next(1);
+    }
+
+    /**
+     * Advances the lexer to the character in the text according to the offset.
+     *
+     * @param offset The amount of change that cursor will make.
+     */
+    private void next(int offset) {
+        _position += offset;
     }
 
     /**
@@ -137,9 +151,26 @@ public class Lexer {
                 next();
                 return new SyntaxToken(SyntaxType.CloseParenthesisToken, getPosition(), ")", null);
             }
+            case '!' -> {
+                next();
+                return new SyntaxToken(SyntaxType.BangToken, getPosition(), "!", null);
+            }
+            case '&' -> {
+                if(peek(1) == '&') {
+                    next(2);
+                    return new SyntaxToken(SyntaxType.DoubleAmpersandToken, getPosition(), "&&", null);
+                }
+            }
+            case '|' -> {
+                if(peek(1) == '|') {
+                    next(2);
+                    return new SyntaxToken(SyntaxType.DoublePipeToken, getPosition(), "||", null);
+                }
+            }
+
         }
-        next();
         _diagnostics.add(String.format("ERROR: Bad character input: %c", currentChar()));
+        next();
         return new SyntaxToken(SyntaxType.BadToken, getPosition(), String.valueOf(currentChar()), null);
     }
 

@@ -31,12 +31,16 @@ public class Main {
             SyntaxTree tree = SyntaxTree.parse(line);
             Binder binder = new Binder();
             BoundExpression boundExpression = binder.bindExpression(tree.getRoot());
-            Iterator<String> diagnosticsIterator = tree.diagnostics();
+            Iterator<String> treeDiagnosticsIterator = tree.diagnostics();
+            Iterator<String> binderDiagnosticsIterator = binder.diagnostics();
             prettyPrint(tree.getRoot(), "", true);
 
-            if (diagnosticsIterator.hasNext()) {
-                while (diagnosticsIterator.hasNext()) {
-                    System.out.println(diagnosticsIterator.next());
+            if (treeDiagnosticsIterator.hasNext() || binderDiagnosticsIterator.hasNext()) {
+                while (treeDiagnosticsIterator.hasNext()) {
+                    System.out.println(treeDiagnosticsIterator.next());
+                }
+                while (binderDiagnosticsIterator.hasNext()) {
+                    System.out.println(binderDiagnosticsIterator.next());
                 }
             }
             else {

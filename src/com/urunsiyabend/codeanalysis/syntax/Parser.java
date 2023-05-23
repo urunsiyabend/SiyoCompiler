@@ -160,7 +160,7 @@ public class Parser {
             }
             case FalseKeyword, TrueKeyword -> {
                 SyntaxToken keywordToken = nextToken();
-                var value = current().getType() == SyntaxType.TrueKeyword;
+                var value = keywordToken.getType() == SyntaxType.TrueKeyword;
                 return new LiteralExpressionSyntax(keywordToken, value);
             }
             default -> {

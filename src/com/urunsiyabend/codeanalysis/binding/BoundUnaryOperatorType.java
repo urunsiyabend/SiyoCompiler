@@ -9,5 +9,6 @@ package com.urunsiyabend.codeanalysis.binding;
  */
 public enum BoundUnaryOperatorType {
     Identity,
-    Negation
+    Negation,
+    LogicalNegation,
 }
