@@ -4,35 +4,35 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 /**
- * Represents a paranthesized expression in the syntax tree.
- * This class encapsulates an opening paranthesis token, an expression, and a closing paranthesis token.
+ * Represents a parenthesized expression in the syntax tree.
+ * This class encapsulates an opening parenthesis token, an expression, and a closing parenthesis token.
  *
  * @see <a href="https://github.com/urunsiyabend">GitHub Profile</a>
  * @author Siyabend Urun
  * @version 1.0
  */
 public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
-    private SyntaxToken _openParanthesisToken;
-    private SyntaxToken _closeParanthesisToken;
+    private SyntaxToken _openParenthesisToken;
+    private SyntaxToken _closeParenthesisToken;
     private ExpressionSyntax _expression;
 
     /**
-     * Initializes a new instance of the ParanthesizedExpressionSyntax class with the specified tokens and expression.
+     * Initializes a new instance of the ParenthesizedExpressionSyntax class with the specified tokens and expression.
      *
-     * @param openParanthesisToken  The opening paranthesis token.
-     * @param expression            The expression contained within the parantheses.
-     * @param closeParanthesisToken The closing paranthesis token.
+     * @param openParenthesisToken  The opening parenthesis token.
+     * @param expression            The expression contained within the parentheses.
+     * @param closeParenthesisToken The closing parenthesis token.
      */
-    public ParanthesizedExpressionSyntax(SyntaxToken openParanthesisToken, ExpressionSyntax expression, SyntaxToken closeParanthesisToken) {
+    public ParanthesizedExpressionSyntax(SyntaxToken openParenthesisToken, ExpressionSyntax expression, SyntaxToken closeParenthesisToken) {
         _expression = expression;
-        setOpenParanthesisToken(openParanthesisToken);
-        setCloseParanthesisToken(closeParanthesisToken);
+        setOpenParenthesisToken(openParenthesisToken);
+        setCloseParenthesisToken(closeParenthesisToken);
     }
 
     /**
-     * Gets the syntax type of the paranthesized expression.
+     * Gets the syntax type of the parenthesized expression.
      *
-     * @return The syntax type of the paranthesized expression.
+     * @return The syntax type of the parenthesized expression.
      */
     @Override
     public SyntaxType getType() {
@@ -51,62 +51,62 @@ public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
     }
 
     /**
-     * Sets the opening paranthesis token for the paranthesized expression.
+     * Sets the opening parenthesis token for the paranthesized expression.
      *
-     * @param openParanthesisToken The opening paranthesis token.
+     * @param openParenthesisToken The opening parenthesis token.
      */
-    public void setOpenParanthesisToken(SyntaxToken openParanthesisToken) {
-        _openParanthesisToken = openParanthesisToken;
+    public void setOpenParenthesisToken(SyntaxToken openParenthesisToken) {
+        _openParenthesisToken = openParenthesisToken;
     }
 
     /**
-     * Gets the opening paranthesis token of the paranthesized expression.
+     * Gets the opening parenthesis token of the parenthesized expression.
      *
-     * @return The opening paranthesis token.
+     * @return The opening parenthesis token.
      */
-    public SyntaxToken getOpenParanthesisToken() {
-        return _openParanthesisToken;
+    public SyntaxToken getOpenParenthesisToken() {
+        return _openParenthesisToken;
     }
 
     /**
-     * Sets the closing paranthesis token for the paranthesized expression.
+     * Sets the closing parenthesis token for the paranthesized expression.
      *
-     * @param closeParanthesisToken The closing paranthesis token.
+     * @param closeParenthesisToken The closing paranthesis token.
      */
-    public void setCloseParanthesisToken(SyntaxToken closeParanthesisToken) {
-        _closeParanthesisToken = closeParanthesisToken;
+    public void setCloseParenthesisToken(SyntaxToken closeParenthesisToken) {
+        _closeParenthesisToken = closeParenthesisToken;
     }
 
     /**
-     * Gets the closing paranthesis token of the paranthesized expression.
+     * Gets the closing parenthesis token of the parenthesized expression.
      *
-     * @return The closing paranthesis token.
+     * @return The closing parenthesis token.
      */
-    public SyntaxToken getCloseParanthesisToken() {
-        return _closeParanthesisToken;
+    public SyntaxToken getCloseParenthesisToken() {
+        return _closeParenthesisToken;
     }
 
     /**
-     * Gets the expression contained within the parantheses of the paranthesized expression.
+     * Gets the expression contained within the parentheses of the parenthesized expression.
      *
-     * @return The expression within the parantheses.
+     * @return The expression within the parentheses.
      */
     public ExpressionSyntax getExpression() {
         return _expression;
     }
 
     /**
-     * Sets the expression contained within the parantheses of the paranthesized expression.
+     * Sets the expression contained within the parentheses of the parenthesized expression.
      *
-     * @param _expression The expression within the parantheses.
+     * @param _expression The expression within the parentheses.
      */
     public void setExpression(ExpressionSyntax _expression) {
         this._expression = _expression;
     }
 
     /**
-     * Iterator implementation for iterating over the child nodes of the paranthesized expression.
-     * The child nodes include the opening paranthesis token and the closing paranthesis token.
+     * Iterator implementation for iterating over the child nodes of the parenthesized expression.
+     * The child nodes include the opening parenthesis token and the closing parenthesis token.
      */
     private class ChildrenIterator implements Iterator<SyntaxNode> {
 
@@ -137,11 +137,11 @@ public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
             switch (index) {
                 case 0 -> {
                     index++;
-                    return getOpenParanthesisToken();
+                    return getOpenParenthesisToken();
                 }
                 case 1 -> {
                     index++;
-                    return getCloseParanthesisToken();
+                    return getCloseParenthesisToken();
                 }
                 default -> throw new NoSuchElementException();
             }

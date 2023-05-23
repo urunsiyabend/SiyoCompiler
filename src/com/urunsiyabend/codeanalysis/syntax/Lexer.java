@@ -99,6 +99,19 @@ public class Lexer {
             return new SyntaxToken(SyntaxType.WhiteSpaceToken, start, text, null);
         }
 
+        if (Character.isLetter(currentChar())) {
+            int start = _position;
+
+            while(Character.isLetter(currentChar())) {
+                next();
+            }
+
+            int length = _position - start;
+            String text = _text.substring(start, start + length);
+            SyntaxType type = SyntaxRules.getKeywordType(text);
+            return new SyntaxToken(type, start, text, null);
+        }
+
         switch (currentChar()) {
             case '+' -> {
                 next();

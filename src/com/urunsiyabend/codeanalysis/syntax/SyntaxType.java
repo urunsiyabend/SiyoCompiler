@@ -47,6 +47,15 @@ public enum SyntaxType {
     /* Represents a unary expression. */
     UnaryExpression,
 
+    /* Represents a 'true' keyword. */
+    TrueKeyword,
+
+    /* Represents a 'false' keyword. */
+    FalseKeyword,
+
+    /* Represents a identifier token. */
+    IdentifierToken,
+
     /* Represents a binary expression. */
     BinaryExpression
 }

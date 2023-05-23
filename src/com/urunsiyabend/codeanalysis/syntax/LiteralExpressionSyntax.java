@@ -13,14 +13,23 @@ import java.util.List;
  * @version 1.0
  */
 public final class LiteralExpressionSyntax extends ExpressionSyntax {
+    private final Object _value;
     private SyntaxToken _literalToken;
 
     /**
      * Initializes a new instance of the LiteralExpressionSyntax class with the specified literal token.
      *
      * @param literalToken The literal token representing the value of the literal expression.
+     * @param value The value of literal expression.
      */
+
     public LiteralExpressionSyntax(SyntaxToken literalToken) {
+        this._value = literalToken.getValue();
+        setLiteralToken(literalToken);
+    }
+
+    public LiteralExpressionSyntax(SyntaxToken literalToken, Object value) {
+        this._value = value;
         setLiteralToken(literalToken);
     }
 
@@ -63,5 +72,14 @@ public final class LiteralExpressionSyntax extends ExpressionSyntax {
      */
     public void setLiteralToken(SyntaxToken literalToken) {
         _literalToken = literalToken;
+    }
+
+    /**
+     * Gets the value for the literal expression.
+     *
+     * @return The valueof the literal expression.
+     */
+    public Object getValue() {
+        return _value;
     }
 }

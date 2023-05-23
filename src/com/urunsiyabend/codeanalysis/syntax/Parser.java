@@ -150,16 +150,24 @@ public class Parser {
      * @return The parsed expression syntax.
      */
     private ExpressionSyntax parsePrimary() {
-        if (current().type == SyntaxType.OpenParenthesisToken) {
-            SyntaxToken left = nextToken();
-            ExpressionSyntax exp = parseExp();
-            SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
+        switch (current().getType()) {
+            case OpenParenthesisToken -> {
+                SyntaxToken left = nextToken();
+                ExpressionSyntax exp = parseExp();
+                SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
 
-            return new ParanthesizedExpressionSyntax(left, exp, right);
+                return new ParanthesizedExpressionSyntax(left, exp, right);
+            }
+            case FalseKeyword, TrueKeyword -> {
+                SyntaxToken keywordToken = nextToken();
+                var value = current().getType() == SyntaxType.TrueKeyword;
+                return new LiteralExpressionSyntax(keywordToken, value);
+            }
+            default -> {
+                SyntaxToken numberToken = match(SyntaxType.NumberToken);
+                return new LiteralExpressionSyntax(numberToken);
+            }
         }
-        SyntaxToken numberToken = match(SyntaxType.NumberToken);
-        return new LiteralExpressionSyntax(numberToken);
     }
-
 }
 

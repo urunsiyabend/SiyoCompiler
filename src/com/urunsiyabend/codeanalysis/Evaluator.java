@@ -35,7 +35,7 @@ public class Evaluator {
      * @return The computed result of the expression.
      * @throws Exception if an error occurs during evaluation.
      */
-    public int evaluate() throws Exception {
+    public Object evaluate() throws Exception {
         return evaluateExpression(_root);
     }
 
@@ -46,13 +46,13 @@ public class Evaluator {
      * @return The computed result of the expression.
      * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
      */
-    private int evaluateExpression(BoundExpression node) throws Exception {
+    private Object evaluateExpression(BoundExpression node) throws Exception {
         if (node instanceof BoundLiteralExpression n) {
-            return (int) n.getValue();
+            return n.getValue();
         }
 
         if (node instanceof BoundUnaryExpression u) {
-            int operand = evaluateExpression(u.getOperand());
+            int operand = (int) evaluateExpression(u.getOperand());
             return switch (u.getOperatorType()) {
                 case Identity -> operand;
                 case Negation -> -operand;
@@ -62,8 +62,8 @@ public class Evaluator {
 
 
         if (node instanceof BoundBinaryExpression b) {
-            int left = evaluateExpression(b.getLeft());
-            int right = evaluateExpression(b.getRight());
+            int left = (int) evaluateExpression(b.getLeft());
+            int right = (int) evaluateExpression(b.getRight());
 
             return switch (b.getOperatorType()) {
                 case Addition -> left + right;

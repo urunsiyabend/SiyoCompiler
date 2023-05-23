@@ -63,9 +63,8 @@ public class Binder {
      * @return The bound expression.
      */
     private BoundExpression bindLiteralExpression(LiteralExpressionSyntax syntax) {
-        Object value = syntax.getLiteralToken().getValue();
-        int intValue = (value instanceof Integer) ? (int) value : 0;
-        return new BoundLiteralExpression(intValue);
+        Object value = syntax.getValue() != null ? syntax.getValue() : 0;
+        return new BoundLiteralExpression(value);
     }
 
 

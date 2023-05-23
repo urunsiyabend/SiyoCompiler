@@ -42,7 +42,7 @@ public class Main {
             else {
                 Evaluator evaluator = new Evaluator(boundExpression);
                 try {
-                    int result = evaluator.evaluate();
+                    Object result = evaluator.evaluate();
                     System.out.println(result);
                 }
                 catch (Exception e) {
