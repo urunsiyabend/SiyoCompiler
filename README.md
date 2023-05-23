@@ -1,7 +1,7 @@
 <img src="src/com/urunsiyabend/SiyoLanguage.png" alt= “” width="200" height="200">
 <hr>
 
-# Siyo Compiler Project
+# Handwritten Compiler with Java for the Siyo Programming Language
 
 Welcome to the Siyo Compiler Project! This project aims to develop a compiler for the Siyo language.
 
