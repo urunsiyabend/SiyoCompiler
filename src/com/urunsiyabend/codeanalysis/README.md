@@ -8,7 +8,7 @@ This package contains classes related to code analysis in the `com.urunsiyabend`
 - `Evaluator`: Evaluates the syntax tree and computes the result.
 - `ExpressionSyntax`: Represents an expression in the syntax tree.
 - `Lexer`: Performs lexical analysis on the input text and generates tokens.
-- `NumberExpressionSyntax`: Represents a number expression in the syntax tree.
+- `LiteralExpressionSyntax`: Represents a literal expression in the syntax tree.
 - `ParanthesizedExpressionSyntax`: Represents a parenthesized expression in the syntax tree.
 - `Parser`: Parses the input text and generates the syntax tree.
 - `README.md` (you are here): Provides an overview of the `com.urunsiyabend.codeanalysis` package.
