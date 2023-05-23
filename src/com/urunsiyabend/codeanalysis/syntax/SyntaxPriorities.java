@@ -9,20 +9,6 @@ package com.urunsiyabend.codeanalysis.syntax;
  */
 public class SyntaxPriorities {
     /**
-     * Retrieves the priority of a binary operator based on its syntax type.
-     *
-     * @param type The syntax type of the binary operator.
-     * @return The priority of the binary operator.
-     */
-    public static int GetBinaryOperatorPriority(SyntaxType type) {
-        return switch (type) {
-            case PlusToken, MinusToken -> 1;
-            case AsteriskToken, SlashToken -> 2;
-            default -> 0;
-        };
-    }
-
-    /**
      * Retrieves the priority of a unary operator based on its syntax type.
      *
      * @param type The syntax type of the unary operator.
@@ -30,7 +16,23 @@ public class SyntaxPriorities {
      */
     public static int GetUnaryOperatorPriority(SyntaxType type) {
         return switch (type) {
+            case PlusToken, MinusToken, BangToken -> 5;
+            default -> 0;
+        };
+    }
+
+    /**
+     * Retrieves the priority of a binary operator based on its syntax type.
+     *
+     * @param type The syntax type of the binary operator.
+     * @return The priority of the binary operator.
+     */
+    public static int GetBinaryOperatorPriority(SyntaxType type) {
+        return switch (type) {
+            case AsteriskToken, SlashToken -> 4;
             case PlusToken, MinusToken -> 3;
+            case DoubleAmpersandToken-> 2;
+            case DoublePipeToken -> 1;
             default -> 0;
         };
     }

@@ -46,6 +46,8 @@ public enum SyntaxType {
 
     /* Represents a unary expression. */
     UnaryExpression,
+    /* Represents a binary expression. */
+    BinaryExpression,
 
     /* Represents a 'true' keyword. */
     TrueKeyword,
@@ -56,6 +58,12 @@ public enum SyntaxType {
     /* Represents a identifier token. */
     IdentifierToken,
 
-    /* Represents a binary expression. */
-    BinaryExpression
+    /* Represents a bang (!) token. */
+    BangToken,
+
+    /* Represents a double ampersand (&&) token. */
+    DoubleAmpersandToken,
+
+    /* Represents a double pipe (||) token. */
+    DoublePipeToken,
 }
