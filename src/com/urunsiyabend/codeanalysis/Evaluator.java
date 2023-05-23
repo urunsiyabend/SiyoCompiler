@@ -44,8 +44,8 @@ public class Evaluator {
      * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
      */
     private int evaluateExpression(ExpressionSyntax node) throws Exception {
-        if (node instanceof NumberExpressionSyntax n) {
-            return (int) n.getNumberToken().getValue();
+        if (node instanceof LiteralExpressionSyntax n) {
+            return (int) n.getLiteralToken().getValue();
         }
 
         if (node instanceof BinaryExpressionSyntax b) {

@@ -101,9 +101,18 @@ public class Parser {
      * @return The syntax tree representing the parsed input.
      */
     public SyntaxTree parse() {
-        ExpressionSyntax expression = parseTerm();
+        ExpressionSyntax expression = parseExp();
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
         return new SyntaxTree(_diagnostics, expression, eofToken);
+    }
+
+    /**
+     * Parses expressions.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseExp() {
+        return parseTerm();
     }
 
     /**
@@ -116,22 +125,13 @@ public class Parser {
 
         while (current().type == SyntaxType.PlusToken ||
                 current().type == SyntaxType.MinusToken
-                ) {
+        ) {
             SyntaxToken operator = nextToken();
             ExpressionSyntax right = parseFactor();
             left = new BinaryExpressionSyntax(left, operator, right);
         }
 
         return left;
-    }
-
-    /**
-     * Parses expressions.
-     *
-     * @return The parsed expression syntax.
-     */
-    private ExpressionSyntax ParseExp() {
-        return parseTerm();
     }
 
     /**
@@ -160,13 +160,13 @@ public class Parser {
     private ExpressionSyntax parsePrimary() {
         if (current().type == SyntaxType.OpenParenthesisToken) {
             SyntaxToken left = nextToken();
-            ExpressionSyntax exp = ParseExp();
+            ExpressionSyntax exp = parseExp();
             SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
 
             return new ParanthesizedExpressionSyntax(left, exp, right);
         }
         SyntaxToken numberToken = match(SyntaxType.NumberToken);
-        return new NumberExpressionSyntax(numberToken);
+        return new LiteralExpressionSyntax(numberToken);
     }
 
 }

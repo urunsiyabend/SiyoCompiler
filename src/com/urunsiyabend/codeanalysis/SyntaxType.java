@@ -38,8 +38,8 @@ public enum SyntaxType {
     /* Represents an end-of-file token. */
     EOFToken,
 
-    /* Represents a number expression. */
-    NumberExpression,
+    /* Represents a literal expression. */
+    LiteralExpression,
 
     /* Represents a parenthesized expression. */
     ParenthesizedExpression,
