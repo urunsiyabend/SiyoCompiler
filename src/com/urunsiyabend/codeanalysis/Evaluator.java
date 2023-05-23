@@ -53,11 +53,11 @@ public class Evaluator {
 
         if (node instanceof BoundUnaryExpression u) {
             Object operand = evaluateExpression(u.getOperand());
-            return switch (u.getOperatorType()) {
+            return switch (u.getOperator().getType()) {
                 case Identity -> (int) operand;
                 case Negation -> -(int)operand;
                 case LogicalNegation -> !(boolean)operand;
-                default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperatorType()));
+                default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
             };
         }
 
@@ -66,14 +66,16 @@ public class Evaluator {
             Object left = evaluateExpression(b.getLeft());
             Object right = evaluateExpression(b.getRight());
 
-            return switch (b.getOperatorType()) {
+            return switch (b.getOperator().getType()) {
                 case Addition -> (int) left + (int) right;
                 case Subtraction -> (int) left - (int) right;
                 case Multiplication -> (int) left * (int) right;
                 case Division -> (int) left / (int) right;
                 case LogicalAnd -> (boolean) left && (boolean) right;
                 case LogicalOr -> (boolean) left || (boolean) right;
-                default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperatorType()));
+                case Equals -> left.equals(right);
+                case NotEquals -> !left.equals(right);
+                default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
             };
         }
 

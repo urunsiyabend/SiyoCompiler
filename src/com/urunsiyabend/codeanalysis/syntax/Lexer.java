@@ -151,10 +151,6 @@ public class Lexer {
                 next();
                 return new SyntaxToken(SyntaxType.CloseParenthesisToken, getPosition(), ")", null);
             }
-            case '!' -> {
-                next();
-                return new SyntaxToken(SyntaxType.BangToken, getPosition(), "!", null);
-            }
             case '&' -> {
                 if(peek(1) == '&') {
                     next(2);
@@ -165,6 +161,22 @@ public class Lexer {
                 if(peek(1) == '|') {
                     next(2);
                     return new SyntaxToken(SyntaxType.DoublePipeToken, getPosition(), "||", null);
+                }
+            }
+            case '=' -> {
+                if(peek(1) == '=') {
+                    next(2);
+                    return new SyntaxToken(SyntaxType.EqualsEqualsToken, getPosition(), "==", null);
+                }
+            }
+            case '!' -> {
+                if(peek(1) == '=') {
+                    next(2);
+                    return new SyntaxToken(SyntaxType.BangEqualsToken, getPosition(), "!=", null);
+                }
+                else {
+                    next();
+                    return new SyntaxToken(SyntaxType.BangToken, getPosition(), "!", null);
                 }
             }
 

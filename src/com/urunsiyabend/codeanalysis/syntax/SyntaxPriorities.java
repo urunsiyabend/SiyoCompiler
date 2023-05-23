@@ -16,7 +16,7 @@ public class SyntaxPriorities {
      */
     public static int GetUnaryOperatorPriority(SyntaxType type) {
         return switch (type) {
-            case PlusToken, MinusToken, BangToken -> 5;
+            case PlusToken, MinusToken, BangToken -> 6;
             default -> 0;
         };
     }
@@ -29,8 +29,9 @@ public class SyntaxPriorities {
      */
     public static int GetBinaryOperatorPriority(SyntaxType type) {
         return switch (type) {
-            case AsteriskToken, SlashToken -> 4;
-            case PlusToken, MinusToken -> 3;
+            case AsteriskToken, SlashToken -> 5;
+            case PlusToken, MinusToken -> 4;
+            case EqualsEqualsToken, BangEqualsToken -> 3;
             case DoubleAmpersandToken-> 2;
             case DoublePipeToken -> 1;
             default -> 0;

@@ -76,12 +76,12 @@ public class Binder {
      */
     private BoundExpression bindUnaryExpression(UnaryExpressionSyntax syntax) throws Exception {
         BoundExpression boundOperand = bindExpression(syntax.getOperand());
-        BoundUnaryOperatorType boundOperatorType = bindUnaryOperatorType(syntax.getOperator().getType(), boundOperand.getClassType());
-        if (boundOperatorType == null) {
+        BoundUnaryOperator boundOperator = BoundUnaryOperator.bind(syntax.getOperator().getType(), boundOperand.getClassType());
+        if (boundOperator == null) {
             _diagnostics.add(String.format("Unary operator '%s' is not defined for type %s", syntax.getOperator(), boundOperand.getClassType()));
             return boundOperand;
         }
-        return new BoundUnaryExpression(boundOperatorType, boundOperand);
+        return new BoundUnaryExpression(boundOperator, boundOperand);
     }
 
     /**
@@ -93,12 +93,12 @@ public class Binder {
     private BoundExpression bindBinaryExpression(BinaryExpressionSyntax syntax) throws Exception {
         BoundExpression boundLeft = bindExpression(syntax.getLeft());
         BoundExpression boundRight = bindExpression(syntax.getRight());
-        BoundBinaryOperatorType boundOperatorType = bindBinaryOperatorType(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
-        if (boundOperatorType == null) {
+        BoundBinaryOperator boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
+        if (boundOperator == null) {
             _diagnostics.add(String.format("Binary operator '%s' is not defined for types %s and %s", syntax.getOperator(), boundLeft.getClassType(), boundRight.getClassType()));
             return boundLeft;
         }
-        return new BoundBinaryExpression(boundLeft, boundOperatorType, boundRight);
+        return new BoundBinaryExpression(boundLeft, boundOperator, boundRight);
     }
 
     /**

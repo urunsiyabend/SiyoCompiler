@@ -8,7 +8,7 @@ package com.urunsiyabend.codeanalysis.binding;
  * @version 1.0
  */
 public class BoundUnaryExpression extends BoundExpression {
-    private BoundUnaryOperatorType _operatorType;
+    private BoundUnaryOperator _operator;
     private BoundExpression _operand;
 
     /**
@@ -17,8 +17,8 @@ public class BoundUnaryExpression extends BoundExpression {
      * @param operatorType The operator type of the unary expression.
      * @param operand      The operand of the unary expression.
      */
-    public BoundUnaryExpression(BoundUnaryOperatorType operatorType, BoundExpression operand) {
-        _operatorType = operatorType;
+    public BoundUnaryExpression(BoundUnaryOperator operator, BoundExpression operand) {
+        _operator = operator;
         _operand = operand;
     }
 
@@ -39,7 +39,7 @@ public class BoundUnaryExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        return getOperand().getClass();
+        return getOperator().getResultType();
     }
 
     /**
@@ -61,20 +61,11 @@ public class BoundUnaryExpression extends BoundExpression {
     }
 
     /**
-     * Gets the operator type of the unary expression.
+     * Gets the operator of the unary expression.
      *
-     * @return The operator type of the unary expression.
+     * @return The operator of the unary expression.
      */
-    public BoundUnaryOperatorType getOperatorType() {
-        return _operatorType;
-    }
-
-    /**
-     * Sets the operator type of the unary expression.
-     *
-     * @param operatorType The operator type to set for the unary expression.
-     */
-    public void setOperatorType(BoundUnaryOperatorType operatorType) {
-        this._operatorType = operatorType;
+    public BoundUnaryOperator getOperator() {
+        return _operator;
     }
 }

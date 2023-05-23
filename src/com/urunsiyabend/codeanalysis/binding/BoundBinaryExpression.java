@@ -8,7 +8,7 @@ package com.urunsiyabend.codeanalysis.binding;
  * @version 1.0
  */
 public class BoundBinaryExpression extends BoundExpression {
-    private BoundBinaryOperatorType _operatorType;
+    private final BoundBinaryOperator _operator;
     private BoundExpression _left;
     private BoundExpression _right;
 
@@ -16,11 +16,11 @@ public class BoundBinaryExpression extends BoundExpression {
      * Constructs a new instance of the BoundBinaryExpression class.
      *
      * @param left         The left operand bound expression.
-     * @param operatorType The bound binary operator type.
+     * @param operator The bound binary operator type.
      * @param right        The right operand bound expression.
      */
-    public BoundBinaryExpression(BoundExpression left, BoundBinaryOperatorType operatorType, BoundExpression right) {
-        _operatorType = operatorType;
+    public BoundBinaryExpression(BoundExpression left, BoundBinaryOperator operator, BoundExpression right) {
+        _operator = operator;
         _left = left;
         _right = right;
     }
@@ -42,26 +42,16 @@ public class BoundBinaryExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        return getLeft().getClassType();
-    }
-
-
-    /**
-     * Gets the bound binary operator type of the expression.
-     *
-     * @return The bound binary operator type.
-     */
-    public BoundBinaryOperatorType getOperatorType() {
-        return _operatorType;
+        return getOperator().getResultType();
     }
 
     /**
-     * Sets the bound binary operator type of the expression.
+     * Gets the bound binary operator of the expression.
      *
-     * @param operatorType The bound binary operator type to set.
+     * @return The bound binary operator.
      */
-    public void setOperatorType(BoundBinaryOperatorType operatorType) {
-        this._operatorType = operatorType;
+    public BoundBinaryOperator getOperator() {
+        return _operator;
     }
 
     /**

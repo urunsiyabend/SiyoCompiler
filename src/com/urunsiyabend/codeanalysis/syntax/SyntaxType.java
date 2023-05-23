@@ -65,5 +65,5 @@ public enum SyntaxType {
     DoubleAmpersandToken,
 
     /* Represents a double pipe (||) token. */
-    DoublePipeToken,
+    DoublePipeToken, EqualsEqualsToken, BangEqualsToken,
 }
