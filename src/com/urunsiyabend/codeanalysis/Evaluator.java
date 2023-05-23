@@ -48,6 +48,20 @@ public class Evaluator {
             return (int) n.getLiteralToken().getValue();
         }
 
+        if (node instanceof UnaryExpressionSyntax u) {
+            int operand = evaluateExpression(u.getOperand());
+            if (u.getOperator().getType() == SyntaxType.PlusToken) {
+                return operand;
+            }
+            else if (u.getOperator().getType() == SyntaxType.MinusToken) {
+                return -operand;
+            }
+            else {
+                throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
+            }
+        }
+
+
         if (node instanceof BinaryExpressionSyntax b) {
             int left = evaluateExpression(b.getLeft());
             int right = evaluateExpression(b.getRight());

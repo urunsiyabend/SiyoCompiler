@@ -107,45 +107,37 @@ public class Parser {
     }
 
     /**
-     * Parses expressions.
+     * Dispatches parseExp function by default value of parentPriority 0.
      *
      * @return The parsed expression syntax.
      */
     private ExpressionSyntax parseExp() {
-        return parseTerm();
+        return parseExp(0);
     }
 
     /**
-     * Parses a term expression.
+     * Parses expressions.
      *
      * @return The parsed expression syntax.
      */
-    private ExpressionSyntax parseTerm() {
-        ExpressionSyntax left = parseFactor();
-
-        while (current().type == SyntaxType.PlusToken ||
-                current().type == SyntaxType.MinusToken
-        ) {
+    private ExpressionSyntax parseExp(int parentPriority) {
+        ExpressionSyntax left;
+        int unaryOperatorPriority = SyntaxPriorities.GetUnaryOperatorPriority(current().getType());
+        if (unaryOperatorPriority != 0 && unaryOperatorPriority >= parentPriority) {
             SyntaxToken operator = nextToken();
-            ExpressionSyntax right = parseFactor();
-            left = new BinaryExpressionSyntax(left, operator, right);
+            ExpressionSyntax operand = parseExp();
+            left = new UnaryExpressionSyntax(operator, operand);
+        }
+        else {
+            left = parsePrimary();
         }
 
-        return left;
-    }
-
-    /**
-     * Parses a factor expression.
-     *
-     * @return The parsed expression syntax.
-     */
-    private ExpressionSyntax parseFactor() {
-        ExpressionSyntax left = parsePrimary();
-
-        while (current().type == SyntaxType.AsteriskToken ||
-                current().type == SyntaxType.SlashToken) {
+        while (true) {
+            int priority = SyntaxPriorities.GetBinaryOperatorPriority(current().getType());
+            if (priority == 0 || priority <= parentPriority)
+                break;
             SyntaxToken operator = nextToken();
-            ExpressionSyntax right = parsePrimary();
+            ExpressionSyntax right = parseExp(priority);
             left = new BinaryExpressionSyntax(left, operator, right);
         }
 

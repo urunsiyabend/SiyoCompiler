@@ -44,6 +44,9 @@ public enum SyntaxType {
     /* Represents a parenthesized expression. */
     ParenthesizedExpression,
 
+    /* Represents a unary expression. */
+    UnaryExpression,
+
     /* Represents a binary expression. */
     BinaryExpression
 }

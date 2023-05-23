@@ -99,29 +99,31 @@ public class Lexer {
             return new SyntaxToken(SyntaxType.WhiteSpaceToken, start, text, null);
         }
 
-        if (currentChar() == '+') {
-            next();
-            return new SyntaxToken(SyntaxType.PlusToken, getPosition(), "+", null);
-        }
-        else if (currentChar() == '-') {
-            next();
-            return new SyntaxToken(SyntaxType.MinusToken, getPosition(), "-", null);
-        }
-        else if (currentChar() == '*') {
-            next();
-            return new SyntaxToken(SyntaxType.AsteriskToken, getPosition(), "*", null);
-        }
-        else if (currentChar() == '/') {
-            next();
-            return new SyntaxToken(SyntaxType.SlashToken, getPosition(), "/", null);
-        }
-        else if (currentChar() == '(') {
-            next();
-            return new SyntaxToken(SyntaxType.OpenParenthesisToken, getPosition(), "(", null);
-        }
-        else if (currentChar() == ')') {
-            next();
-            return new SyntaxToken(SyntaxType.CloseParenthesisToken, getPosition(), ")", null);
+        switch (currentChar()) {
+            case '+' -> {
+                next();
+                return new SyntaxToken(SyntaxType.PlusToken, getPosition(), "+", null);
+            }
+            case '-' -> {
+                next();
+                return new SyntaxToken(SyntaxType.MinusToken, getPosition(), "-", null);
+            }
+            case '*' -> {
+                next();
+                return new SyntaxToken(SyntaxType.AsteriskToken, getPosition(), "*", null);
+            }
+            case '/' -> {
+                next();
+                return new SyntaxToken(SyntaxType.SlashToken, getPosition(), "/", null);
+            }
+            case '(' -> {
+                next();
+                return new SyntaxToken(SyntaxType.OpenParenthesisToken, getPosition(), "(", null);
+            }
+            case ')' -> {
+                next();
+                return new SyntaxToken(SyntaxType.CloseParenthesisToken, getPosition(), ")", null);
+            }
         }
         next();
         _diagnostics.add(String.format("ERROR: Bad character input: %c", currentChar()));
