@@ -1,4 +1,4 @@
-package com.urunsiyabend.codeanalysis;
+package com.urunsiyabend.codeanalysis.syntax;
 
 /**
  * Represents the type of a syntax token or syntax node in the code analysis system.

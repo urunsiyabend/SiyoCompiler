@@ -1,4 +1,4 @@
-package com.urunsiyabend.codeanalysis;
+package com.urunsiyabend.codeanalysis.syntax;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;

@@ -1,4 +1,4 @@
-package com.urunsiyabend.codeanalysis;
+package com.urunsiyabend.codeanalysis.syntax;
 
 public class SyntaxPriorities {
     public static int GetBinaryOperatorPriority(SyntaxType type) {

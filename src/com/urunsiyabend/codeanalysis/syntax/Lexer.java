@@ -1,4 +1,4 @@
-package com.urunsiyabend.codeanalysis;
+package com.urunsiyabend.codeanalysis.syntax;
 
 import java.util.ArrayList;
 import java.util.Iterator;

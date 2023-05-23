@@ -1,4 +1,4 @@
-package com.urunsiyabend.codeanalysis;
+package com.urunsiyabend.codeanalysis.syntax;
 
 /**
  * The {@code ExpressionSyntax} class is an abstract base class for representing expression syntax nodes in the syntax tree.

@@ -22,10 +22,12 @@ The Siyo Compiler Project is designed to provide a comprehensive compiler implem
 
 The project will have following components:
 
-- `com.urunsiyabend.codeanalysis`: This package contains classes for code analysis, including the lexer, parser, syntax tree, syntax nodes, and token types.
-- `com.urunsiyabend.codegeneration (soon!)`: This package contains classes for code generation, including code emitter and bytecode generation (if applicable).
-- `com.urunsiyabend.semanticanalysis (soon!)`: This package contains classes for semantic analysis, including type checking, symbol table management, and error reporting.
-- `com.urunsiyabend.util (soon!)`: This package contains utility classes used throughout the project.
+- `com.urunsiyabend.codeanalysis`: Contains classes for code analysis, including the lexer, parser, syntax tree, syntax nodes, and token types.
+  - `com.urunsiyabend.codeanalysis.binding`: Contains classes for binding expressions in the code analysis process.
+  - `com.urunsiyabend.codeanalysis.syntax`: Contains classes for syntax analysis in the code analysis process.
+- `com.urunsiyabend.codegeneration (soon!)`: Contains classes for code generation, including code emitter and bytecode generation (if applicable).
+- `com.urunsiyabend.semanticanalysis (soon!)`: Contains classes for semantic analysis, including type checking, symbol table management, and error reporting.
+- `com.urunsiyabend.util (soon!)`: Contains utility classes used throughout the project.
 
 ## Usage
 

@@ -1,9 +1,11 @@
 package com.urunsiyabend;
 
 import com.urunsiyabend.codeanalysis.Evaluator;
-import com.urunsiyabend.codeanalysis.SyntaxNode;
-import com.urunsiyabend.codeanalysis.SyntaxToken;
-import com.urunsiyabend.codeanalysis.SyntaxTree;
+import com.urunsiyabend.codeanalysis.binding.Binder;
+import com.urunsiyabend.codeanalysis.binding.BoundExpression;
+import com.urunsiyabend.codeanalysis.syntax.SyntaxNode;
+import com.urunsiyabend.codeanalysis.syntax.SyntaxToken;
+import com.urunsiyabend.codeanalysis.syntax.SyntaxTree;
 
 import java.util.Iterator;
 import java.util.Scanner;
@@ -27,16 +29,18 @@ public class Main {
             }
 
             SyntaxTree tree = SyntaxTree.parse(line);
+            Binder binder = new Binder();
+            BoundExpression boundExpression = binder.bindExpression(tree.getRoot());
+            Iterator<String> diagnosticsIterator = tree.diagnostics();
             prettyPrint(tree.getRoot(), "", true);
 
-            Iterator<String> diagnosticsIterator = tree.diagnostics();
             if (diagnosticsIterator.hasNext()) {
                 while (diagnosticsIterator.hasNext()) {
                     System.out.println(diagnosticsIterator.next());
                 }
             }
             else {
-                Evaluator evaluator = new Evaluator(tree.getRoot());
+                Evaluator evaluator = new Evaluator(boundExpression);
                 try {
                     int result = evaluator.evaluate();
                     System.out.println(result);
