@@ -18,6 +18,11 @@ public class Binder {
     private final Map<VariableSymbol, Object> _variables;
     DiagnosticBox _diagnostics = new DiagnosticBox();
 
+    /**
+     * Initializes a new instance of the Binder class with the specified variables.
+     *
+     * @param variables The variables to be used during binding process.
+     */
     public Binder(Map<VariableSymbol, Object> variables) {
         this._variables = variables;
     }

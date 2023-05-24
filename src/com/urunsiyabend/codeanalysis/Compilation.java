@@ -41,6 +41,8 @@ public class Compilation {
     /**
      * Evaluates the syntax tree and returns the evaluation result.
      *
+     * @param variables The variables to be used during the evaluation process.
+     *
      * @return The evaluation result.
      * @throws Exception if an error occurs during the evaluation process.
      */

@@ -8,13 +8,13 @@ package com.urunsiyabend.codeanalysis.binding;
  * @version 1.0
  */
 public class BoundUnaryExpression extends BoundExpression {
-    private BoundUnaryOperator _operator;
-    private BoundExpression _operand;
+    private final BoundUnaryOperator _operator;
+    private final BoundExpression _operand;
 
     /**
      * Constructs a new instance of the BoundUnaryExpression class.
      *
-     * @param operatorType The operator type of the unary expression.
+     * @param operator The operator of the unary expression.
      * @param operand      The operand of the unary expression.
      */
     public BoundUnaryExpression(BoundUnaryOperator operator, BoundExpression operand) {
@@ -51,14 +51,6 @@ public class BoundUnaryExpression extends BoundExpression {
         return _operand;
     }
 
-    /**
-     * Sets the operand of the unary expression.
-     *
-     * @param operand The operand to set for the unary expression.
-     */
-    public void setOperand(BoundExpression operand) {
-        this._operand = operand;
-    }
 
     /**
      * Gets the operator of the unary expression.
