@@ -1,7 +1,7 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
 /**
- * Represents the type of a syntax token or syntax node in the code analysis system.
+ * Represents the type of syntax token or syntax node in the code analysis system.
  *
  * @see <a href="https://github.com/urunsiyabend">GitHub Profile</a>
  * @author Siyabend Urun
@@ -46,6 +46,7 @@ public enum SyntaxType {
 
     /* Represents a unary expression. */
     UnaryExpression,
+
     /* Represents a binary expression. */
     BinaryExpression,
 
@@ -65,5 +66,20 @@ public enum SyntaxType {
     DoubleAmpersandToken,
 
     /* Represents a double pipe (||) token. */
-    DoublePipeToken, EqualsEqualsToken, BangEqualsToken,
+    DoublePipeToken,
+
+    /* Represents a double equals (==) token. */
+    EqualsEqualsToken,
+
+    /* Represents a bang equals (!=) token. */
+    BangEqualsToken,
+
+    /* Represents a name expression token. */
+    NameExpression,
+
+    /* Represents an assignment expression token. */
+    AssignmentExpression,
+
+    /* Represents a equals (=) token. */
+    EqualsToken,
 }

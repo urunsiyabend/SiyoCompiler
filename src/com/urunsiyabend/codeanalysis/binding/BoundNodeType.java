@@ -10,6 +10,8 @@ package com.urunsiyabend.codeanalysis.binding;
  */
 public enum BoundNodeType {
     LiteralExpression,
+    AssignmentExpression,
+    VariableExpression,
     UnaryExpression,
     BinaryExpression,
 }

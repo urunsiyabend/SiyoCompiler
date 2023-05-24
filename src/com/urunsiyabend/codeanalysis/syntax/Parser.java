@@ -1,10 +1,8 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
-import com.urunsiyabend.codeanalysis.Diagnostic;
 import com.urunsiyabend.codeanalysis.DiagnosticBox;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 
 /**
  * The Parser class is responsible for parsing the input text and generating a syntax tree.
@@ -104,31 +102,56 @@ public class Parser {
      * @return The syntax tree representing the parsed input.
      */
     public SyntaxTree parse() {
-        ExpressionSyntax expression = parseExp();
+        ExpressionSyntax expression = parseExpression();
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
         return new SyntaxTree(_diagnostics, expression, eofToken);
     }
 
     /**
-     * Dispatches parseExp function by default value of parentPriority 0.
+     * Parses the input text and generates an expression syntax.
      *
      * @return The parsed expression syntax.
      */
-    private ExpressionSyntax parseExp() {
-        return parseExp(0);
+    private ExpressionSyntax parseExpression() {
+        return parseAssignmentExpression();
+    }
+
+
+    /**
+     * Dispatches parseBinaryExpression function by default value of parentPriority 0.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseBinaryExpression() {
+        return parseBinaryExpression(0);
     }
 
     /**
-     * Parses expressions.
+     * Parses an assignment expression.
      *
      * @return The parsed expression syntax.
      */
-    private ExpressionSyntax parseExp(int parentPriority) {
+    public ExpressionSyntax parseAssignmentExpression() {
+        if (peek(0).getType() == SyntaxType.IdentifierToken && peek(1).getType() == SyntaxType.EqualsToken) {
+            SyntaxToken identifierToken = nextToken();
+            SyntaxToken operatorToken = nextToken();
+            ExpressionSyntax right = parseAssignmentExpression();
+            return new AssignmentExpressionSyntax(identifierToken, operatorToken, right);
+        }
+    return parseBinaryExpression();
+    }
+
+    /**
+     * Parses a binary expression.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseBinaryExpression(int parentPriority) {
         ExpressionSyntax left;
         int unaryOperatorPriority = SyntaxPriorities.GetUnaryOperatorPriority(current().getType());
         if (unaryOperatorPriority != 0 && unaryOperatorPriority >= parentPriority) {
             SyntaxToken operator = nextToken();
-            ExpressionSyntax operand = parseExp();
+            ExpressionSyntax operand = parseBinaryExpression();
             left = new UnaryExpressionSyntax(operator, operand);
         }
         else {
@@ -140,7 +163,7 @@ public class Parser {
             if (priority == 0 || priority <= parentPriority)
                 break;
             SyntaxToken operator = nextToken();
-            ExpressionSyntax right = parseExp(priority);
+            ExpressionSyntax right = parseBinaryExpression(priority);
             left = new BinaryExpressionSyntax(left, operator, right);
         }
 
@@ -156,7 +179,7 @@ public class Parser {
         switch (current().getType()) {
             case OpenParenthesisToken -> {
                 SyntaxToken left = nextToken();
-                ExpressionSyntax exp = parseExp();
+                ExpressionSyntax exp = parseBinaryExpression();
                 SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
 
                 return new ParanthesizedExpressionSyntax(left, exp, right);
@@ -165,6 +188,10 @@ public class Parser {
                 SyntaxToken keywordToken = nextToken();
                 var value = keywordToken.getType() == SyntaxType.TrueKeyword;
                 return new LiteralExpressionSyntax(keywordToken, value);
+            }
+            case IdentifierToken -> {
+                SyntaxToken identifierToken = nextToken();
+                return new NameExpressionSyntax(identifierToken);
             }
             default -> {
                 SyntaxToken numberToken = match(SyntaxType.NumberToken);

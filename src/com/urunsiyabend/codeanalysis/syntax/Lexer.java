@@ -166,6 +166,10 @@ public class Lexer {
                     next(2);
                     return new SyntaxToken(SyntaxType.EqualsEqualsToken, start, "==", null);
                 }
+                else {
+                    next();
+                    return new SyntaxToken(SyntaxType.EqualsToken, start, "=", null);
+                }
             }
             case '!' -> {
                 if(peek(1) == '=') {

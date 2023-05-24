@@ -7,8 +7,7 @@ import com.urunsiyabend.codeanalysis.syntax.SyntaxNode;
 import com.urunsiyabend.codeanalysis.syntax.SyntaxToken;
 import com.urunsiyabend.codeanalysis.syntax.SyntaxTree;
 
-import java.util.Iterator;
-import java.util.Scanner;
+import java.util.*;
 
 /**
  * Entry point of program.
@@ -20,6 +19,8 @@ public class Main {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
+        Map<VariableSymbol, Object> variables = new HashMap<>();
+
         while (true) {
             System.out.print("> ");
             Scanner scanner = new Scanner(System.in);
@@ -32,7 +33,7 @@ public class Main {
             Compilation compilation = new Compilation(tree);
             EvaluationResult result;
             try {
-                result = compilation.evaluate();
+                result = compilation.evaluate(variables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -55,6 +56,7 @@ public class Main {
                     System.out.print(error);
                     System.out.print(suffix);
                     System.out.println();
+                    System.out.println(" ".repeat(diagnostic.getSpan().getStart() + 4) + "^".repeat(diagnostic.getSpan().getLength()));
                 }
             }
             else {

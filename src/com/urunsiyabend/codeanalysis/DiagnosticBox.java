@@ -109,7 +109,7 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param operandType The type of the operand.
      */
     public void reportUndefinedUnaryOperator(TextSpan span, String data, Class<?> operandType) {
-        String message = String.format("Unary operator <%s> is not defined for type <%s>", data, operandType);
+        String message = String.format("Unary operator '%s' is not defined for type <%s>", data, operandType);
         report(span, message);
     }
 
@@ -123,7 +123,18 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param rightType The type of the right operand.
      */
     public void reportUndefinedBinaryOperator(TextSpan span, String data, Class<?> leftType, Class<?> rightType) {
-        String message = String.format("Binary operator <%s> is not defined for types <%s> and <%s>", data, leftType, rightType);
+        String message = String.format("Binary operator '%s' is not defined for types <%s> and <%s>", data, leftType, rightType);
+        report(span, message);
+    }
+
+    /**
+     * Reports an undefined name diagnostic with the specified span and name.
+     *
+     * @param span The text span where the undefined name occurs.
+     * @param name The undefined name.
+     */
+    public void reportUndefinedName(TextSpan span, String name) {
+        String message = String.format("Name '%s' does not exist", name);
         report(span, message);
     }
 }

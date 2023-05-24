@@ -1,11 +1,10 @@
 package com.urunsiyabend.codeanalysis.binding;
 
 import com.urunsiyabend.codeanalysis.DiagnosticBox;
+import com.urunsiyabend.codeanalysis.VariableSymbol;
 import com.urunsiyabend.codeanalysis.syntax.*;
-import jdk.jshell.Diag;
 
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.Map;
 
 /**
  * The `Binder` class is responsible for binding expression syntax to bound expressions.
@@ -16,7 +15,12 @@ import java.util.Iterator;
  * @version 1.0
  */
 public class Binder {
+    private final Map<VariableSymbol, Object> _variables;
     DiagnosticBox _diagnostics = new DiagnosticBox();
+
+    public Binder(Map<VariableSymbol, Object> variables) {
+        this._variables = variables;
+    }
 
     /**
      * Binds the given expression syntax and returns the corresponding bound expression.
@@ -26,8 +30,32 @@ public class Binder {
      */
     public BoundExpression bindExpression(ExpressionSyntax syntax) {
         switch (syntax.getType()) {
+            case ParenthesizedExpression -> {
+                try {
+                    return bindParenthesizedExpression(((ParanthesizedExpressionSyntax)syntax));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.exit(1);
+                }
+            }
             case LiteralExpression -> {
                 return bindLiteralExpression((LiteralExpressionSyntax)syntax);
+            }
+            case NameExpression -> {
+                try {
+                    return bindNameExpression(((NameExpressionSyntax)syntax));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.exit(1);
+                }
+            }
+            case AssignmentExpression -> {
+                try {
+                    return bindAssignmentExpression(((AssignmentExpressionSyntax)syntax));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.exit(1);
+                }
             }
             case UnaryExpression -> {
                 try {
@@ -44,15 +72,6 @@ public class Binder {
                     e.printStackTrace();
                     System.exit(1);
                 }
-            }
-            case ParenthesizedExpression -> {
-                try {
-                    return bindExpression(((ParanthesizedExpressionSyntax)syntax).getExpression());
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
-
             }
         }
         return null;
@@ -113,60 +132,55 @@ public class Binder {
     }
 
     /**
-     * Binds the given unary operator type to a bound unary operator type based on the syntax type and operand type.
+     * Binds a parenthesized expression syntax to a bound expression.
      *
-     * @param type        The syntax type of the unary operator.
-     * @param operandType The type of the operand.
-     * @return The bound unary operator type.
-     * @throws Exception if the unary operator type is unexpected.
+     * @param syntax The name expression syntax to bind.
+     * @return The bound expression.
      */
-    private BoundUnaryOperatorType bindUnaryOperatorType(SyntaxType type, Class<?> operandType) throws Exception {
-        if (operandType == Integer.class) {
-            return switch (type) {
-                case PlusToken -> BoundUnaryOperatorType.Identity;
-                case MinusToken -> BoundUnaryOperatorType.Negation;
-                default -> throw new Exception(String.format("Unexpected unary operator <%s> for type <%s>", type, operandType));
-            };
-        }
-        if (operandType == Boolean.class) {
-            return switch (type) {
-                case BangToken -> BoundUnaryOperatorType.LogicalNegation;
-                default -> throw new Exception(String.format("Unexpected unary operator <%s> for type <%s>", type, operandType));
-            };
-        }
-
-        return null;
+    private BoundExpression bindParenthesizedExpression(ParanthesizedExpressionSyntax syntax) {
+        return bindExpression(syntax.getExpression());
     }
 
     /**
-     * Binds the given binary operator type to a bound binary operator type based on the syntax type, left operand type, and right operand type.
+     * Binds a name expression syntax to a bound expression.
      *
-     * @param type       The syntax type of the binary operator.
-     * @param leftType   The type of the left operand.
-     * @param rightType  The type of the right operand.
-     * @return The bound binary operator type.
-     * @throws Exception if the binary operator type is unexpected.
+     * @param syntax The name expression syntax to bind.
+     * @return The bound expression.
      */
-    private BoundBinaryOperatorType bindBinaryOperatorType(SyntaxType type, Class<?> leftType, Class<?> rightType) throws Exception {
-        if (leftType == Integer.class && rightType == Integer.class) {
-            return switch (type) {
-                case PlusToken -> BoundBinaryOperatorType.Addition;
-                case MinusToken -> BoundBinaryOperatorType.Subtraction;
-                case AsteriskToken -> BoundBinaryOperatorType.Multiplication;
-                case SlashToken -> BoundBinaryOperatorType.Division;
-                default -> throw new Exception(String.format("Unexpected binary operator <%s>", type));
-            };
-        }
+    private BoundExpression bindNameExpression(NameExpressionSyntax syntax) {
+        String name = syntax.getIdentifierToken().getData();
+        VariableSymbol variable = _variables.keySet()
+                .stream()
+                .filter(v -> v.getName().equals(name))
+                .findFirst()
+                .orElse(null);
 
-        if (leftType == Boolean.class && rightType == Boolean.class) {
-            return switch (type) {
-                case DoubleAmpersandToken -> BoundBinaryOperatorType.LogicalAnd;
-                case DoublePipeToken -> BoundBinaryOperatorType.LogicalOr;
-                default -> throw new Exception(String.format("Unexpected binary operator <%s>", type));
-            };
+        if (variable == null) {
+            _diagnostics.reportUndefinedName(syntax.getIdentifierToken().getSpan(), name);
+            return new BoundLiteralExpression(0);
         }
-        return null;
-
+        return new BoundVariableExpression(variable);
     }
 
+    /**
+     * Binds an assignment expression syntax to a bound expression.
+     *
+     * @param syntax The assignment expression syntax to bind.
+     * @return The bound expression.
+     * @throws Exception If an error occurs during binding.
+     */
+    private BoundExpression bindAssignmentExpression(AssignmentExpressionSyntax syntax) throws Exception {
+        String name = syntax.getIdentifierToken().getData();
+        BoundExpression boundExpression = bindExpression(syntax.getExpressionSyntax());
+
+        _variables.keySet()
+                .stream()
+                .filter(v -> v.getName().equals(name))
+                .findFirst().ifPresent(_variables::remove);
+
+        var variable = new VariableSymbol(name, boundExpression.getClassType());
+        _variables.put(variable, null);
+
+        return new BoundAssignmentExpression(variable, boundExpression);
+    }
 }

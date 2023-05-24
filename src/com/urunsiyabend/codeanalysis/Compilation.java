@@ -4,6 +4,8 @@ import com.urunsiyabend.codeanalysis.binding.Binder;
 import com.urunsiyabend.codeanalysis.binding.BoundExpression;
 import com.urunsiyabend.codeanalysis.syntax.SyntaxTree;
 
+import java.util.Map;
+
 
 /**
  * The Compilation class represents a compilation unit in the code analysis process.
@@ -42,8 +44,8 @@ public class Compilation {
      * @return The evaluation result.
      * @throws Exception if an error occurs during the evaluation process.
      */
-    public EvaluationResult evaluate() throws Exception {
-        Binder binder = new Binder();
+    public EvaluationResult evaluate(Map<VariableSymbol, Object> variables) throws Exception {
+        Binder binder = new Binder(variables);
         BoundExpression boundExpression = binder.bindExpression(_syntaxTree.getRoot());
 
         DiagnosticBox diagnostics = _syntaxTree.diagnostics().addAll(binder.diagnostics());
@@ -51,7 +53,7 @@ public class Compilation {
             return new EvaluationResult(diagnostics, null);
         }
 
-        Evaluator evaluator = new Evaluator(boundExpression);
+        Evaluator evaluator = new Evaluator(boundExpression, variables);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
     }

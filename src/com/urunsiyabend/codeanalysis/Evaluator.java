@@ -2,6 +2,8 @@ package com.urunsiyabend.codeanalysis;
 
 import com.urunsiyabend.codeanalysis.binding.*;
 
+import java.util.Map;
+
 /**
  * The {@code Evaluator} class is responsible for evaluating an expression syntax tree and computing the result.
  * It provides a method to evaluate the root expression syntax and return the computed result.
@@ -18,15 +20,7 @@ import com.urunsiyabend.codeanalysis.binding.*;
  */
 public class Evaluator {
     private final BoundExpression _root;
-
-    /**
-     * Initializes a new instance of the {@code Evaluator} class with the specified root expression syntax.
-     *
-     * @param root The root expression syntax to evaluate.
-     */
-    public Evaluator(BoundExpression root) {
-        _root = root;
-    }
+    private final Map<VariableSymbol, Object> _variables;
 
     /**
      * Evaluates the expression syntax tree and computes the result.
@@ -39,6 +33,17 @@ public class Evaluator {
     }
 
     /**
+     * Initializes a new instance of the {@code Evaluator} class with the specified root expression syntax.
+     *
+     * @param root      The root expression syntax to evaluate.
+     * @param variables The variables of the evaluator.
+     */
+    public Evaluator(BoundExpression root, Map<VariableSymbol, Object> variables) {
+        _root = root;
+        this._variables = variables;
+    }
+
+    /**
      * Recursively evaluates the specified expression syntax node and computes the result.
      *
      * @param node The expression syntax node to evaluate.
@@ -48,6 +53,16 @@ public class Evaluator {
     private Object evaluateExpression(BoundExpression node) throws Exception {
         if (node instanceof BoundLiteralExpression n) {
             return n.getValue();
+        }
+
+        if (node instanceof BoundVariableExpression v) {
+            return _variables.get(v.getVariable());
+        }
+
+        if (node instanceof BoundAssignmentExpression a) {
+            Object value = evaluateExpression(a.getExpression());
+            _variables.put(a.getVariable(), value);
+            return value;
         }
 
         if (node instanceof BoundUnaryExpression u) {
