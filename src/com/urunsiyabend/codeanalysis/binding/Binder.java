@@ -1,6 +1,8 @@
 package com.urunsiyabend.codeanalysis.binding;
 
+import com.urunsiyabend.codeanalysis.DiagnosticBox;
 import com.urunsiyabend.codeanalysis.syntax.*;
+import jdk.jshell.Diag;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -14,7 +16,7 @@ import java.util.Iterator;
  * @version 1.0
  */
 public class Binder {
-    ArrayList<String> _diagnostics = new ArrayList<>();
+    DiagnosticBox _diagnostics = new DiagnosticBox();
 
     /**
      * Binds the given expression syntax and returns the corresponding bound expression.
@@ -43,6 +45,15 @@ public class Binder {
                     System.exit(1);
                 }
             }
+            case ParenthesizedExpression -> {
+                try {
+                    return bindExpression(((ParanthesizedExpressionSyntax)syntax).getExpression());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    System.exit(1);
+                }
+
+            }
         }
         return null;
     }
@@ -52,8 +63,8 @@ public class Binder {
      *
      * @return An iterator over the diagnostic messages.
      */
-    public Iterator<String> diagnostics() {
-        return _diagnostics.iterator();
+    public DiagnosticBox diagnostics() {
+        return _diagnostics;
     }
 
     /**
@@ -78,7 +89,7 @@ public class Binder {
         BoundExpression boundOperand = bindExpression(syntax.getOperand());
         BoundUnaryOperator boundOperator = BoundUnaryOperator.bind(syntax.getOperator().getType(), boundOperand.getClassType());
         if (boundOperator == null) {
-            _diagnostics.add(String.format("Unary operator '%s' is not defined for type %s", syntax.getOperator(), boundOperand.getClassType()));
+            _diagnostics.reportUndefinedUnaryOperator(syntax.getOperator().getSpan(), syntax.getOperator().getData(), boundOperand.getClassType());
             return boundOperand;
         }
         return new BoundUnaryExpression(boundOperator, boundOperand);
@@ -95,7 +106,7 @@ public class Binder {
         BoundExpression boundRight = bindExpression(syntax.getRight());
         BoundBinaryOperator boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
         if (boundOperator == null) {
-            _diagnostics.add(String.format("Binary operator '%s' is not defined for types %s and %s", syntax.getOperator(), boundLeft.getClassType(), boundRight.getClassType()));
+            _diagnostics.reportUndefinedBinaryOperator(syntax.getOperator().getSpan(), syntax.getOperator().getData(), boundLeft.getClassType(), boundRight.getClassType());
             return boundLeft;
         }
         return new BoundBinaryExpression(boundLeft, boundOperator, boundRight);

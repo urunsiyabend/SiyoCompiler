@@ -9,5 +9,7 @@ package com.urunsiyabend.codeanalysis.binding;
  * @version 1.0
  */
 public enum BoundNodeType {
-    UnaryExpression, LiteralExpression
+    LiteralExpression,
+    UnaryExpression,
+    BinaryExpression,
 }

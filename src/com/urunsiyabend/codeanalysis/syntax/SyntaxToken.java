@@ -1,5 +1,8 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
+import com.urunsiyabend.codeanalysis.TextSpan;
+import org.w3c.dom.Text;
+
 import java.util.Collections;
 import java.util.Iterator;
 
@@ -17,6 +20,7 @@ public class SyntaxToken extends SyntaxNode {
     int position;
     String data;
     Object value;
+    public TextSpan _span;
 
     /**
      * Initializes a new instance of the SyntaxToken class with the specified type, position, data, and value.
@@ -31,6 +35,8 @@ public class SyntaxToken extends SyntaxNode {
         this.position = position;
         this.data = data;
         this.value = value;
+        int length = (data != null && !data.equals("\0")) ? data.length() : 0;
+        _span = new TextSpan(position, length);
     }
 
     /**
@@ -105,6 +111,15 @@ public class SyntaxToken extends SyntaxNode {
      */
     public void setValue(Object value) {
         this.value = value;
+    }
+
+    /**
+     * Gets the text span associated with the syntax token.
+     *
+     * @return The text span of related syntax token.
+     */
+    public TextSpan getSpan() {
+        return _span;
     }
 
     /**

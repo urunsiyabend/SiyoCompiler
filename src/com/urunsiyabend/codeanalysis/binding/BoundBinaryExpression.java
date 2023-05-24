@@ -32,7 +32,7 @@ public class BoundBinaryExpression extends BoundExpression {
      */
     @Override
     public BoundNodeType getType() {
-        return BoundNodeType.UnaryExpression;
+        return BoundNodeType.BinaryExpression;
     }
 
     /**

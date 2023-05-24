@@ -1,6 +1,6 @@
 package com.urunsiyabend;
 
-import com.urunsiyabend.codeanalysis.Evaluator;
+import com.urunsiyabend.codeanalysis.*;
 import com.urunsiyabend.codeanalysis.binding.Binder;
 import com.urunsiyabend.codeanalysis.binding.BoundExpression;
 import com.urunsiyabend.codeanalysis.syntax.SyntaxNode;
@@ -29,25 +29,37 @@ public class Main {
             }
 
             SyntaxTree tree = SyntaxTree.parse(line);
-            Binder binder = new Binder();
-            BoundExpression boundExpression = binder.bindExpression(tree.getRoot());
-            Iterator<String> treeDiagnosticsIterator = tree.diagnostics();
-            Iterator<String> binderDiagnosticsIterator = binder.diagnostics();
+            Compilation compilation = new Compilation(tree);
+            EvaluationResult result;
+            try {
+                result = compilation.evaluate();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+
+            DiagnosticBox diagnosticsIterator = result.diagnostics();
             prettyPrint(tree.getRoot(), "", true);
 
-            if (treeDiagnosticsIterator.hasNext() || binderDiagnosticsIterator.hasNext()) {
-                while (treeDiagnosticsIterator.hasNext()) {
-                    System.out.println(treeDiagnosticsIterator.next());
-                }
-                while (binderDiagnosticsIterator.hasNext()) {
-                    System.out.println(binderDiagnosticsIterator.next());
+            if (diagnosticsIterator.hasNext()) {
+                while (diagnosticsIterator.hasNext()) {
+                    Diagnostic diagnostic = diagnosticsIterator.next();
+                    System.out.println();
+                    System.out.println(diagnostic);
+
+                    String prefix = line.substring(0, diagnostic.getSpan().getStart());
+                    String error = line.substring(diagnostic.getSpan().getStart(), diagnostic.getSpan().getEnd());
+                    String suffix = line.substring(diagnostic.getSpan().getEnd());
+
+                    System.out.print("    ");
+                    System.out.print(prefix);
+                    System.out.print(error);
+                    System.out.print(suffix);
+                    System.out.println();
                 }
             }
             else {
-                Evaluator evaluator = new Evaluator(boundExpression);
                 try {
-                    Object result = evaluator.evaluate();
-                    System.out.println(result);
+                    System.out.println(result.getValue());
                 }
                 catch (Exception e) {
                     System.out.println(e);

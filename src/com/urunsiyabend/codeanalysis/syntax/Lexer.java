@@ -1,7 +1,7 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
-import java.util.ArrayList;
-import java.util.Iterator;
+import com.urunsiyabend.codeanalysis.DiagnosticBox;
+import com.urunsiyabend.codeanalysis.TextSpan;
 
 /**
  * The {@code Lexer} class is responsible for lexical analysis of a given text, producing tokens that represent different elements of the text.
@@ -14,7 +14,7 @@ import java.util.Iterator;
 public class Lexer {
     private final String _text;
     private int _position;
-    ArrayList<String> _diagnostics = new ArrayList<>();
+    DiagnosticBox _diagnostics = new DiagnosticBox();
 
     /**
      * Initializes a new instance of the {@code Lexer} class with the specified text to analyze.
@@ -56,8 +56,8 @@ public class Lexer {
      *
      * @return An iterator over the diagnostic messages.
      */
-    public Iterator<String> diagnostics() {
-        return _diagnostics.iterator();
+    public DiagnosticBox diagnostics() {
+        return _diagnostics;
     }
 
     /**
@@ -86,9 +86,9 @@ public class Lexer {
         if (_position >= _text.length()) {
             return new SyntaxToken(SyntaxType.EOFToken, _position, "\0", null);
         }
+        int start = _position;
 
         if (Character.isDigit(currentChar())) {
-            int start = _position;
             while (Character.isDigit(currentChar())) {
                 next();
             }
@@ -98,13 +98,12 @@ public class Lexer {
             try {
                 value = Integer.parseInt(text);
             } catch (NumberFormatException e) {
-                _diagnostics.add(String.format("The expression %s could not be represented as Int32", text));
+                diagnostics().reportInvalidNumber(new TextSpan(start, length), _text, Integer.class);
             }
             return new SyntaxToken(SyntaxType.NumberToken, start, text, value);
         }
 
         if (Character.isWhitespace(currentChar())) {
-            int start = _position;
             while (Character.isWhitespace(currentChar())) {
                 next();
             }
@@ -114,7 +113,6 @@ public class Lexer {
         }
 
         if (Character.isLetter(currentChar())) {
-            int start = _position;
 
             while(Character.isLetter(currentChar())) {
                 next();
@@ -129,23 +127,23 @@ public class Lexer {
         switch (currentChar()) {
             case '+' -> {
                 next();
-                return new SyntaxToken(SyntaxType.PlusToken, getPosition(), "+", null);
+                return new SyntaxToken(SyntaxType.PlusToken, start, "+", null);
             }
             case '-' -> {
                 next();
-                return new SyntaxToken(SyntaxType.MinusToken, getPosition(), "-", null);
+                return new SyntaxToken(SyntaxType.MinusToken, start, "-", null);
             }
             case '*' -> {
                 next();
-                return new SyntaxToken(SyntaxType.AsteriskToken, getPosition(), "*", null);
+                return new SyntaxToken(SyntaxType.AsteriskToken, start, "*", null);
             }
             case '/' -> {
                 next();
-                return new SyntaxToken(SyntaxType.SlashToken, getPosition(), "/", null);
+                return new SyntaxToken(SyntaxType.SlashToken, start, "/", null);
             }
             case '(' -> {
                 next();
-                return new SyntaxToken(SyntaxType.OpenParenthesisToken, getPosition(), "(", null);
+                return new SyntaxToken(SyntaxType.OpenParenthesisToken, start, "(", null);
             }
             case ')' -> {
                 next();
@@ -154,36 +152,36 @@ public class Lexer {
             case '&' -> {
                 if(peek(1) == '&') {
                     next(2);
-                    return new SyntaxToken(SyntaxType.DoubleAmpersandToken, getPosition(), "&&", null);
+                    return new SyntaxToken(SyntaxType.DoubleAmpersandToken, start, "&&", null);
                 }
             }
             case '|' -> {
                 if(peek(1) == '|') {
                     next(2);
-                    return new SyntaxToken(SyntaxType.DoublePipeToken, getPosition(), "||", null);
+                    return new SyntaxToken(SyntaxType.DoublePipeToken, start, "||", null);
                 }
             }
             case '=' -> {
                 if(peek(1) == '=') {
                     next(2);
-                    return new SyntaxToken(SyntaxType.EqualsEqualsToken, getPosition(), "==", null);
+                    return new SyntaxToken(SyntaxType.EqualsEqualsToken, start, "==", null);
                 }
             }
             case '!' -> {
                 if(peek(1) == '=') {
                     next(2);
-                    return new SyntaxToken(SyntaxType.BangEqualsToken, getPosition(), "!=", null);
+                    return new SyntaxToken(SyntaxType.BangEqualsToken, start, "!=", null);
                 }
                 else {
                     next();
-                    return new SyntaxToken(SyntaxType.BangToken, getPosition(), "!", null);
+                    return new SyntaxToken(SyntaxType.BangToken, start, "!", null);
                 }
             }
 
         }
-        _diagnostics.add(String.format("ERROR: Bad character input: %c", currentChar()));
+        _diagnostics.reportBadCharacter(_position, currentChar());
         next();
-        return new SyntaxToken(SyntaxType.BadToken, getPosition(), String.valueOf(currentChar()), null);
+        return new SyntaxToken(SyntaxType.BadToken, getPosition(), String.valueOf((peek(-1))), null);
     }
 
 }

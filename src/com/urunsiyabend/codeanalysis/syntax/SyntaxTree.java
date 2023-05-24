@@ -1,5 +1,8 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
+import com.urunsiyabend.codeanalysis.DiagnosticBox;
+import jdk.jshell.Diag;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -15,7 +18,7 @@ import java.util.Iterator;
 public final class SyntaxTree {
     private final ExpressionSyntax _root;
     private final SyntaxToken _eofToken;
-    private final ArrayList<String> _diagnostics;
+    private final DiagnosticBox _diagnostics;
 
     /**
      * Initializes a new instance of the SyntaxTree class with the specified diagnostics, root expression syntax, and end-of-file token.
@@ -24,7 +27,7 @@ public final class SyntaxTree {
      * @param root        The root expression syntax node of the syntax tree.
      * @param EOFToken    The end-of-file token indicating the completion of parsing.
      */
-    public SyntaxTree (ArrayList<String> diagnostics, ExpressionSyntax root, SyntaxToken EOFToken) {
+    public SyntaxTree (DiagnosticBox diagnostics, ExpressionSyntax root, SyntaxToken EOFToken) {
         _diagnostics = diagnostics;
         _root = root;
         _eofToken = EOFToken;
@@ -35,8 +38,8 @@ public final class SyntaxTree {
      *
      * @return An iterator over the diagnostics.
      */
-    public Iterator<String> diagnostics() {
-        return _diagnostics.iterator();
+    public DiagnosticBox diagnostics() {
+        return _diagnostics;
     }
 
     /**

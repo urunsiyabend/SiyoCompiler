@@ -1,5 +1,8 @@
 package com.urunsiyabend.codeanalysis.syntax;
 
+import com.urunsiyabend.codeanalysis.Diagnostic;
+import com.urunsiyabend.codeanalysis.DiagnosticBox;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -14,7 +17,7 @@ import java.util.Iterator;
 public class Parser {
     private final SyntaxToken[] _tokens;
     private int _position;
-    private final ArrayList<String> _diagnostics = new ArrayList<>();
+    private final DiagnosticBox _diagnostics = new DiagnosticBox();
 
     /**
      * Initializes a new instance of the Parser class with the specified input text.
@@ -72,12 +75,12 @@ public class Parser {
     }
 
     /**
-     * Retrieves an iterator over the diagnostics produced during parsing.
+     * Retrieves diagnostic box over the diagnostics produced during parsing.
      *
      * @return An iterator over the diagnostics.
      */
-    public Iterator<String> diagnostics() {
-        return _diagnostics.iterator();
+    public DiagnosticBox diagnostics() {
+        return _diagnostics;
     }
 
     /**
@@ -91,7 +94,7 @@ public class Parser {
         if (current().type == type) {
             return nextToken();
         }
-        _diagnostics.add(String.format("ERROR: Unexpected token: <%s>, expected <%s>", current().type, type));
+        _diagnostics.reportUnexpectedToken(current()._span, current().getType(), type);
         return new SyntaxToken(type, current().position, null, null);
     }
 

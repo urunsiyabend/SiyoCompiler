@@ -1,7 +1,6 @@
 package com.urunsiyabend.codeanalysis;
 
 import com.urunsiyabend.codeanalysis.binding.*;
-import com.urunsiyabend.codeanalysis.syntax.*;
 
 /**
  * The {@code Evaluator} class is responsible for evaluating an expression syntax tree and computing the result.
@@ -82,3 +81,4 @@ public class Evaluator {
         throw new Exception(String.format("Unexpected node: %s", node.getType()));
     }
 }
+
