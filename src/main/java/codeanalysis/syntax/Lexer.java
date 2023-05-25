@@ -13,8 +13,12 @@ import codeanalysis.TextSpan;
  */
 public class Lexer {
     private final String _text;
-    private int _position;
     DiagnosticBox _diagnostics = new DiagnosticBox();
+
+    private int _position;
+    private int _start;
+    private SyntaxType _type;
+    private Object _value;
 
     /**
      * Initializes a new instance of the {@code Lexer} class with the specified text to analyze.
@@ -83,109 +87,131 @@ public class Lexer {
      * @return The next token in the text.
      */
     public SyntaxToken getNextToken() {
-        if (_position >= _text.length()) {
-            return new SyntaxToken(SyntaxType.EOFToken, _position, "\0", null);
-        }
-        int start = _position;
-
-        if (Character.isDigit(currentChar())) {
-            while (Character.isDigit(currentChar())) {
-                next();
-            }
-            int length = _position - start;
-            String text = _text.substring(start, start + length);
-            int value = 0;
-            try {
-                value = Integer.parseInt(text);
-            } catch (NumberFormatException e) {
-                diagnostics().reportInvalidNumber(new TextSpan(start, length), _text, Integer.class);
-            }
-            return new SyntaxToken(SyntaxType.NumberToken, start, text, value);
-        }
-
-        if (Character.isWhitespace(currentChar())) {
-            while (Character.isWhitespace(currentChar())) {
-                next();
-            }
-            int length = _position - start;
-            String text = _text.substring(start, start + length);
-            return new SyntaxToken(SyntaxType.WhiteSpaceToken, start, text, null);
-        }
-
-        if (Character.isLetter(currentChar())) {
-
-            while(Character.isLetter(currentChar())) {
-                next();
-            }
-
-            int length = _position - start;
-            String text = _text.substring(start, start + length);
-            SyntaxType type = SyntaxRules.getKeywordType(text);
-            return new SyntaxToken(type, start, text, null);
-        }
+        _start = _position;
+        _type = SyntaxType.BadToken;
+        _value = null;
 
         switch (currentChar()) {
+            case '\0' -> {
+                _type = SyntaxType.EOFToken;
+            }
             case '+' -> {
                 next();
-                return new SyntaxToken(SyntaxType.PlusToken, start, "+", null);
+                _type = SyntaxType.PlusToken;
             }
             case '-' -> {
                 next();
-                return new SyntaxToken(SyntaxType.MinusToken, start, "-", null);
+                _type = SyntaxType.MinusToken;
             }
             case '*' -> {
                 next();
-                return new SyntaxToken(SyntaxType.AsteriskToken, start, "*", null);
+                _type = SyntaxType.AsteriskToken;
             }
             case '/' -> {
                 next();
-                return new SyntaxToken(SyntaxType.SlashToken, start, "/", null);
+                _type = SyntaxType.SlashToken;
             }
             case '(' -> {
                 next();
-                return new SyntaxToken(SyntaxType.OpenParenthesisToken, start, "(", null);
+                _type = SyntaxType.OpenParenthesisToken;
             }
             case ')' -> {
                 next();
-                return new SyntaxToken(SyntaxType.CloseParenthesisToken, getPosition(), ")", null);
+                _type = SyntaxType.CloseParenthesisToken;
             }
             case '&' -> {
-                if(peek(1) == '&') {
-                    next(2);
-                    return new SyntaxToken(SyntaxType.DoubleAmpersandToken, start, "&&", null);
+                next();
+                if (currentChar() == '&') {
+                    next();
+                    _type = SyntaxType.DoubleAmpersandToken;
                 }
             }
             case '|' -> {
-                if(peek(1) == '|') {
-                    next(2);
-                    return new SyntaxToken(SyntaxType.DoublePipeToken, start, "||", null);
+                next();
+                if (currentChar() == '|') {
+                    next();
+                    _type = SyntaxType.DoublePipeToken;
                 }
             }
             case '=' -> {
-                if(peek(1) == '=') {
-                    next(2);
-                    return new SyntaxToken(SyntaxType.EqualsEqualsToken, start, "==", null);
-                }
-                else {
+                next();
+                if (currentChar() == '=') {
                     next();
-                    return new SyntaxToken(SyntaxType.EqualsToken, start, "=", null);
+                    _type = SyntaxType.EqualsEqualsToken;
+                } else {
+                    _type = SyntaxType.EqualsToken;
                 }
             }
             case '!' -> {
-                if(peek(1) == '=') {
-                    next(2);
-                    return new SyntaxToken(SyntaxType.BangEqualsToken, start, "!=", null);
-                }
-                else {
+                next();
+                if (currentChar() == '=') {
                     next();
-                    return new SyntaxToken(SyntaxType.BangToken, start, "!", null);
+                    _type = SyntaxType.BangEqualsToken;
+                } else {
+                    _type = SyntaxType.BangToken;
                 }
             }
-
+            case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> readNumberToken();
+            case ' ', '\t', '\n', '\r' -> readWhitespaceToken();
+            default -> {
+                if (Character.isLetter(currentChar())) {
+                    readKeywordOrIdentifier();
+                } else if (Character.isWhitespace(currentChar())) {
+                    readWhitespaceToken();
+                } else {
+                    _diagnostics.reportBadCharacter(_position, currentChar());
+                    next();
+                }
+            }
         }
-        _diagnostics.reportBadCharacter(_position, currentChar());
-        next();
-        return new SyntaxToken(SyntaxType.BadToken, getPosition(), String.valueOf((peek(-1))), null);
+
+        int length = _position - _start;
+        String text = SyntaxRules.getTextData(_type);
+        if (text == null) {
+            text = _text.substring(_start, _start + length);
+        }
+        return new SyntaxToken(_type, _start, text, _value);
     }
 
+    /**
+     * Reads the number token from the text being analyzed and moves the cursor. If the number is invalid, it reports an error.
+     */
+    private void readNumberToken() {
+        while (Character.isDigit(currentChar())) {
+            next();
+        }
+        int length = _position - _start;
+        String text = _text.substring(_start, _start + length);
+        int value = 0;
+        try {
+            value = Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            _diagnostics.reportInvalidNumber(new TextSpan(_start, length), _text, Integer.class);
+        }
+        _value = value;
+        _type = SyntaxType.NumberToken;
+    }
+
+    /**
+     * Reads the whitespace token from the text being analyzed and moves the cursor.
+     */
+    private void readWhitespaceToken() {
+        while (Character.isWhitespace(currentChar())) {
+            next();
+        }
+        _type = SyntaxType.WhiteSpaceToken;
+    }
+
+    /**
+     * Reads the keyword or identifier token from the text being analyzed and moves the cursor.
+     */
+    private void readKeywordOrIdentifier() {
+        while(Character.isLetter(currentChar())) {
+            next();
+        }
+
+        int length = _position - _start;
+        String text = _text.substring(_start, _start + length);
+        _type = SyntaxRules.getKeywordType(text);
+    }
 }
