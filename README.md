@@ -1,4 +1,4 @@
-<img src="src/com/urunsiyabend/SiyoLanguage.png" alt= “” width="200" height="200">
+<img src="src/main/java/SiyoLanguage.png" alt= “” width="200" height="200">
 <hr>
 
 # Siyo Compiler Project
