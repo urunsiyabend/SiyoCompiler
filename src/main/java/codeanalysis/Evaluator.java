@@ -48,49 +48,86 @@ public class Evaluator {
      * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
      */
     private Object evaluateExpression(BoundExpression node) throws Exception {
-        if (node instanceof BoundLiteralExpression n) {
-            return n.getValue();
-        }
+        return switch (node.getType()) {
+            case LiteralExpression -> evaluateLiteralExpression((BoundLiteralExpression) node);
+            case VariableExpression -> evaluateVariableExpression((BoundVariableExpression) node);
+            case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
+            case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
+            case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
+        };
 
-        if (node instanceof BoundVariableExpression v) {
-            return _variables.get(v.getVariable());
-        }
+    }
 
-        if (node instanceof BoundAssignmentExpression a) {
-            Object value = evaluateExpression(a.getExpression());
-            _variables.put(a.getVariable(), value);
-            return value;
-        }
+    /**
+     * Evaluates the specified literal expression syntax node and computes the result.
+     *
+     * @param n The literal expression syntax node to evaluate.
+     * @return The computed result of the expression.
+     */
+    private static Object evaluateLiteralExpression(BoundLiteralExpression n) {
+        return n.getValue();
+    }
 
-        if (node instanceof BoundUnaryExpression u) {
-            Object operand = evaluateExpression(u.getOperand());
-            return switch (u.getOperator().getType()) {
-                case Identity -> (int) operand;
-                case Negation -> -(int)operand;
-                case LogicalNegation -> !(boolean)operand;
-                default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
-            };
-        }
+    /**
+     * Evaluates the specified variable expression syntax node and computes the result.
+     *
+     * @param v The variable expression syntax node to evaluate.
+     * @return The computed result of the expression.
+     */
+    private Object evaluateVariableExpression(BoundVariableExpression v) {
+        return _variables.get(v.getVariable());
+    }
 
+    /**
+     * Evaluates the specified assignment expression syntax node and computes the result.
+     *
+     * @param a The assignment expression syntax node to evaluate.
+     * @return The computed result of the expression.
+     * @throws Exception if an error occurs during evaluation.
+     */
+    private Object evaluateAssignmentExpression(BoundAssignmentExpression a) throws Exception {
+        Object value = evaluateExpression(a.getExpression());
+        _variables.put(a.getVariable(), value);
+        return value;
+    }
 
-        if (node instanceof BoundBinaryExpression b) {
-            Object left = evaluateExpression(b.getLeft());
-            Object right = evaluateExpression(b.getRight());
+    /**
+     * @param u The unary expression syntax node to evaluate.
+     * @return The computed result of the expression.
+     * @throws Exception if an error occurs during evaluation or if an unexpected operator is encountered.
+     */
+    private Object evaluateUnaryExpression(BoundUnaryExpression u) throws Exception {
+        Object operand = evaluateExpression(u.getOperand());
+        return switch (u.getOperator().getType()) {
+            case Identity -> (int) operand;
+            case Negation -> -(int) operand;
+            case LogicalNegation -> !(boolean) operand;
+            default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
+        };
+    }
 
-            return switch (b.getOperator().getType()) {
-                case Addition -> (int) left + (int) right;
-                case Subtraction -> (int) left - (int) right;
-                case Multiplication -> (int) left * (int) right;
-                case Division -> (int) left / (int) right;
-                case LogicalAnd -> (boolean) left && (boolean) right;
-                case LogicalOr -> (boolean) left || (boolean) right;
-                case Equals -> left.equals(right);
-                case NotEquals -> !left.equals(right);
-                default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
-            };
-        }
+    /**
+     * Evaluates the specified binary expression syntax node and computes the result.
+     *
+     * @param b The binary expression syntax node to evaluate.
+     * @return The computed result of the expression.
+     * @throws Exception if an error occurs during evaluation or if an unexpected operator is encountered.
+     */
+    private Object evaluateBinaryExpression(BoundBinaryExpression b) throws Exception {
+        Object left = evaluateExpression(b.getLeft());
+        Object right = evaluateExpression(b.getRight());
 
-        throw new Exception(String.format("Unexpected node: %s", node.getType()));
+        return switch (b.getOperator().getType()) {
+            case Addition -> (int) left + (int) right;
+            case Subtraction -> (int) left - (int) right;
+            case Multiplication -> (int) left * (int) right;
+            case Division -> (int) left / (int) right;
+            case LogicalAnd -> (boolean) left && (boolean) right;
+            case LogicalOr -> (boolean) left || (boolean) right;
+            case Equals -> left.equals(right);
+            case NotEquals -> !left.equals(right);
+            default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
+        };
     }
 }
 
