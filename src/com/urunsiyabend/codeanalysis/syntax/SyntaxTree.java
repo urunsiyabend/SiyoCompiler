@@ -61,4 +61,24 @@ public final class SyntaxTree {
         Parser parser = new Parser(text);
         return parser.parse();
     }
+
+    /**
+     * Parses the specified source code text and returns the corresponding tokens.
+     *
+     * @param text The source code text to be parsed.
+     * @return The tokens representing the parsed source code.
+     */
+    public static Iterable<SyntaxToken> parseTokens(String text) {
+        Lexer lexer = new Lexer(text);
+        ArrayList<SyntaxToken> tokens = new ArrayList<>();
+
+        while (true) {
+            SyntaxToken token = lexer.getNextToken();
+            if (token.getType() == SyntaxType.EOFToken)
+                break;
+            tokens.add(token);
+        }
+
+        return tokens;
+    }
 }
