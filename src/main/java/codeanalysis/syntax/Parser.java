@@ -148,7 +148,7 @@ public class Parser {
      */
     private ExpressionSyntax parseBinaryExpression(int parentPriority) {
         ExpressionSyntax left;
-        int unaryOperatorPriority = SyntaxPriorities.GetUnaryOperatorPriority(current().getType());
+        int unaryOperatorPriority = SyntaxPriorities.getUnaryOperatorPriority(current().getType());
         if (unaryOperatorPriority != 0 && unaryOperatorPriority >= parentPriority) {
             SyntaxToken operator = nextToken();
             ExpressionSyntax operand = parseBinaryExpression();
@@ -159,7 +159,7 @@ public class Parser {
         }
 
         while (true) {
-            int priority = SyntaxPriorities.GetBinaryOperatorPriority(current().getType());
+            int priority = SyntaxPriorities.getBinaryOperatorPriority(current().getType());
             if (priority == 0 || priority <= parentPriority)
                 break;
             SyntaxToken operator = nextToken();

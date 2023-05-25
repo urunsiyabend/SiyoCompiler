@@ -14,7 +14,7 @@ public class SyntaxPriorities {
      * @param type The syntax type of the unary operator.
      * @return The priority of the unary operator.
      */
-    public static int GetUnaryOperatorPriority(SyntaxType type) {
+    public static int getUnaryOperatorPriority(SyntaxType type) {
         return switch (type) {
             case PlusToken, MinusToken, BangToken -> 6;
             default -> 0;
@@ -27,7 +27,7 @@ public class SyntaxPriorities {
      * @param type The syntax type of the binary operator.
      * @return The priority of the binary operator.
      */
-    public static int GetBinaryOperatorPriority(SyntaxType type) {
+    public static int getBinaryOperatorPriority(SyntaxType type) {
         return switch (type) {
             case AsteriskToken, SlashToken -> 5;
             case PlusToken, MinusToken -> 4;
