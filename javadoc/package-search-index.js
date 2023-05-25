@@ -1,1 +1,1 @@
-packageSearchIndex = [{"l":"All Packages","u":"allpackages-index.html"},{"l":"com.urunsiyabend"},{"l":"com.urunsiyabend.codeanalysis"},{"l":"com.urunsiyabend.codeanalysis.binding"},{"l":"com.urunsiyabend.codeanalysis.syntax"}];updateSearchResults();
+packageSearchIndex = [{"l":"All Packages","u":"allpackages-index.html"},{"l":"codeanalysis"},{"l":"codeanalysis.binding"},{"l":"codeanalysis.syntax"}];updateSearchResults();
