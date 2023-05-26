@@ -176,28 +176,59 @@ public class Parser {
      * @return The parsed expression syntax.
      */
     private ExpressionSyntax parsePrimary() {
-        switch (current().getType()) {
-            case OpenParenthesisToken -> {
-                SyntaxToken left = nextToken();
-                ExpressionSyntax exp = parseBinaryExpression();
-                SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
+        return switch (current().getType()) {
+            case OpenParenthesisToken -> parseParenthesizedExpression();
+            case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
+            case NumberToken -> parseNumberLiteral();
+            default -> parseNameExpression();
+        };
+    }
 
-                return new ParanthesizedExpressionSyntax(left, exp, right);
-            }
-            case FalseKeyword, TrueKeyword -> {
-                SyntaxToken keywordToken = nextToken();
-                var value = keywordToken.getType() == SyntaxType.TrueKeyword;
-                return new LiteralExpressionSyntax(keywordToken, value);
-            }
-            case IdentifierToken -> {
-                SyntaxToken identifierToken = nextToken();
-                return new NameExpressionSyntax(identifierToken);
-            }
-            default -> {
-                SyntaxToken numberToken = match(SyntaxType.NumberToken);
-                return new LiteralExpressionSyntax(numberToken);
-            }
-        }
+    /**
+     * Parses a parenthesized expression.
+     * ParenthesizedExpressionSyntax has a left and right parenthesis token, and an expression.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseParenthesizedExpression() {
+        SyntaxToken left = match(SyntaxType.OpenParenthesisToken);
+        ExpressionSyntax exp = parseExpression();
+        SyntaxToken right = match(SyntaxType.CloseParenthesisToken);
+        return new ParanthesizedExpressionSyntax(left, exp, right);
+    }
+
+    /**
+     * Parses a boolean literal.
+     * LiteralExpressionSyntax has a keyword token and a value.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseBooleanLiteral() {
+        boolean isTrue = current().getType() == SyntaxType.TrueKeyword;
+        SyntaxToken keywordToken = isTrue ? match(SyntaxType.TrueKeyword) : match(SyntaxType.FalseKeyword);
+        return new LiteralExpressionSyntax(keywordToken, isTrue);
+    }
+
+    /**
+     * Parses a number literal.
+     * LiteralExpressionSyntax has a number token and a value.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseNumberLiteral() {
+        SyntaxToken numberToken = match(SyntaxType.NumberToken);
+        return new LiteralExpressionSyntax(numberToken);
+    }
+
+    /**
+     * Parses a name expression.
+     * NameExpressionSyntax has an identifier token.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseNameExpression() {
+        SyntaxToken identifierToken = match(SyntaxType.IdentifierToken);
+        return new NameExpressionSyntax(identifierToken);
     }
 }
 
