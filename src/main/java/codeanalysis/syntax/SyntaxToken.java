@@ -1,6 +1,6 @@
 package codeanalysis.syntax;
 
-import codeanalysis.TextSpan;
+import codeanalysis.text.TextSpan;
 
 import java.util.Collections;
 import java.util.Iterator;
@@ -117,6 +117,7 @@ public class SyntaxToken extends SyntaxNode {
      *
      * @return The text span of related syntax token.
      */
+    @Override
     public TextSpan getSpan() {
         return _span;
     }

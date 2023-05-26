@@ -1,8 +1,8 @@
 import codeanalysis.*;
-import codeanalysis.syntax.SyntaxNode;
-import codeanalysis.syntax.SyntaxToken;
 import codeanalysis.syntax.SyntaxTree;
 
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 /**
@@ -35,7 +35,13 @@ public class Main {
             }
 
             DiagnosticBox diagnosticsIterator = result.diagnostics();
-            prettyPrint(tree.getRoot(), "", true);
+            PrintWriter printWriter = new PrintWriter(System.out);
+            try {
+                tree.getRoot().writeTo(printWriter);
+                printWriter.flush();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
 
             if (diagnosticsIterator.hasNext()) {
                 while (diagnosticsIterator.hasNext()) {
@@ -64,38 +70,6 @@ public class Main {
                 }
 
             }
-        }
-    }
-
-    /**
-     * Recursively pretty prints the syntax tree.
-     *
-     * @param node   The syntax node to print.
-     * @param indent The indentation string.
-     * @param isLast Specifies if the current node is the last child of its parent.
-     */
-    static void prettyPrint(SyntaxNode node, String indent, boolean isLast) {
-        String marker = isLast ? "└──" : "├──";
-
-        System.out.print(indent);
-        System.out.print(marker);
-        System.out.print(node.getType());
-
-
-        if (node instanceof SyntaxToken t && t.getValue() != null) {
-            System.out.print(" ");
-            System.out.print(t.getValue());
-        }
-
-        System.out.println();
-
-        indent += isLast ? "    ": "│   ";
-
-        Iterator<SyntaxNode> iterator = node.getChildren();
-        while (iterator.hasNext()) {
-            SyntaxNode child = iterator.next();
-            boolean last = !iterator.hasNext();
-            prettyPrint(child, indent, last);
         }
     }
 }

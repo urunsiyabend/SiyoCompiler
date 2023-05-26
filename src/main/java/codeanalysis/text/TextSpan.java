@@ -1,4 +1,4 @@
-package codeanalysis;
+package codeanalysis.text;
 
 /**
  * The TextSpan class represents a span of text in a source file.
@@ -21,6 +21,18 @@ public class TextSpan {
     public TextSpan(int start, int length) {
         this._start = start;
         this._length = length;
+    }
+
+    /**
+     * Creates a new instance of the TextSpan class with the specified start and end positions.
+     *
+     * @param start The start position of the text span.
+     * @param end   The end position of the text span.
+     * @return The new text span.
+     */
+    public static TextSpan fromBounds(int start, int end) {
+        int length = end - start;
+        return new TextSpan(start, length);
     }
 
     /**

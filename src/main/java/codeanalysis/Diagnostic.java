@@ -1,5 +1,7 @@
 package codeanalysis;
 
+import codeanalysis.text.TextSpan;
+
 /**
  * The Diagnostic class represents a diagnostic message produced during code analysis.
  * It contains information about the location of the issue in the source code (specified by a TextSpan)

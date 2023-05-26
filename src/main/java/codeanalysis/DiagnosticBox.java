@@ -1,6 +1,7 @@
 package codeanalysis;
 
 import codeanalysis.syntax.SyntaxType;
+import codeanalysis.text.TextSpan;
 
 import java.util.ArrayList;
 import java.util.Iterator;

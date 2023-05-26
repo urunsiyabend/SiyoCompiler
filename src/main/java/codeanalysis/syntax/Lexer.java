@@ -1,7 +1,7 @@
 package codeanalysis.syntax;
 
 import codeanalysis.DiagnosticBox;
-import codeanalysis.TextSpan;
+import codeanalysis.text.TextSpan;
 
 /**
  * The {@code Lexer} class is responsible for lexical analysis of a given text, producing tokens that represent different elements of the text.
