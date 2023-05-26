@@ -1,6 +1,7 @@
 package codeanalysis.syntax;
 
 import codeanalysis.DiagnosticBox;
+import codeanalysis.text.SourceText;
 import codeanalysis.text.TextSpan;
 
 /**
@@ -12,7 +13,7 @@ import codeanalysis.text.TextSpan;
  * @version 1.0
  */
 public class Lexer {
-    private final String _text;
+    private final SourceText _text;
     DiagnosticBox _diagnostics = new DiagnosticBox();
 
     private int _position;
@@ -25,7 +26,7 @@ public class Lexer {
      *
      * @param text The text to analyze.
      */
-    public Lexer(String text) {
+    public Lexer(SourceText text) {
         this._text = text;
     }
 
@@ -168,7 +169,7 @@ public class Lexer {
         int length = _position - _start;
         String text = SyntaxRules.getTextData(_type);
         if (text == null) {
-            text = _text.substring(_start, _start + length);
+            text = _text.toString(_start, _start + length);
         }
         return new SyntaxToken(_type, _start, text, _value);
     }
@@ -181,12 +182,12 @@ public class Lexer {
             next();
         }
         int length = _position - _start;
-        String text = _text.substring(_start, _start + length);
+        String text = _text.toString(_start, _start + length);
         int value = 0;
         try {
             value = Integer.parseInt(text);
         } catch (NumberFormatException e) {
-            _diagnostics.reportInvalidNumber(new TextSpan(_start, length), _text, Integer.class);
+            _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Integer.class);
         }
         _value = value;
         _type = SyntaxType.NumberToken;
@@ -211,7 +212,7 @@ public class Lexer {
         }
 
         int length = _position - _start;
-        String text = _text.substring(_start, _start + length);
+        String text = _text.toString(_start, _start + length);
         _type = SyntaxRules.getKeywordType(text);
     }
 }

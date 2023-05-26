@@ -1,6 +1,7 @@
 package codeanalysis.syntax;
 
 import codeanalysis.DiagnosticBox;
+import codeanalysis.text.SourceText;
 
 import java.util.ArrayList;
 
@@ -16,13 +17,14 @@ public class Parser {
     private final SyntaxToken[] _tokens;
     private int _position;
     private final DiagnosticBox _diagnostics = new DiagnosticBox();
+    private final SourceText _text;
 
     /**
      * Initializes a new instance of the Parser class with the specified input text.
      *
      * @param text The input text to be parsed.
      */
-    public Parser(String text) {
+    public Parser(SourceText text) {
         ArrayList<SyntaxToken> tokens = new ArrayList<>();
 
         Lexer lexer = new Lexer(text);
@@ -34,6 +36,7 @@ public class Parser {
             }
         } while (token.getType() != SyntaxType.EOFToken);
 
+        _text = text;
         _tokens = tokens.toArray(new SyntaxToken[0]);
         _diagnostics.addAll(lexer._diagnostics);
     }
@@ -104,7 +107,7 @@ public class Parser {
     public SyntaxTree parse() {
         ExpressionSyntax expression = parseExpression();
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
-        return new SyntaxTree(_diagnostics, expression, eofToken);
+        return new SyntaxTree(_text, _diagnostics, expression, eofToken);
     }
 
     /**

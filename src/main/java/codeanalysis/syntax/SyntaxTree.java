@@ -1,6 +1,7 @@
 package codeanalysis.syntax;
 
 import codeanalysis.DiagnosticBox;
+import codeanalysis.text.SourceText;
 
 import java.util.ArrayList;
 
@@ -17,6 +18,7 @@ public final class SyntaxTree {
     private final ExpressionSyntax _root;
     private final SyntaxToken _eofToken;
     private final DiagnosticBox _diagnostics;
+    private final SourceText _text;
 
     /**
      * Initializes a new instance of the SyntaxTree class with the specified diagnostics, root expression syntax, and end-of-file token.
@@ -25,7 +27,8 @@ public final class SyntaxTree {
      * @param root        The root expression syntax node of the syntax tree.
      * @param EOFToken    The end-of-file token indicating the completion of parsing.
      */
-    public SyntaxTree (DiagnosticBox diagnostics, ExpressionSyntax root, SyntaxToken EOFToken) {
+    public SyntaxTree (SourceText text, DiagnosticBox diagnostics, ExpressionSyntax root, SyntaxToken EOFToken) {
+        _text = text;
         _diagnostics = diagnostics;
         _root = root;
         _eofToken = EOFToken;
@@ -49,6 +52,10 @@ public final class SyntaxTree {
         return _root;
     }
 
+    public SourceText getText() {
+        return _text;
+    }
+
     /**
      * Parses the specified source code text and returns the corresponding syntax tree.
      *
@@ -56,8 +63,30 @@ public final class SyntaxTree {
      * @return The syntax tree representing the parsed source code.
      */
     public static SyntaxTree parse(String text) {
+        SourceText sourceText = SourceText.from(text);
+        return parse(sourceText);
+    }
+
+    /**
+     * Parses the specified source code text and returns the corresponding syntax tree.
+     *
+     * @param text The source code text to be parsed.
+     * @return The syntax tree representing the parsed source code.
+     */
+    public static SyntaxTree parse(SourceText text) {
         Parser parser = new Parser(text);
         return parser.parse();
+    }
+
+    /**
+     * Parses the specified source code text and returns the corresponding tokens.
+     *
+     * @param text The text to be parsed.
+     * @return The tokens representing the parsed source code.
+     */
+    public static Iterable<SyntaxToken> parseTokens(String text) {
+        SourceText sourceText = SourceText.from(text);
+        return parseTokens(sourceText);
     }
 
     /**
@@ -66,7 +95,7 @@ public final class SyntaxTree {
      * @param text The source code text to be parsed.
      * @return The tokens representing the parsed source code.
      */
-    public static Iterable<SyntaxToken> parseTokens(String text) {
+    public static Iterable<SyntaxToken> parseTokens(SourceText text) {
         Lexer lexer = new Lexer(text);
         ArrayList<SyntaxToken> tokens = new ArrayList<>();
 
