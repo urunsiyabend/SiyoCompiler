@@ -23,6 +23,7 @@ public final class SyntaxTree {
     /**
      * Initializes a new instance of the SyntaxTree class with the specified diagnostics, root expression syntax, and end-of-file token.
      *
+     * @param text        The source text of the syntax tree.
      * @param diagnostics The list of diagnostics produced during parsing.
      * @param root        The root expression syntax node of the syntax tree.
      * @param EOFToken    The end-of-file token indicating the completion of parsing.
@@ -52,6 +53,12 @@ public final class SyntaxTree {
         return _root;
     }
 
+
+    /**
+     * Gets the source text of the syntax tree.
+     *
+     * @return The source text.
+     */
     public SourceText getText() {
         return _text;
     }

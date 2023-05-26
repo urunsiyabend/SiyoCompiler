@@ -83,6 +83,9 @@ public class AssertingEnumerator implements AutoCloseable {
     }
 
 
+    /**
+     * Closes the AssertingEnumerator instance.
+     */
     @Override
     public void close() {
         if (!hasErrors) {
@@ -90,11 +93,16 @@ public class AssertingEnumerator implements AutoCloseable {
         }
     }
 
-    public void assertNode(SyntaxType kind) {
+    /**
+     * Asserts that the next node is of the specified type.
+     *
+     * @param type The syntax type of the node.
+     */
+    public void assertNode(SyntaxType type) {
         try {
             Assertions.assertTrue(enumerator.hasNext());
             SyntaxNode current = enumerator.next();
-            Assertions.assertEquals(kind, current.getType());
+            Assertions.assertEquals(type, current.getType());
             Assertions.assertFalse(current instanceof SyntaxToken);
         } catch (Throwable t) {
             if (markFailed()) {
@@ -103,6 +111,12 @@ public class AssertingEnumerator implements AutoCloseable {
         }
     }
 
+    /**
+     * Asserts that the next node is of the specified type and has the specified text.
+     *
+     * @param type The syntax type of the node.
+     * @param text The text of the node.
+     */
     public void assertToken(SyntaxType type, String text) {
         try {
             Assertions.assertTrue(enumerator.hasNext());

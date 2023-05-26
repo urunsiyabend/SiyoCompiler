@@ -46,6 +46,7 @@ public abstract class SyntaxNode {
      * Writes the syntax tree to the specified writer.
      *
      * @param writer The writer to write the tree to.
+     * @throws IOException If an I/O error occurs.
      */
     public void writeTo(Writer writer) throws IOException {
         prettyPrint(writer, this, "", true);
