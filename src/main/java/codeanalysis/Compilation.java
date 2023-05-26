@@ -48,7 +48,7 @@ public class Compilation {
      */
     public EvaluationResult evaluate(Map<VariableSymbol, Object> variables) throws Exception {
         Binder binder = new Binder(variables);
-        BoundExpression boundExpression = binder.bindExpression(_syntaxTree.getRoot());
+        BoundExpression boundExpression = binder.bindExpression(_syntaxTree.getRoot().getExpression());
 
         DiagnosticBox diagnostics = _syntaxTree.diagnostics().addAll(binder.diagnostics());
         if (diagnostics.hasNext()) {

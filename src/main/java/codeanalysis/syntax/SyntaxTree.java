@@ -15,8 +15,7 @@ import java.util.ArrayList;
  * @version 1.0
  */
 public final class SyntaxTree {
-    private final ExpressionSyntax _root;
-    private final SyntaxToken _eofToken;
+    private final CompilationUnitSyntax _root;
     private final DiagnosticBox _diagnostics;
     private final SourceText _text;
 
@@ -24,15 +23,14 @@ public final class SyntaxTree {
      * Initializes a new instance of the SyntaxTree class with the specified diagnostics, root expression syntax, and end-of-file token.
      *
      * @param text        The source text of the syntax tree.
-     * @param diagnostics The list of diagnostics produced during parsing.
-     * @param root        The root expression syntax node of the syntax tree.
-     * @param EOFToken    The end-of-file token indicating the completion of parsing.
      */
-    public SyntaxTree (SourceText text, DiagnosticBox diagnostics, ExpressionSyntax root, SyntaxToken EOFToken) {
+    private SyntaxTree (SourceText text) {
+        Parser parser = new Parser(text);
+
+
         _text = text;
-        _diagnostics = diagnostics;
-        _root = root;
-        _eofToken = EOFToken;
+        _diagnostics = parser.getDiagnostics();
+        _root = parser.parseCompilationUnit();
     }
 
     /**
@@ -49,7 +47,7 @@ public final class SyntaxTree {
      *
      * @return The root expression syntax node.
      */
-    public ExpressionSyntax getRoot() {
+    public CompilationUnitSyntax getRoot() {
         return _root;
     }
 
@@ -81,8 +79,7 @@ public final class SyntaxTree {
      * @return The syntax tree representing the parsed source code.
      */
     public static SyntaxTree parse(SourceText text) {
-        Parser parser = new Parser(text);
-        return parser.parse();
+        return new SyntaxTree(text);
     }
 
     /**

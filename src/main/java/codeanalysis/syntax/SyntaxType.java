@@ -82,4 +82,7 @@ public enum SyntaxType {
 
     /* Represents a equals (=) token. */
     EqualsToken,
+
+    /* Represents a compilation unit. */
+    CompilationUnit,
 }

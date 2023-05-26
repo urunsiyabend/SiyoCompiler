@@ -16,9 +16,10 @@ import java.util.ArrayList;
 public class Parser {
     private final SyntaxToken[] _tokens;
     private int _position;
-    private final DiagnosticBox _diagnostics = new DiagnosticBox();
-    private final SourceText _text;
 
+    private final DiagnosticBox _diagnostics = new DiagnosticBox();
+
+    private final SourceText _text;
     /**
      * Initializes a new instance of the Parser class with the specified input text.
      *
@@ -39,6 +40,15 @@ public class Parser {
         _text = text;
         _tokens = tokens.toArray(new SyntaxToken[0]);
         _diagnostics.addAll(lexer._diagnostics);
+    }
+
+    /**
+     * Gets the diagnostic box over the diagnostics produced during parsing.
+     *
+     * @return The diagnostic box.
+     */
+    public DiagnosticBox getDiagnostics() {
+        return _diagnostics;
     }
 
     /**
@@ -104,10 +114,10 @@ public class Parser {
      *
      * @return The syntax tree representing the parsed input.
      */
-    public SyntaxTree parse() {
+    public CompilationUnitSyntax parseCompilationUnit() {
         ExpressionSyntax expression = parseExpression();
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
-        return new SyntaxTree(_text, _diagnostics, expression, eofToken);
+        return new CompilationUnitSyntax(expression, eofToken);
     }
 
     /**

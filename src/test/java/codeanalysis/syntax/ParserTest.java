@@ -38,7 +38,7 @@ public class ParserTest {
         String op1Text = SyntaxRules.getTextData(op1);
         String op2Text = SyntaxRules.getTextData(op2);
         String text = "a " + op1Text + " b " + op2Text;
-        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot();
+        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot().getExpression();
 
         if (op1Precedence >= op2Precedence) {
             //     op2
@@ -94,7 +94,7 @@ public class ParserTest {
         String unaryText = SyntaxRules.getTextData(unaryType);
         String binaryText = SyntaxRules.getTextData(binaryType);
         String text = unaryText + " a " + binaryText + " b";
-        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot();
+        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot().getExpression();
 
         if (unaryPrecedence >= binaryPrecedence) {
             //   binary
