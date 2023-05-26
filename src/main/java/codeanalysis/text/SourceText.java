@@ -77,7 +77,7 @@ public class SourceText {
             }
         }
 
-        if (position > lineStart) {
+        if (position >= lineStart) {
             addLine(result, sourceText, position, lineStart, 0);
         }
         return result;

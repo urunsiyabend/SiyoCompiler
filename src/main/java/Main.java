@@ -1,6 +1,5 @@
 import codeanalysis.*;
 import codeanalysis.syntax.SyntaxTree;
-import codeanalysis.text.SourceText;
 import codeanalysis.text.TextSpan;
 
 import java.io.IOException;
@@ -30,9 +29,12 @@ public class Main {
             String input = scanner.nextLine();
 
             boolean isBlank = input.equals("");
-            if (isBlank) {
-                break;
+            if (builder.length() == 0) {
+                if (isBlank) {
+                    break;
+                }
             }
+
 
             builder.append(input);
             builder.append("\n");
