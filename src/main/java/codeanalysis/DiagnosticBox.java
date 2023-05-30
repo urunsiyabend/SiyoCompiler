@@ -138,4 +138,25 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Name '%s' does not exist", name);
         report(span, message);
     }
+
+    /**
+     * Reports a variable already declared diagnostic with the specified span and name.
+     *
+     * @param span The text span where the variable is already declared.
+     * @param name The name of the variable.
+     */
+    public void reportVariableAlreadyDeclared(TextSpan span, String name) {
+        String message = String.format("Variable '%s' is already declared", name);
+        report(span, message);
+    }
+
+    /**
+     * @param span The text span where the name is already declared.
+     * @param fromType The type of the name to be assigned.
+     * @param toType The type of the name that already assigned.
+     */
+    public void reportCannotConvert(TextSpan span, Class<?> fromType, Class<?> toType) {
+        String message = String.format("Cannot convert type <%s> to <%s>", fromType, toType);
+        report(span, message);
+    }
 }

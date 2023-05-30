@@ -36,9 +36,11 @@ public abstract class SyntaxNode {
      * @return The span of the syntax node.
      */
     public TextSpan getSpan() {
-        ArrayList<SyntaxNode> childrens = (ArrayList<SyntaxNode>) getChildren();
-        TextSpan first = childrens.get(0).getSpan();
-        TextSpan last = childrens.get(childrens.size() - 1).getSpan();
+        ArrayList<SyntaxNode> children = new ArrayList<>();
+        getChildren().forEachRemaining(children::add);
+
+        TextSpan first = children.get(0).getSpan();
+        TextSpan last = children.get(children.size() - 1).getSpan();
         return TextSpan.fromBounds(first.getStart(), last.getEnd());
     }
 

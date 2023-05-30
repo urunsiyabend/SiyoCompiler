@@ -4,7 +4,7 @@ import codeanalysis.DiagnosticBox;
 import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
 
-import java.util.Map;
+import java.util.Stack;
 
 /**
  * The `Binder` class is responsible for binding expression syntax to bound expressions.
@@ -15,16 +15,44 @@ import java.util.Map;
  * @version 1.0
  */
 public class Binder {
-    private final Map<VariableSymbol, Object> _variables;
     DiagnosticBox _diagnostics = new DiagnosticBox();
+    private final BoundScope _scope;
 
     /**
      * Initializes a new instance of the Binder class with the specified variables.
      *
-     * @param variables The variables to be used during binding process.
+     * @param parent The parent scope.
      */
-    public Binder(Map<VariableSymbol, Object> variables) {
-        this._variables = variables;
+    public Binder(BoundScope parent) {
+        _scope = new BoundScope(parent);
+    }
+
+    public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
+        var parentScope = createParentScopes(previous);
+        Binder binder = new Binder(parentScope);
+        BoundExpression expression = binder.bindExpression(syntax.getExpression());
+        Iterable<VariableSymbol> variables = binder._scope.getDeclaredVariables();
+        DiagnosticBox diagnostics = binder._diagnostics;
+        return new BoundGlobalScope(previous, diagnostics, variables, expression);
+    }
+
+    private static BoundScope createParentScopes(BoundGlobalScope previous) {
+        Stack<BoundGlobalScope> scopeStack = new Stack<>();
+        while (previous != null) {
+            scopeStack.push(previous);
+            previous = previous.getPrevious();
+        }
+        BoundScope parent = null;
+
+        while (scopeStack.size() > 0) {
+            previous = scopeStack.pop();
+            BoundScope scope = new BoundScope(parent);
+            for (VariableSymbol variable : previous.getVariableSymbols()) {
+                scope.declare(variable);
+            }
+            parent = scope;
+        }
+        return parent;
     }
 
     /**
@@ -154,16 +182,13 @@ public class Binder {
      */
     private BoundExpression bindNameExpression(NameExpressionSyntax syntax) {
         String name = syntax.getIdentifierToken().getData();
-        VariableSymbol variable = _variables.keySet()
-                .stream()
-                .filter(v -> v.getName().equals(name))
-                .findFirst()
-                .orElse(null);
+        boolean hasVariable = _scope.tryLookup(name);
 
-        if (variable == null) {
+        if (!hasVariable) {
             _diagnostics.reportUndefinedName(syntax.getIdentifierToken().getSpan(), name);
             return new BoundLiteralExpression(0);
         }
+        var variable  = _scope.lookupVariable(name);
         return new BoundVariableExpression(variable);
     }
 
@@ -177,14 +202,20 @@ public class Binder {
     private BoundExpression bindAssignmentExpression(AssignmentExpressionSyntax syntax) throws Exception {
         String name = syntax.getIdentifierToken().getData();
         BoundExpression boundExpression = bindExpression(syntax.getExpressionSyntax());
+        VariableSymbol variable;
 
-        _variables.keySet()
-                .stream()
-                .filter(v -> v.getName().equals(name))
-                .findFirst().ifPresent(_variables::remove);
+        if (!_scope.tryLookup(name)) {
+            variable = new VariableSymbol(name, boundExpression.getClassType());
+            _scope.declare(variable);
+        }
+        else {
+            variable = _scope.lookupVariable(name);
+        }
 
-        var variable = new VariableSymbol(name, boundExpression.getClassType());
-        _variables.put(variable, null);
+        if (boundExpression.getClassType() != variable.getType()) {
+            _diagnostics.reportCannotConvert(syntax.getExpressionSyntax().getSpan(), boundExpression.getClassType(), variable.getType());
+            return boundExpression;
+        }
 
         return new BoundAssignmentExpression(variable, boundExpression);
     }

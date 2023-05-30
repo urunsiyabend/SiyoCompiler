@@ -7,17 +7,26 @@ import java.io.PrintWriter;
 import java.util.*;
 
 /**
- * Entry point of program.
+ * The Main class is the entry point of the program.
+ * It starts a REPL loop that reads input from the user, parses it, and prints the result.
+ * The loop terminates when the user enters a blank line.
+ *
+ * @see <a href="https://github.com/urunsiyabend">GitHub Profile</a>
+ * @author Siyabend Urun
+ * @version 1.0
  */
 public class Main {
     /**
-     * Main method to execute the code analysis and evaluation.
+     * Entry point of program.
+     * Starts a REPL loop that reads input from the user, parses it, and prints the result.
+     * The loop terminates when the user enters a blank line.
      *
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
         Map<VariableSymbol, Object> variables = new HashMap<>();
         StringBuilder builder = new StringBuilder();
+        Compilation previous = null;
 
         while (true) {
             if (builder.length() == 0) {
@@ -47,7 +56,7 @@ public class Main {
             }
 
 
-            Compilation compilation = new Compilation(tree);
+            Compilation compilation = previous == null ? new Compilation(tree) : previous.continueWith(tree);
             EvaluationResult result;
             try {
                 result = compilation.evaluate(variables);
@@ -92,13 +101,13 @@ public class Main {
                 }
             }
             else {
+                previous = compilation;
                 try {
                     System.out.println(result.getValue());
                 }
                 catch (Exception e) {
                     System.out.println(e);
                 }
-
             }
 
             builder = new StringBuilder();
