@@ -34,7 +34,6 @@ public class BoundScope {
      * @param variableSymbol The variable to be declared.
      */
     public void declare(VariableSymbol variableSymbol) {
-        System.out.println(this);
         if (_variables.containsKey(variableSymbol.getName())) {
             return;
         }
