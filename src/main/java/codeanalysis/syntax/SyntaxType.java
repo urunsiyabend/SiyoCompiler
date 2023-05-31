@@ -85,4 +85,25 @@ public enum SyntaxType {
 
     /* Represents a compilation unit. */
     CompilationUnit,
+
+    /* Represents a block statement. */
+    BlockStatement,
+
+    /* Represents a expression statement. */
+    ExpressionStatement,
+
+    /* Represents a open brace token. */
+    OpenBraceToken,
+
+    /* Represents a close brace token. */
+    CloseBraceToken,
+
+    /* Represents a variable declaration. */
+    VariableDeclaration,
+
+    /* Represents a "mut" keyword. */
+    MutableKeyword,
+
+    /* Represents an "imut" keyword. */
+    ImmutableKeyword,
 }

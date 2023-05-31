@@ -1,8 +1,5 @@
 package codeanalysis.syntax;
 
-import codeanalysis.syntax.SyntaxPriorities;
-import codeanalysis.syntax.SyntaxRules;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -38,7 +35,7 @@ public class ParserTest {
         String op1Text = SyntaxRules.getTextData(op1);
         String op2Text = SyntaxRules.getTextData(op2);
         String text = "a " + op1Text + " b " + op2Text;
-        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot().getExpression();
+        StatementSyntax statementSyntax = SyntaxTree.parse(text).getRoot().getStatement();
 
         if (op1Precedence >= op2Precedence) {
             //     op2
@@ -47,7 +44,7 @@ public class ParserTest {
             //  /   \
             // a     b
 
-            AssertingEnumerator e = new AssertingEnumerator(expression);
+            AssertingEnumerator e = new AssertingEnumerator(statementSyntax);
             e.assertNode(SyntaxType.BinaryExpression);
             e.assertNode(SyntaxType.BinaryExpression);
             e.assertNode(SyntaxType.NameExpression);
@@ -65,7 +62,7 @@ public class ParserTest {
             //     /   \
             //    b     c
 
-            AssertingEnumerator e = new AssertingEnumerator(expression);
+            AssertingEnumerator e = new AssertingEnumerator(statementSyntax);
             e.assertNode(SyntaxType.BinaryExpression);
             e.assertNode(SyntaxType.NameExpression);
             e.assertToken(SyntaxType.IdentifierToken, "a");
@@ -94,7 +91,7 @@ public class ParserTest {
         String unaryText = SyntaxRules.getTextData(unaryType);
         String binaryText = SyntaxRules.getTextData(binaryType);
         String text = unaryText + " a " + binaryText + " b";
-        ExpressionSyntax expression = SyntaxTree.parse(text).getRoot().getExpression();
+        StatementSyntax expression = SyntaxTree.parse(text).getRoot().getStatement();
 
         if (unaryPrecedence >= binaryPrecedence) {
             //   binary

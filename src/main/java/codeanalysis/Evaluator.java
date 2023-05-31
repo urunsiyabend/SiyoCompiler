@@ -16,8 +16,9 @@ import java.util.Map;
  * @version 1.0
  */
 public class Evaluator {
-    private final BoundExpression _root;
+    private final BoundStatement _root;
     private final Map<VariableSymbol, Object> _variables;
+    private Object _lastValue;
 
     /**
      * Evaluates the expression syntax tree and computes the result.
@@ -26,7 +27,8 @@ public class Evaluator {
      * @throws Exception if an error occurs during evaluation.
      */
     public Object evaluate() throws Exception {
-        return evaluateExpression(_root);
+        evaluateStatement(_root);
+        return _lastValue;
     }
 
     /**
@@ -35,9 +37,58 @@ public class Evaluator {
      * @param root      The root expression syntax to evaluate.
      * @param variables The variables of the evaluator.
      */
-    public Evaluator(BoundExpression root, Map<VariableSymbol, Object> variables) {
+    public Evaluator(BoundStatement root, Map<VariableSymbol, Object> variables) {
         _root = root;
         this._variables = variables;
+    }
+
+    /**
+     * Recursively evaluates the specified expression syntax node and computes the result.
+     *
+     * @param node The bound statement node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateStatement(BoundStatement node) throws Exception {
+        switch (node.getType()) {
+            case BlockStatement -> evaluateBlockStatement((BoundBlockStatement) node);
+            case VariableDeclaration -> evaluateVariableDeclaration((BoundVariableDeclaration) node);
+            case ExpressionStatement -> evaluateExpressionStatement((BoundExpressionStatement) node);
+            default -> throw new Exception("Unexpected node: " + node.getType());
+        };
+    }
+
+    /**
+     * Recursively evaluates the specified expression syntax node and computes the result.
+     *
+     * @param statement The bound statement node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateBlockStatement(BoundBlockStatement statement) throws Exception {
+        for (BoundStatement boundStatement : statement.getStatements()) {
+            evaluateStatement(boundStatement);
+        }
+    }
+
+    /**
+     * Evaluates the specified expression statement syntax node and computes the result.
+     *
+     * @param statement The bound statement node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateExpressionStatement(BoundExpressionStatement statement) throws Exception {
+        _lastValue = evaluateExpression(statement.getExpression());
+    }
+
+    /**
+     * Evaluates the specified variable declaration syntax node and computes the result.
+     *
+     * @param node The bound expression node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateVariableDeclaration(BoundVariableDeclaration node) throws Exception {
+        Object value = evaluateExpression(node.getInitializer());
+        _variables.put(node.getVariable(), value);
+        _lastValue = value;
     }
 
     /**
@@ -54,8 +105,8 @@ public class Evaluator {
             case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
+            default -> throw new Exception("Unexpected node: " + node.getType());
         };
-
     }
 
     /**

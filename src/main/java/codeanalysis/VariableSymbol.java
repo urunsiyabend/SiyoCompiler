@@ -10,6 +10,7 @@ package codeanalysis;
  */
 public class VariableSymbol {
     private final String _name;
+    private final boolean _isReadOnly;
     private final Class<?> _type;
 
     /**
@@ -18,8 +19,9 @@ public class VariableSymbol {
      * @param name The name of variable
      * @param type The type of variable
      */
-    public VariableSymbol(String name, Class<?> type) {
+    public VariableSymbol(String name, boolean isReadOnly, Class<?> type) {
         _name = name;
+        _isReadOnly = isReadOnly;
         _type = type;
     }
 
@@ -30,6 +32,15 @@ public class VariableSymbol {
      */
     public String getName() {
         return _name;
+    }
+
+    /**
+     * Retrieves whether the variable is read-only or not.
+     *
+     * @return Whether the variable is read-only or not.
+     */
+    public boolean isReadOnly() {
+        return _isReadOnly;
     }
 
     /**

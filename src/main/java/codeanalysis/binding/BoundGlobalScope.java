@@ -16,7 +16,7 @@ public class BoundGlobalScope {
     private final BoundGlobalScope _previous;
     private final DiagnosticBox _diagnostics;
     private final Iterable<VariableSymbol> _variableSymbols;
-    private final BoundExpression _boundExpression;
+    private final BoundStatement _boundStatement;
 
     /**
      * Initializes a new instance of the BoundGlobalScope class with the specified previous bound global scope, diagnostic box, variable symbols and bound expression.
@@ -26,11 +26,11 @@ public class BoundGlobalScope {
      * @param variableSymbols The variable symbols.
      * @param boundExpression The bound expression.
      */
-    public BoundGlobalScope(BoundGlobalScope previous, DiagnosticBox diagnostics, Iterable<VariableSymbol> variableSymbols, BoundExpression boundExpression) {
+    public BoundGlobalScope(BoundGlobalScope previous, DiagnosticBox diagnostics, Iterable<VariableSymbol> variableSymbols, BoundStatement statement) {
         _previous = previous;
         _diagnostics = diagnostics;
         _variableSymbols = variableSymbols;
-        _boundExpression = boundExpression;
+        _boundStatement = statement;
     }
 
     /**
@@ -52,12 +52,12 @@ public class BoundGlobalScope {
     }
 
     /**
-     * Gets the bound expression.
+     * Gets the bound statement.
      *
-     * @return The bound expression of the bound global scope.
+     * @return The bound statement of the bound global scope.
      */
-    public BoundExpression getBoundExpression() {
-        return _boundExpression;
+    public BoundStatement getBoundStatement() {
+        return _boundStatement;
     }
 
     /**

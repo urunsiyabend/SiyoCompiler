@@ -13,7 +13,7 @@ import java.util.NoSuchElementException;
  */
 public class CompilationUnitSyntax extends SyntaxNode {
     private final SyntaxToken _eofToken;
-    private final ExpressionSyntax _expression;
+    private final StatementSyntax _statementSyntax;
 
     /**
      * Creates a new instance of the CompilationUnitSyntax class with the specified expression syntax and end-of-file token.
@@ -21,9 +21,9 @@ public class CompilationUnitSyntax extends SyntaxNode {
      * @param expression The expression syntax.
      * @param eofToken   The end-of-file token.
      */
-    public CompilationUnitSyntax(ExpressionSyntax expression, SyntaxToken eofToken) {
+    public CompilationUnitSyntax(StatementSyntax statement, SyntaxToken eofToken) {
         _eofToken = eofToken;
-        _expression = expression;
+        _statementSyntax = statement;
     }
 
     /**
@@ -31,8 +31,8 @@ public class CompilationUnitSyntax extends SyntaxNode {
      *
      * @return The end-of-file token.
      */
-    public ExpressionSyntax getExpression() {
-        return _expression;
+    public StatementSyntax getStatement() {
+        return _statementSyntax;
     }
 
     /**
@@ -87,7 +87,7 @@ public class CompilationUnitSyntax extends SyntaxNode {
             switch (index) {
                 case 0 -> {
                     index++;
-                    return _expression;
+                    return _statementSyntax;
                 }
                 case 1 -> {
                     index++;

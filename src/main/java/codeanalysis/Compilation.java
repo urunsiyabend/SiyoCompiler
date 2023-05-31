@@ -93,7 +93,7 @@ public class Compilation {
             return new EvaluationResult(diagnostics, null);
         }
 
-        Evaluator evaluator = new Evaluator(getGlobalScope().getBoundExpression(), variables);
+        Evaluator evaluator = new Evaluator(getGlobalScope().getBoundStatement(), variables);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
     }

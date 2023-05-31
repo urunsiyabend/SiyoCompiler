@@ -3,6 +3,7 @@ package codeanalysis.syntax;
 import codeanalysis.DiagnosticBox;
 import codeanalysis.text.SourceText;
 
+import java.sql.Statement;
 import java.util.ArrayList;
 
 /**
@@ -115,9 +116,45 @@ public class Parser {
      * @return The syntax tree representing the parsed input.
      */
     public CompilationUnitSyntax parseCompilationUnit() {
-        ExpressionSyntax expression = parseExpression();
+        StatementSyntax statement = parseStatement();
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
-        return new CompilationUnitSyntax(expression, eofToken);
+        return new CompilationUnitSyntax(statement, eofToken);
+    }
+
+    private StatementSyntax parseStatement() {
+        return switch (current().getType()) {
+            case OpenBraceToken -> parseBlockStatement();
+            case ImmutableKeyword, MutableKeyword -> parseVariableDeclaration();
+            default -> parseExpressionStatement();
+        };
+    }
+
+    private BlockStatementSyntax parseBlockStatement() {
+        ArrayList<StatementSyntax> statements = new ArrayList<>();
+
+        SyntaxToken openBraceToken = match(SyntaxType.OpenBraceToken);
+
+        while (current().type != SyntaxType.EOFToken && current().type != SyntaxType.CloseBraceToken) {
+            StatementSyntax statement = parseStatement();
+            statements.add(statement);
+        }
+
+        SyntaxToken closeBraceToken = match(SyntaxType.CloseBraceToken);
+
+        return new BlockStatementSyntax(openBraceToken, statements, closeBraceToken);
+    }
+
+    private ExpressionStatementSyntax parseExpressionStatement() {
+        return new ExpressionStatementSyntax(parseExpression());
+    }
+
+    private VariableDeclarationSyntax parseVariableDeclaration() {
+        SyntaxType expectedKeyword = current().getType() == SyntaxType.ImmutableKeyword ? SyntaxType.ImmutableKeyword : SyntaxType.MutableKeyword;
+        SyntaxToken keyword = match(expectedKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken equals = match(SyntaxType.EqualsToken);
+        ExpressionSyntax initializer = parseExpression();
+        return new VariableDeclarationSyntax(keyword, identifier, equals, initializer);
     }
 
     /**

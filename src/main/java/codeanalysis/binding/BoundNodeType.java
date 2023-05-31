@@ -14,4 +14,7 @@ public enum BoundNodeType {
     VariableExpression,
     UnaryExpression,
     BinaryExpression,
+    BlockStatement,
+    ExpressionStatement,
+    VariableDeclaration,
 }

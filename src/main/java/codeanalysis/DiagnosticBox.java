@@ -159,4 +159,15 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Cannot convert type <%s> to <%s>", fromType, toType);
         report(span, message);
     }
+
+    /**
+     * Reports a variable already declared diagnostic with the specified span and name.
+     *
+     * @param span The text span where the variable is already declared.
+     * @param name The name of the variable.
+     */
+    public void reportCannotAssign(TextSpan span, String name) {
+        String message = String.format("Variable '%s' is read-only and cannot be assigned", name);
+        report(span, message);
+    }
 }

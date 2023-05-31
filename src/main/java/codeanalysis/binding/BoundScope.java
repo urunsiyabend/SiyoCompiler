@@ -33,12 +33,13 @@ public class BoundScope {
      *
      * @param variableSymbol The variable to be declared.
      */
-    public void declare(VariableSymbol variableSymbol) {
+    public boolean tryDeclare(VariableSymbol variableSymbol) {
         if (_variables.containsKey(variableSymbol.getName())) {
-            return;
+            return false;
         }
 
         _variables.put(variableSymbol.getName(), variableSymbol);
+        return true;
     }
 
     /**
@@ -83,5 +84,14 @@ public class BoundScope {
      */
     public Iterable<VariableSymbol> getDeclaredVariables() {
         return _variables.values();
+    }
+
+    /**
+     * Gets the parent scope of the scope.
+     *
+     * @return The parent scope of the scope.
+     */
+    public BoundScope getParent() {
+        return _parent;
     }
 }

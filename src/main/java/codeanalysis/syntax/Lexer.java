@@ -15,7 +15,6 @@ import codeanalysis.text.TextSpan;
 public class Lexer {
     private final SourceText _text;
     DiagnosticBox _diagnostics = new DiagnosticBox();
-
     private int _position;
     private int _start;
     private SyntaxType _type;
@@ -119,6 +118,14 @@ public class Lexer {
             case ')' -> {
                 next();
                 _type = SyntaxType.CloseParenthesisToken;
+            }
+            case '{' -> {
+                next();
+                _type = SyntaxType.OpenBraceToken;
+            }
+            case '}' -> {
+                next();
+                _type = SyntaxType.CloseBraceToken;
             }
             case '&' -> {
                 next();

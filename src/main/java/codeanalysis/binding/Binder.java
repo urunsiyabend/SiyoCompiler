@@ -4,6 +4,7 @@ import codeanalysis.DiagnosticBox;
 import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
 
+import java.util.ArrayList;
 import java.util.Stack;
 
 /**
@@ -16,7 +17,7 @@ import java.util.Stack;
  */
 public class Binder {
     DiagnosticBox _diagnostics = new DiagnosticBox();
-    private final BoundScope _scope;
+    private BoundScope _scope;
 
     /**
      * Initializes a new instance of the Binder class with the specified variables.
@@ -30,7 +31,7 @@ public class Binder {
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
         var parentScope = createParentScopes(previous);
         Binder binder = new Binder(parentScope);
-        BoundExpression expression = binder.bindExpression(syntax.getExpression());
+        BoundStatement expression = binder.bindStatement(syntax.getStatement());
         Iterable<VariableSymbol> variables = binder._scope.getDeclaredVariables();
         DiagnosticBox diagnostics = binder._diagnostics;
         return new BoundGlobalScope(previous, diagnostics, variables, expression);
@@ -48,11 +49,75 @@ public class Binder {
             previous = scopeStack.pop();
             BoundScope scope = new BoundScope(parent);
             for (VariableSymbol variable : previous.getVariableSymbols()) {
-                scope.declare(variable);
+                scope.tryDeclare(variable);
             }
             parent = scope;
         }
         return parent;
+    }
+
+    /**
+     * Binds the given expression syntax and returns the corresponding bound statement.
+     *
+     * @param syntax The statement syntax to bind.
+     * @return The bound statement.
+     */
+    private BoundStatement bindStatement(StatementSyntax syntax) {
+        return switch (syntax.getType()) {
+            case BlockStatement -> bindBlockStatement((BlockStatementSyntax)syntax);
+            case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
+            case VariableDeclaration -> bindVariableDeclaration((VariableDeclarationSyntax)syntax);
+            default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
+        };
+    }
+
+    /**
+     * Binds the block statement syntax and returns the corresponding bound block statement.
+     *
+     * @param syntax The block statement syntax to bind.
+     * @return The bound block statement.
+     */
+    private BoundStatement bindBlockStatement(BlockStatementSyntax syntax) {
+        ArrayList<BoundStatement> statements = new ArrayList<>();
+        _scope = new BoundScope(_scope);
+
+        for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            BoundStatement boundStatement = bindStatement(statementSyntax);
+            statements.add(boundStatement);
+        }
+
+        _scope = _scope.getParent();
+        return new BoundBlockStatement(statements);
+    }
+
+    /**
+     * Binds the expression statement syntax and returns the corresponding bound expression statement.
+     *
+     * @param syntax The expression statement syntax to bind.
+     * @return The bound expression statement.
+     */
+    private BoundStatement bindExpressionStatement(ExpressionStatementSyntax syntax) {
+        BoundExpression expression = bindExpression(syntax.getExpression());
+        return new BoundExpressionStatement(expression);
+    }
+
+    /**
+     * Binds the variable declaration syntax and returns the corresponding bound variable declaration.
+     *
+     * @param syntax The variable declaration syntax to bind.
+     * @return The bound variable declaration.
+     */
+    private BoundStatement bindVariableDeclaration(VariableDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        var isReadOnly = syntax.getKeyword().getType() == SyntaxType.ImmutableKeyword;
+        BoundExpression initializer = bindExpression(syntax.getInitializer());
+        VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, initializer.getClassType());
+
+        if (!_scope.tryDeclare(variableSymbol)) {
+            _diagnostics.reportVariableAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        }
+
+        return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
     /**
@@ -205,11 +270,16 @@ public class Binder {
         VariableSymbol variable;
 
         if (!_scope.tryLookup(name)) {
-            variable = new VariableSymbol(name, boundExpression.getClassType());
-            _scope.declare(variable);
+            _diagnostics.reportUndefinedName(syntax.getIdentifierToken().getSpan(), name);
+            return boundExpression;
         }
         else {
             variable = _scope.lookupVariable(name);
+        }
+
+        if (variable.isReadOnly()) {
+            _diagnostics.reportCannotAssign(syntax.getEqualsToken().getSpan(), name);
+            return boundExpression;
         }
 
         if (boundExpression.getClassType() != variable.getType()) {

@@ -22,6 +22,8 @@ public class SyntaxRules {
         return switch (text) {
             case "true" -> SyntaxType.TrueKeyword;
             case "false" -> SyntaxType.FalseKeyword;
+            case "imut" -> SyntaxType.ImmutableKeyword;
+            case "mut" -> SyntaxType.MutableKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -47,8 +49,12 @@ public class SyntaxRules {
             case BangEqualsToken -> "!=";
             case OpenParenthesisToken -> "(";
             case CloseParenthesisToken -> ")";
+            case OpenBraceToken -> "{";
+            case CloseBraceToken -> "}";
             case FalseKeyword -> "false";
             case TrueKeyword -> "true";
+            case ImmutableKeyword -> "imut";
+            case MutableKeyword -> "mut";
             default -> null;
         };
     }

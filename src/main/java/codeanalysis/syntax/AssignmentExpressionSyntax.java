@@ -69,6 +69,19 @@ public class AssignmentExpressionSyntax extends ExpressionSyntax {
         return _identifierToken;
     }
 
+    /**
+     * Retrieves the equals token.
+     *
+     * @return The equals token.
+     */
+    public SyntaxToken getEqualsToken() {
+        return _equalsToken;
+    }
+
+    /**
+     * The ChildrenIterator class implements an iterator over the child nodes of the syntax node.
+     * It is used to iterate over the identifier token, equals token, and expression syntax.
+     */
     private class ChildrenIterator implements Iterator<SyntaxNode> {
         private int index;
 
