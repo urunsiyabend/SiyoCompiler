@@ -206,6 +206,10 @@ class EvaluatorTest {
                 {"{ imut b = 0 {imut b = true} b }", 0},
                 {"{ imut b = 0 {imut b = true b} }", true},
                 {"{ {mut x = 1} mut x = 10 x}", 10},
+                {"{ mut x = 1 if x == 1 x = 2 x}", 2},
+                {"{ mut x = 1 if x == 0 x = 2 x}", 1},
+                {"{ mut x = 1 if x == 1 x = 2 else x = 3 x}", 2},
+                {"{ mut x = 1 if x == 0 x = 2 else x = 3 x}", 3},
         };
     }
 

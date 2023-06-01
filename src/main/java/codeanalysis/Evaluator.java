@@ -53,6 +53,7 @@ public class Evaluator {
             case BlockStatement -> evaluateBlockStatement((BoundBlockStatement) node);
             case VariableDeclaration -> evaluateVariableDeclaration((BoundVariableDeclaration) node);
             case ExpressionStatement -> evaluateExpressionStatement((BoundExpressionStatement) node);
+            case IfStatement -> evaluateIfStatement((BoundIfStatement) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
         };
     }
@@ -89,6 +90,24 @@ public class Evaluator {
         Object value = evaluateExpression(node.getInitializer());
         _variables.put(node.getVariable(), value);
         _lastValue = value;
+    }
+
+    /**
+     * Evaluates the specified if statement syntax node and computes the result.
+     * If the condition is true, the then statement is evaluated.
+     * Otherwise, if the else statement is not null, it is evaluated.
+     * Otherwise, nothing happens.
+     *
+     * @param node The bound expression node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateIfStatement(BoundIfStatement node) throws Exception {
+        var condition = (boolean) evaluateExpression(node.getCondition());
+        if (condition) {
+            evaluateStatement(node.getThenStatement());
+        } else if (node.getElseStatement() != null) {
+            evaluateStatement(node.getElseStatement());
+        }
     }
 
     /**

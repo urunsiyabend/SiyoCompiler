@@ -67,6 +67,7 @@ public class Binder {
             case BlockStatement -> bindBlockStatement((BlockStatementSyntax)syntax);
             case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
             case VariableDeclaration -> bindVariableDeclaration((VariableDeclarationSyntax)syntax);
+            case IfStatement -> bindIfStatement((IfStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -118,6 +119,27 @@ public class Binder {
         }
 
         return new BoundVariableDeclaration(variableSymbol, initializer);
+    }
+
+    /**
+     * Binds the if statement syntax and returns the corresponding bound if statement.
+     *
+     * @param syntax The if statement syntax to bind.
+     * @return The bound if statement.
+     */
+    private BoundStatement bindIfStatement(IfStatementSyntax syntax) {
+        BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
+        BoundStatement thenStatement = bindStatement(syntax.getThenStatement());
+        BoundStatement elseStatement = syntax.getElseClause() == null ? null : bindStatement(syntax.getElseClause().getElseStatement());
+        return new BoundIfStatement(condition, thenStatement, elseStatement);
+    }
+
+    public BoundExpression bindExpression(ExpressionSyntax syntax, Class<?> expectedType) {
+        BoundExpression boundExpression = bindExpression(syntax);
+        if (boundExpression.getClassType() != expectedType) {
+            _diagnostics.reportCannotConvert(syntax.getSpan(), boundExpression.getClassType(), expectedType);
+        }
+        return boundExpression;
     }
 
     /**

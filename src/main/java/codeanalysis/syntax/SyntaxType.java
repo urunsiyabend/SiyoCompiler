@@ -114,8 +114,20 @@ public enum SyntaxType {
     LessOrEqualsToken,
 
     /* Represents a greater (>) keyword. */
-    GreaterToken
+    GreaterToken,
 
-    /* Represents a greater or equals (>=) keyword. */,
+    /* Represents a greater or equals (>=) keyword. */
     GreaterOrEqualsToken,
+
+    /* Represents an if statement */
+    IfStatement,
+
+    /* Represents an else clause */
+    ElseClause,
+
+    /* Represents an if (if) keyword */
+    IfKeyword,
+
+    /* Represents an else (else) keyword */
+    ElseKeyword,
 }

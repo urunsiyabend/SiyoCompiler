@@ -3,7 +3,6 @@ package codeanalysis.syntax;
 import codeanalysis.DiagnosticBox;
 import codeanalysis.text.SourceText;
 
-import java.sql.Statement;
 import java.util.ArrayList;
 
 /**
@@ -121,14 +120,28 @@ public class Parser {
         return new CompilationUnitSyntax(statement, eofToken);
     }
 
+    /**
+     * Parses a statement.
+     * A statement can be either a block statement, variable declaration, if statement or an expression statement.
+     *
+     * @return The parsed statement syntax.
+     */
     private StatementSyntax parseStatement() {
         return switch (current().getType()) {
             case OpenBraceToken -> parseBlockStatement();
             case ImmutableKeyword, MutableKeyword -> parseVariableDeclaration();
+            case IfKeyword -> parseIfStatement();
             default -> parseExpressionStatement();
         };
     }
 
+    /**
+     * Parses a block statement.
+     * A block statement is a sequence of statements enclosed in curly braces.
+     * The block statement is used to group statements together.
+     *
+     * @return The parsed block statement syntax.
+     */
     private BlockStatementSyntax parseBlockStatement() {
         ArrayList<StatementSyntax> statements = new ArrayList<>();
 
@@ -144,10 +157,22 @@ public class Parser {
         return new BlockStatementSyntax(openBraceToken, statements, closeBraceToken);
     }
 
+    /**
+     * Parses an expression statement.
+     * An expression statement is a statement that consists of an expression.
+     *
+     * @return The parsed expression statement syntax.
+     */
     private ExpressionStatementSyntax parseExpressionStatement() {
         return new ExpressionStatementSyntax(parseExpression());
     }
 
+    /**
+     * Parses an expression.
+     * An expression can be either a binary expression, unary expression, literal expression or a parenthesized expression.
+     *
+     * @return The parsed expression syntax.
+     */
     private VariableDeclarationSyntax parseVariableDeclaration() {
         SyntaxType expectedKeyword = current().getType() == SyntaxType.ImmutableKeyword ? SyntaxType.ImmutableKeyword : SyntaxType.MutableKeyword;
         SyntaxToken keyword = match(expectedKeyword);
@@ -158,6 +183,34 @@ public class Parser {
     }
 
     /**
+     * Parses an if statement.
+     * An if statement is a statement that consists of a condition, a then statement and an optional else clause.
+     *
+     * @return The parsed if statement syntax.
+     */
+    private StatementSyntax parseIfStatement() {
+        SyntaxToken keyword = match(SyntaxType.IfKeyword);
+        ExpressionSyntax condition = parseExpression();
+        StatementSyntax thenStatement = parseStatement();
+        ElseClauseSyntax elseClause = parseElseClause();
+        return new IfStatementSyntax(keyword, condition, thenStatement, elseClause);
+    }
+
+    /**
+     * Parses an else clause.
+     * An else clause is a statement that consists of an else keyword and a statement.
+     *
+     * @return The parsed else clause syntax.
+     */
+    private ElseClauseSyntax parseElseClause() {
+        if (current().getType() != SyntaxType.ElseKeyword)
+            return null;
+        SyntaxToken keyword = nextToken();
+        StatementSyntax statement = parseStatement();
+        return new ElseClauseSyntax(keyword, statement);
+    }
+
+    /**
      * Parses the input text and generates an expression syntax.
      *
      * @return The parsed expression syntax.
@@ -165,7 +218,6 @@ public class Parser {
     private ExpressionSyntax parseExpression() {
         return parseAssignmentExpression();
     }
-
 
     /**
      * Dispatches parseBinaryExpression function by default value of parentPriority 0.
@@ -188,7 +240,7 @@ public class Parser {
             ExpressionSyntax right = parseAssignmentExpression();
             return new AssignmentExpressionSyntax(identifierToken, operatorToken, right);
         }
-    return parseBinaryExpression();
+        return parseBinaryExpression();
     }
 
     /**
@@ -201,14 +253,14 @@ public class Parser {
         int unaryOperatorPriority = SyntaxPriorities.getUnaryOperatorPriority(current().getType());
         if (unaryOperatorPriority != 0 && unaryOperatorPriority >= parentPriority) {
             SyntaxToken operator = nextToken();
-            ExpressionSyntax operand = parseBinaryExpression();
+            ExpressionSyntax operand = parseBinaryExpression(unaryOperatorPriority);
             left = new UnaryExpressionSyntax(operator, operand);
         }
         else {
             left = parsePrimary();
         }
 
-        while (true) {
+        while (SyntaxPriorities.getBinaryOperatorPriority(current().getType()) > parentPriority) {
             int priority = SyntaxPriorities.getBinaryOperatorPriority(current().getType());
             if (priority == 0 || priority <= parentPriority)
                 break;

@@ -24,6 +24,8 @@ public class SyntaxRules {
             case "false" -> SyntaxType.FalseKeyword;
             case "imut" -> SyntaxType.ImmutableKeyword;
             case "mut" -> SyntaxType.MutableKeyword;
+            case "if" -> SyntaxType.IfKeyword;
+            case "else" -> SyntaxType.ElseKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -55,6 +57,8 @@ public class SyntaxRules {
             case CloseParenthesisToken -> ")";
             case OpenBraceToken -> "{";
             case CloseBraceToken -> "}";
+            case IfKeyword -> "if";
+            case ElseKeyword -> "else";
             case FalseKeyword -> "false";
             case TrueKeyword -> "true";
             case ImmutableKeyword -> "imut";

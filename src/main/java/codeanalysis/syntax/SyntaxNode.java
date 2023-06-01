@@ -69,7 +69,6 @@ public abstract class SyntaxNode {
         writer.write(marker);
         writer.write(node.getType().toString());
 
-
         if (node instanceof SyntaxToken t && t.getValue() != null) {
             writer.write(" ");
             writer.write(t.getValue().toString());

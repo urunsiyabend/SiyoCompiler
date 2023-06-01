@@ -17,4 +17,5 @@ public enum BoundNodeType {
     BlockStatement,
     ExpressionStatement,
     VariableDeclaration,
+    IfStatement,
 }
