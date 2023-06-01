@@ -46,6 +46,37 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Returns the item at the current position in the collection without advancing the position.
+     *
+     * @return The current diagnostic.
+     */
+    public Diagnostic peek() {
+        if (!hasNext()) {
+            throw new NoSuchElementException();
+        }
+        return _diagnostics.get(_position);
+    }
+
+    /**
+     * Retrieves the diagnostic at the specified index.
+     *
+     * @param index The index of the diagnostic to retrieve.
+     * @return The diagnostic at the specified index.
+     */
+    public Diagnostic get(int index) {
+        return _diagnostics.get(index);
+    }
+
+    /**
+     * Retrieves the size of the diagnostics collection.
+     *
+     * @return The size of the diagnostics collection.
+     */
+    public int size() {
+        return _diagnostics.size();
+    }
+
+    /**
      * Adds all diagnostics from another DiagnosticBox to this DiagnosticBox.
      *
      * @param diagnostics The DiagnosticBox containing additional diagnostics to be added.
@@ -167,7 +198,7 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param name The name of the variable.
      */
     public void reportCannotAssign(TextSpan span, String name) {
-        String message = String.format("Variable '%s' is read-only and cannot be assigned", name);
+        String message = String.format("Name '%s' is read-only and cannot be assigned", name);
         report(span, message);
     }
 }

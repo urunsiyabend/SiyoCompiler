@@ -61,4 +61,28 @@ public class TextSpan {
     public int getEnd() {
         return getStart() + getLength();
     }
+
+    /**
+     * Returns if @code{obj} is equal to this text span.
+     *
+     * @param obj The object to compare.
+     * @return True if the object is equal to this text span, false otherwise.
+     */
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof TextSpan other) {
+            return getStart() == other.getStart() && getLength() == other.getLength();
+        }
+        return false;
+    }
+
+    /**
+     * Returns the string representation of this text span.
+     *
+     * @return The string representation.
+     */
+    @Override
+    public String toString() {
+        return String.format("Start: %d, Length: %d", getStart(), getLength());
+    }
 }
