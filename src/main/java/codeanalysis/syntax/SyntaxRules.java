@@ -43,6 +43,10 @@ public class SyntaxRules {
             case SlashToken -> "/";
             case BangToken -> "!";
             case EqualsToken -> "=";
+            case LessToken -> "<";
+            case LessOrEqualsToken -> "<=";
+            case GreaterToken -> ">";
+            case GreaterOrEqualsToken -> ">=";
             case DoubleAmpersandToken -> "&&";
             case DoublePipeToken -> "||";
             case EqualsEqualsToken -> "==";

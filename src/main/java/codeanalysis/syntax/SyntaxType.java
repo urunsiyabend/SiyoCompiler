@@ -106,4 +106,16 @@ public enum SyntaxType {
 
     /* Represents an "imut" keyword. */
     ImmutableKeyword,
+
+    /* Represents a less (<) keyword. */
+    LessToken,
+
+    /* Represents a less or equals (<=) keyword. */
+    LessOrEqualsToken,
+
+    /* Represents a greater (>) keyword. */
+    GreaterToken
+
+    /* Represents a greater or equals (>=) keyword. */,
+    GreaterOrEqualsToken,
 }

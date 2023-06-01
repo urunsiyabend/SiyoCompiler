@@ -159,6 +159,24 @@ public class Lexer {
                     _type = SyntaxType.BangToken;
                 }
             }
+            case '<' -> {
+                next();
+                if (currentChar() == '=') {
+                    next();
+                    _type = SyntaxType.LessOrEqualsToken;
+                } else {
+                    _type = SyntaxType.LessToken;
+                }
+            }
+            case '>' -> {
+                next();
+                if (currentChar() == '=') {
+                    next();
+                    _type = SyntaxType.GreaterOrEqualsToken;
+                } else {
+                    _type = SyntaxType.GreaterToken;
+                }
+            }
             case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> readNumberToken();
             case ' ', '\t', '\n', '\r' -> readWhitespaceToken();
             default -> {

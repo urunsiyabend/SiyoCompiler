@@ -173,6 +173,18 @@ class LexerTest {
         if (t1Type == SyntaxType.SlashToken && t2Type == SyntaxType.AsteriskToken)
             return true;
 
+        if (t1Type == SyntaxType.LessToken && t2Type == SyntaxType.EqualsToken)
+            return true;
+
+        if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.EqualsToken)
+            return true;
+
+        if (t1Type == SyntaxType.LessToken && t2Type == SyntaxType.EqualsEqualsToken)
+            return true;
+
+        if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.EqualsEqualsToken)
+            return true;
+
         return false;
     }
 
@@ -196,6 +208,10 @@ class LexerTest {
         tokens.add(new Token(SyntaxType.TrueKeyword, "true"));
         tokens.add(new Token(SyntaxType.FalseKeyword, "false"));
         tokens.add(new Token(SyntaxType.BangToken, "!"));
+        tokens.add(new Token(SyntaxType.LessToken, "<"));
+        tokens.add(new Token(SyntaxType.GreaterToken, ">"));
+        tokens.add(new Token(SyntaxType.LessOrEqualsToken, "<="));
+        tokens.add(new Token(SyntaxType.GreaterOrEqualsToken, ">="));
         tokens.add(new Token(SyntaxType.DoubleAmpersandToken, "&&"));
         tokens.add(new Token(SyntaxType.DoublePipeToken, "||"));
         tokens.add(new Token(SyntaxType.EqualsEqualsToken, "=="));

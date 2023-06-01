@@ -16,4 +16,8 @@ public enum BoundBinaryOperatorType {
     LogicalAnd,
     Equals,
     NotEquals,
+    LessThan,
+    LessOrEqualsThan,
+    GreaterThan,
+    GreaterOrEqualsThen,
 }

@@ -24,6 +24,10 @@ public class BoundBinaryOperator {
             new BoundBinaryOperator(SyntaxType.SlashToken, BoundBinaryOperatorType.Division, Integer.class),
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Integer.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessToken, BoundBinaryOperatorType.LessThan, Integer.class, Integer.class),
+            new BoundBinaryOperator(SyntaxType.LessOrEqualsToken, BoundBinaryOperatorType.LessOrEqualsThan, Integer.class, Integer.class),
+            new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, Integer.class, Integer.class),
+            new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, Integer.class, Integer.class),
 
             new BoundBinaryOperator(SyntaxType.DoubleAmpersandToken, BoundBinaryOperatorType.LogicalAnd, Boolean.class),
             new BoundBinaryOperator(SyntaxType.DoublePipeToken, BoundBinaryOperatorType.LogicalOr, Boolean.class),

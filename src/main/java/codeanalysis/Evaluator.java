@@ -177,6 +177,10 @@ public class Evaluator {
             case LogicalOr -> (boolean) left || (boolean) right;
             case Equals -> left.equals(right);
             case NotEquals -> !left.equals(right);
+            case LessThan -> (int) left < (int) right;
+            case LessOrEqualsThan -> (int) left <= (int) right;
+            case GreaterThan -> (int) left > (int) right;
+            case GreaterOrEqualsThen -> (int) left >= (int) right;
             default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
         };
     }

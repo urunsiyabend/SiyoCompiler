@@ -31,7 +31,7 @@ public class SyntaxPriorities {
         return switch (type) {
             case AsteriskToken, SlashToken -> 5;
             case PlusToken, MinusToken -> 4;
-            case EqualsEqualsToken, BangEqualsToken -> 3;
+            case EqualsEqualsToken, BangEqualsToken, LessToken, LessOrEqualsToken, GreaterToken, GreaterOrEqualsToken -> 3;
             case DoubleAmpersandToken-> 2;
             case DoublePipeToken -> 1;
             default -> 0;
