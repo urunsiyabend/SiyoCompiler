@@ -26,6 +26,8 @@ public class SyntaxRules {
             case "mut" -> SyntaxType.MutableKeyword;
             case "if" -> SyntaxType.IfKeyword;
             case "else" -> SyntaxType.ElseKeyword;
+            case "while" -> SyntaxType.WhileKeyword;
+            case "for" -> SyntaxType.ForKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -63,6 +65,8 @@ public class SyntaxRules {
             case TrueKeyword -> "true";
             case ImmutableKeyword -> "imut";
             case MutableKeyword -> "mut";
+            case WhileKeyword -> "while";
+            case ForKeyword -> "for";
             default -> null;
         };
     }

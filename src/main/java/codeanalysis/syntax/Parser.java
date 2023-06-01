@@ -131,6 +131,8 @@ public class Parser {
             case OpenBraceToken -> parseBlockStatement();
             case ImmutableKeyword, MutableKeyword -> parseVariableDeclaration();
             case IfKeyword -> parseIfStatement();
+            case WhileKeyword -> parseWhileStatement();
+            case ForKeyword -> parseForStatement();
             default -> parseExpressionStatement();
         };
     }
@@ -195,6 +197,44 @@ public class Parser {
         ElseClauseSyntax elseClause = parseElseClause();
         return new IfStatementSyntax(keyword, condition, thenStatement, elseClause);
     }
+
+    /**
+     * Parses a while statement.
+     * A while statement is a statement that consists of a condition and a body statement.
+     * The body statement is executed as long as the condition evaluates to true.
+     *
+     * @return The parsed while statement syntax.
+     */
+    private StatementSyntax parseWhileStatement() {
+        SyntaxToken keyword = match(SyntaxType.WhileKeyword);
+        ExpressionSyntax condition = parseExpression();
+        StatementSyntax body = parseStatement();
+        return new WhileStatementSyntax(keyword, condition, body);
+    }
+
+    /**
+     * Parses a for statement.
+     * A for statement consists of an initializer, a condition, an increment expression, and a body statement.
+     * The initializer is executed once at the beginning.
+     * The condition is checked before each iteration, and if false, the loop is terminated.
+     * The increment expression is executed at the end of each iteration.
+     *
+     * @return The parsed for statement syntax.
+     */
+    private StatementSyntax parseForStatement() {
+        SyntaxToken forKeyword = match(SyntaxType.ForKeyword);
+
+        VariableDeclarationSyntax initializer = parseVariableDeclaration();
+
+        ExpressionSyntax condition = parseExpression();
+
+        ExpressionSyntax iterator = parseExpression();
+
+        StatementSyntax body = parseStatement();
+
+        return new ForStatementSyntax(forKeyword, initializer, condition, iterator, body);
+    }
+
 
     /**
      * Parses an else clause.

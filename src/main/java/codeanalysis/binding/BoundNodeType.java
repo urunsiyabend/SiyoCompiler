@@ -18,4 +18,6 @@ public enum BoundNodeType {
     ExpressionStatement,
     VariableDeclaration,
     IfStatement,
+    WhileStatement,
+    ForStatement,
 }

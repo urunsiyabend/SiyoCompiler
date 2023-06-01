@@ -4,73 +4,61 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 /**
- * Represents a variable declaration in the syntax tree.
- * This class defines a variable declaration, which consists of a keyword token, an identifier token,
- * an equals token, and an expression syntax representing the assigned value.
- * It is used to represent statements like "mut x = 1;" or "imut y = false".
+ * Represents a while statement in the syntax tree.
+ * This class defines a while statement, which consists of a keyword token, a condition expression,
+ * and a body statement.
+ * It is used to represent statements like "while (true) { }".
  * <p>
  * This class inherits from the StatementSyntax class and provides additional properties and methods
- * specific to variable declarations.
+ * specific to while statements.
  *
  * @see <a href="https://github.com/urunsiyabend">GitHub Profile</a>
  * @author Siyabend Urun
  * @version 1.0
  */
-public class VariableDeclarationSyntax extends StatementSyntax {
+public class WhileStatementSyntax extends StatementSyntax {
     private final SyntaxToken _keyword;
-    private final SyntaxToken _identifier;
-    private final SyntaxToken _equalsToken;
-    private final ExpressionSyntax _initializer;
+    private final ExpressionSyntax _condition;
+    private final StatementSyntax _body;
 
     /**
-     * Initializes a new instance of the VariableDeclarationSyntax class.
+     * Initializes a new instance of the WhileStatementSyntax class.
      *
-     * @param keyword     The keyword token.
-     * @param identifier  The identifier token.
-     * @param equalsToken The equals token.
-     * @param initializer The initializer expression.
+     * @param keyword   The keyword token.
+     * @param condition The condition expression.
+     * @param body      The body statement.
      */
-    public VariableDeclarationSyntax(SyntaxToken keyword, SyntaxToken identifier, SyntaxToken equalsToken, ExpressionSyntax initializer) {
+    public WhileStatementSyntax(SyntaxToken keyword, ExpressionSyntax condition, StatementSyntax body) {
         _keyword = keyword;
-        _identifier = identifier;
-        _equalsToken = equalsToken;
-        _initializer = initializer;
+        _condition = condition;
+        _body = body;
     }
 
     /**
      * Gets the keyword token.
      *
-     * @return The keyword token of the variable declaration.
+     * @return The keyword token of the while statement.
      */
     public SyntaxToken getKeyword() {
         return _keyword;
     }
 
     /**
-     * Gets the identifier token.
+     * Gets the condition expression.
      *
-     * @return The identifier token of the variable declaration.
+     * @return The condition expression of the while statement.
      */
-    public SyntaxToken getIdentifier() {
-        return _identifier;
+    public ExpressionSyntax getCondition() {
+        return _condition;
     }
 
     /**
-     * Gets the equals token.
+     * Gets the body statement.
      *
-     * @return The equals token of the variable declaration.
+     * @return The body statement of the while statement.
      */
-    public SyntaxToken getEqualsToken() {
-        return _equalsToken;
-    }
-
-    /**
-     * Gets the initializer expression.
-     *
-     * @return The initializer expression of the variable declaration.
-     */
-    public ExpressionSyntax getInitializer() {
-        return _initializer;
+    public StatementSyntax getBody() {
+        return _body;
     }
 
     /**
@@ -80,7 +68,7 @@ public class VariableDeclarationSyntax extends StatementSyntax {
      */
     @Override
     public SyntaxType getType() {
-        return SyntaxType.VariableDeclaration;
+        return SyntaxType.WhileStatement;
     }
 
     /**
@@ -111,7 +99,7 @@ public class VariableDeclarationSyntax extends StatementSyntax {
          */
         @Override
         public boolean hasNext() {
-            return index < 4;
+            return index < 3;
         }
 
         /**
@@ -133,15 +121,11 @@ public class VariableDeclarationSyntax extends StatementSyntax {
                 }
                 case 1 -> {
                     index++;
-                    return _identifier;
+                    return _condition;
                 }
                 case 2 -> {
                     index++;
-                    return _equalsToken;
-                }
-                case 3 -> {
-                    index++;
-                    return _initializer;
+                    return _body;
                 }
                 default -> throw new NoSuchElementException();
             }

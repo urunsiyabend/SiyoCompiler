@@ -210,6 +210,11 @@ class EvaluatorTest {
                 {"{ mut x = 1 if x == 0 x = 2 x}", 1},
                 {"{ mut x = 1 if x == 1 x = 2 else x = 3 x}", 2},
                 {"{ mut x = 1 if x == 0 x = 2 else x = 3 x}", 3},
+                {"{ mut x = 0 while x < 10 {x = x + 1} x}", 10},
+                {"{ mut x = 0 mut lowerThanTen = true while lowerThanTen {lowerThanTen = x < 10 x = x + 1} x}", 11},
+                {"{ for mut x = 0 x < 10 x = x + 1 {x}}", 9},
+                {"{ for mut x = 10 x > 0 x = x - 1 {x}}", 1},
+                {"{ for mut x = 2 x < 100 x = x * x {x}}", 16},
         };
     }
 
@@ -356,6 +361,22 @@ class EvaluatorTest {
                 {
                     mut z = false
                     z = [10]
+                }
+                """, "Cannot convert type <class java.lang.Integer> to <class java.lang.Boolean>"},
+                {"""
+                {
+                    if [5] { true }
+                }
+                """, "Cannot convert type <class java.lang.Integer> to <class java.lang.Boolean>"},
+                {"""
+                {
+                    imut x = 10
+                    if [x] { true }
+                }
+                """, "Cannot convert type <class java.lang.Integer> to <class java.lang.Boolean>"},
+                {"""
+                {
+                    for mut x = 0 [x] x = x + 1 { x }
                 }
                 """, "Cannot convert type <class java.lang.Integer> to <class java.lang.Boolean>"},
         };

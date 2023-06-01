@@ -68,6 +68,8 @@ public class Binder {
             case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
             case VariableDeclaration -> bindVariableDeclaration((VariableDeclarationSyntax)syntax);
             case IfStatement -> bindIfStatement((IfStatementSyntax)syntax);
+            case WhileStatement -> bindWhileStatement((WhileStatementSyntax)syntax);
+            case ForStatement -> bindForStatement((ForStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -132,6 +134,33 @@ public class Binder {
         BoundStatement thenStatement = bindStatement(syntax.getThenStatement());
         BoundStatement elseStatement = syntax.getElseClause() == null ? null : bindStatement(syntax.getElseClause().getElseStatement());
         return new BoundIfStatement(condition, thenStatement, elseStatement);
+    }
+
+    /**
+     * Binds the while statement syntax and returns the corresponding bound while statement.
+     *
+     * @param syntax The while statement syntax to bind.
+     * @return The bound while statement.
+     */
+    private BoundStatement bindWhileStatement(WhileStatementSyntax syntax) {
+        BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
+        BoundStatement body = bindStatement(syntax.getBody());
+        return new BoundWhileStatement(condition, body);
+    }
+
+    /**
+     * Binds the for statement syntax and returns the corresponding bound for statement.
+     *
+     * @param syntax The for statement syntax to bind.
+     * @return The bound for statement.
+     */
+    private BoundStatement bindForStatement(ForStatementSyntax syntax) {
+        BoundStatement initializer = bindVariableDeclaration(syntax.getInitializer());
+        BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
+        BoundExpression iterator = bindExpression(syntax.getIterator());
+        BoundStatement body = bindStatement(syntax.getBody());
+
+        return new BoundForStatement(initializer, condition, iterator, body);
     }
 
     public BoundExpression bindExpression(ExpressionSyntax syntax, Class<?> expectedType) {

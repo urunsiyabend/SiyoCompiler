@@ -54,6 +54,8 @@ public class Evaluator {
             case VariableDeclaration -> evaluateVariableDeclaration((BoundVariableDeclaration) node);
             case ExpressionStatement -> evaluateExpressionStatement((BoundExpressionStatement) node);
             case IfStatement -> evaluateIfStatement((BoundIfStatement) node);
+            case WhileStatement -> evaluateWhileStatement((BoundWhileStatement) node);
+            case ForStatement -> evaluateForStatement((BoundForStatement) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
         };
     }
@@ -107,6 +109,40 @@ public class Evaluator {
             evaluateStatement(node.getThenStatement());
         } else if (node.getElseStatement() != null) {
             evaluateStatement(node.getElseStatement());
+        }
+    }
+
+    /**
+     * Evaluates the specified while statement syntax node and computes the result.
+     * If the condition is true the body statement is evaluated and the condition is checked again.
+     * This continues until the condition becomes false.
+     *
+     * @param node The bound expression node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateWhileStatement(BoundWhileStatement node) throws Exception {
+        while ((boolean) evaluateExpression(node.getCondition())) {
+            evaluateStatement(node.getBody());
+        }
+    }
+
+    /**
+     * Evaluates the specified for statement syntax node and computes the result.
+     * The initializer is evaluated first, then the condition is checked.
+     * If the condition is true the body statement is evaluated and the iterator is evaluated.
+     * This continues until the condition becomes false.
+     *
+     * @param node The bound expression node to evaluate.
+     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
+     */
+    private void evaluateForStatement(BoundForStatement node) throws Exception {
+        evaluateStatement(node.getInitializer());
+        Object conditionValue = evaluateExpression(node.getCondition());
+
+        while ((boolean) conditionValue) {
+            evaluateStatement(node.getBody());
+            evaluateExpression(node.getIterator());
+            conditionValue = evaluateExpression(node.getCondition());
         }
     }
 

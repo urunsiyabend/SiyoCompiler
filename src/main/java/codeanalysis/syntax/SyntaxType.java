@@ -130,4 +130,16 @@ public enum SyntaxType {
 
     /* Represents an else (else) keyword */
     ElseKeyword,
+
+    /* Represents a while (while) keyword */
+    WhileKeyword,
+
+    /* Represents a while statement */
+    WhileStatement,
+
+    /* Represents a for (for) keyword */
+    ForKeyword,
+
+    /* Represents a for statement */
+    ForStatement,
 }
