@@ -15,7 +15,7 @@ import java.util.NoSuchElementException;
  */
 public class ForStatementSyntax extends StatementSyntax {
     private final SyntaxToken _forKeyword;
-    private final VariableDeclarationSyntax _initializer;
+    private final StatementSyntax _initializer;
     private final ExpressionSyntax _condition;
     private final ExpressionSyntax _iterator;
     private final StatementSyntax _body;
@@ -31,7 +31,7 @@ public class ForStatementSyntax extends StatementSyntax {
      * @param iterator The iterator.
      * @param body The body.
      */
-    public ForStatementSyntax(SyntaxToken forKeyword, VariableDeclarationSyntax initializer, ExpressionSyntax condition, ExpressionSyntax iterator, StatementSyntax body) {
+    public ForStatementSyntax(SyntaxToken forKeyword, StatementSyntax initializer, ExpressionSyntax condition, ExpressionSyntax iterator, StatementSyntax body) {
         _forKeyword = forKeyword;
         _initializer = initializer;
         _condition = condition;
@@ -53,7 +53,7 @@ public class ForStatementSyntax extends StatementSyntax {
      *
      * @return The initializer.
      */
-    public VariableDeclarationSyntax getInitializer() {
+    public StatementSyntax getInitializer() {
         return _initializer;
     }
 

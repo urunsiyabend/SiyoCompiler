@@ -155,7 +155,7 @@ public class Binder {
      * @return The bound for statement.
      */
     private BoundStatement bindForStatement(ForStatementSyntax syntax) {
-        BoundStatement initializer = bindVariableDeclaration(syntax.getInitializer());
+        BoundStatement initializer = bindStatement(syntax.getInitializer());
         BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
         BoundExpression iterator = bindExpression(syntax.getIterator());
         BoundStatement body = bindStatement(syntax.getBody());

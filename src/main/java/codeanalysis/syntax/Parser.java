@@ -224,7 +224,7 @@ public class Parser {
     private StatementSyntax parseForStatement() {
         SyntaxToken forKeyword = match(SyntaxType.ForKeyword);
 
-        VariableDeclarationSyntax initializer = parseVariableDeclaration();
+        StatementSyntax initializer = parseStatement();
 
         ExpressionSyntax condition = parseExpression();
 
