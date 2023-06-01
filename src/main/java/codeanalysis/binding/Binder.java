@@ -298,6 +298,10 @@ public class Binder {
      */
     private BoundExpression bindNameExpression(NameExpressionSyntax syntax) {
         String name = syntax.getIdentifierToken().getData();
+        if (name == null || name.equals("")) {
+            return new BoundLiteralExpression(0);
+        }
+
         boolean hasVariable = _scope.tryLookup(name);
 
         if (!hasVariable) {

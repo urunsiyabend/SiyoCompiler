@@ -150,8 +150,14 @@ public class Parser {
         SyntaxToken openBraceToken = match(SyntaxType.OpenBraceToken);
 
         while (current().type != SyntaxType.EOFToken && current().type != SyntaxType.CloseBraceToken) {
+            SyntaxToken startToken = current();
+
             StatementSyntax statement = parseStatement();
             statements.add(statement);
+
+            if (current() == startToken) {
+                nextToken();
+            }
         }
 
         SyntaxToken closeBraceToken = match(SyntaxType.CloseBraceToken);

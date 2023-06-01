@@ -2,6 +2,7 @@ package codeanalysis;
 
 import codeanalysis.syntax.SyntaxTree;
 import codeanalysis.text.TextSpan;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -156,6 +157,32 @@ class EvaluatorTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Test if the evaluator correctly reports diagnostics for empty string initializers.
+     */
+    @Test
+    public void evaluatorNameExpressionNoErrorForInsertedToken() {
+        String text = "[]";
+        var diagnostics = "ERROR: Unexpected token: <EOFToken>, expected <IdentifierToken>";
+        assertHasDiagnostics(text, diagnostics);
+    }
+
+    /**
+     * Test if the evaluator correctly reports when a block statement is missing a closing brace.
+     */
+    @Test
+    public void evaluatorBlockStatementNoInfiniteLoop() {
+        String text = """
+        {
+        [)][]
+        """;
+        var diagnostics = """
+                ERROR: Unexpected token: <CloseParenthesisToken>, expected <IdentifierToken>
+                ERROR: Unexpected token: <EOFToken>, expected <CloseBraceToken>
+                """;
+        assertHasDiagnostics(text, diagnostics);
     }
 
     /**
