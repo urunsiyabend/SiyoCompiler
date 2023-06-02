@@ -273,9 +273,9 @@ class EvaluatorTest {
                 {"{ mut x = 1 if x == 0 x = 2 else x = 3 x}", 3},
                 {"{ mut x = 0 while x < 10 {x = x + 1} x}", 10},
                 {"{ mut x = 0 mut lowerThanTen = true while lowerThanTen {lowerThanTen = x < 10 x = x + 1} x}", 11},
-                {"{ for mut x = 0 x < 10 x = x + 1 {x}}", 9},
-                {"{ for mut x = 10 x > 0 x = x - 1 {x}}", 1},
-                {"{ for mut x = 2 x < 100 x = x * x {x}}", 16},
+                {"{ mut result = 0 for mut x = 0 x < 10 x = x + 1 {result = x} result}", 9},
+                {"{ mut result = 0 for mut x = 10 x > 0 x = x - 1 {result = x} result}", 1},
+                {"{ mut result = 0 for mut x = 2 x < 100 x = x * x {result = x} result}", 16},
         };
     }
 
