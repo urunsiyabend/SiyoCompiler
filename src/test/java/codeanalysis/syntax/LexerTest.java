@@ -185,6 +185,24 @@ class LexerTest {
         if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.EqualsEqualsToken)
             return true;
 
+        if (t1Type == SyntaxType.AmpersandToken && t2Type == SyntaxType.AmpersandToken)
+            return true;
+
+        if (t1Type == SyntaxType.PipeToken && t2Type == SyntaxType.PipeToken)
+            return true;
+
+        if (t1Type == SyntaxType.LessToken && t2Type == SyntaxType.LessToken)
+            return true;
+
+        if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.GreaterToken)
+            return true;
+
+        if (t1Type == SyntaxType.LessToken && t2Type == SyntaxType.LessOrEqualsToken)
+            return true;
+
+        if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.GreaterOrEqualsToken)
+            return true;
+
         return false;
     }
 

@@ -45,7 +45,14 @@ public class SyntaxRules {
             case MinusToken -> "-";
             case AsteriskToken -> "*";
             case SlashToken -> "/";
+            case PercentToken -> "%";
             case BangToken -> "!";
+            case TildeToken -> "~";
+            case CaretToken -> "^";
+            case AmpersandToken -> "&";
+            case PipeToken -> "|";
+            case DoubleLessToken -> "<<";
+            case DoubleGreaterToken -> ">>";
             case EqualsToken -> "=";
             case LessToken -> "<";
             case LessOrEqualsToken -> "<=";

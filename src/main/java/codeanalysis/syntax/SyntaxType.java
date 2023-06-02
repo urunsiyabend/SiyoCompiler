@@ -26,6 +26,9 @@ public enum SyntaxType {
     /* Represents a slash token. */
     SlashToken,
 
+    /* Represents a percent (%) token. */
+    PercentToken,
+
     /* Represents a closing parenthesis token. */
     CloseParenthesisToken,
 
@@ -142,4 +145,22 @@ public enum SyntaxType {
 
     /* Represents a for statement */
     ForStatement,
-}
+
+    /* Represents a tilde (~) token. */
+    TildeToken,
+
+    /* Represents a ampersand (&) token. */
+    AmpersandToken,
+
+    /* Represents a pipe (|) token. */
+    PipeToken,
+
+    /* Represents a double less (<<) token. */
+    DoubleLessToken,
+
+    /* Represents a double greater (>>) token. */
+    DoubleGreaterToken,
+
+    /* Represents a caret (^) token. */
+    CaretToken,
+    }

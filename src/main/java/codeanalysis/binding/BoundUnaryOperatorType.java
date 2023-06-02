@@ -11,4 +11,5 @@ public enum BoundUnaryOperatorType {
     Identity,
     Negation,
     LogicalNegation,
+    OnesComplement,
 }

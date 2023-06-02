@@ -20,4 +20,10 @@ public enum BoundBinaryOperatorType {
     LessOrEqualsThan,
     GreaterThan,
     GreaterOrEqualsThen,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    Modulo,
+    LeftShift,
+    RightShift,
 }

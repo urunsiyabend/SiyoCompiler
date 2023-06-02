@@ -208,6 +208,7 @@ public class Evaluator {
             case Identity -> (int) operand;
             case Negation -> -(int) operand;
             case LogicalNegation -> !(boolean) operand;
+            case OnesComplement -> ~(int) operand;
             default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
         };
     }
@@ -228,6 +229,12 @@ public class Evaluator {
             case Subtraction -> (int) left - (int) right;
             case Multiplication -> (int) left * (int) right;
             case Division -> (int) left / (int) right;
+            case Modulo -> (int) left % (int) right;
+            case BitwiseAnd -> b.getClassType() == Boolean.class ? (boolean) left & (boolean) right : (int) left & (int) right;
+            case BitwiseOr -> b.getClassType() == Boolean.class ? (boolean) left | (boolean) right : (int) left | (int) right;
+            case BitwiseXor -> b.getClassType() == Boolean.class ? (boolean) left ^ (boolean) right : (int) left ^ (int) right;
+            case LeftShift -> (int) left << (int) right;
+            case RightShift -> (int) left >> (int) right;
             case LogicalAnd -> (boolean) left && (boolean) right;
             case LogicalOr -> (boolean) left || (boolean) right;
             case Equals -> left.equals(right);

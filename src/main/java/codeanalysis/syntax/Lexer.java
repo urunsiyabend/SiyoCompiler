@@ -111,6 +111,10 @@ public class Lexer {
                 next();
                 _type = SyntaxType.SlashToken;
             }
+            case '%' -> {
+                next();
+                _type = SyntaxType.PercentToken;
+            }
             case '(' -> {
                 next();
                 _type = SyntaxType.OpenParenthesisToken;
@@ -127,11 +131,22 @@ public class Lexer {
                 next();
                 _type = SyntaxType.CloseBraceToken;
             }
+            case '~' -> {
+                next();
+                _type = SyntaxType.TildeToken;
+            }
+            case '^' -> {
+                next();
+                _type = SyntaxType.CaretToken;
+            }
             case '&' -> {
                 next();
                 if (currentChar() == '&') {
                     next();
                     _type = SyntaxType.DoubleAmpersandToken;
+                }
+                else {
+                    _type = SyntaxType.AmpersandToken;
                 }
             }
             case '|' -> {
@@ -139,6 +154,9 @@ public class Lexer {
                 if (currentChar() == '|') {
                     next();
                     _type = SyntaxType.DoublePipeToken;
+                }
+                else {
+                    _type = SyntaxType.PipeToken;
                 }
             }
             case '=' -> {
@@ -164,7 +182,11 @@ public class Lexer {
                 if (currentChar() == '=') {
                     next();
                     _type = SyntaxType.LessOrEqualsToken;
-                } else {
+                } else if (currentChar() == '<') {
+                    next();
+                    _type = SyntaxType.DoubleLessToken;
+                }
+                else {
                     _type = SyntaxType.LessToken;
                 }
             }
@@ -173,7 +195,11 @@ public class Lexer {
                 if (currentChar() == '=') {
                     next();
                     _type = SyntaxType.GreaterOrEqualsToken;
-                } else {
+                } else if (currentChar() == '>') {
+                    next();
+                    _type = SyntaxType.DoubleGreaterToken;
+                }
+                else {
                     _type = SyntaxType.GreaterToken;
                 }
             }
