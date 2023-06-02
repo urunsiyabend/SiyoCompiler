@@ -68,6 +68,7 @@ public class Main {
             PrintWriter printWriter = new PrintWriter(System.out);
             try {
                 tree.getRoot().writeTo(printWriter);
+                compilation.emitTree(printWriter);
                 printWriter.flush();
             } catch (IOException e) {
                 throw new RuntimeException(e);

@@ -1,5 +1,8 @@
 package codeanalysis.binding;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 /**
  * Represents a bound if statement in the code analysis process.
  * Bound if statements are used to represent if statements in the code analysis process.
@@ -62,5 +65,51 @@ public class BoundIfStatement extends BoundStatement {
     @Override
     public BoundNodeType getType() {
         return BoundNodeType.IfStatement;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    @Override
+    public Iterator<BoundNode> getChildren() {
+        return new ChildrenIterator();
+    }
+
+    /**
+     * Iterator class that iterates over the children of the bound node.
+     */
+    private class ChildrenIterator implements Iterator<BoundNode> {
+        private int _index = 0;
+
+        /**
+         * Checks whether there is a next element in the iterator.
+         *
+         * @return True if there is a next element, false otherwise.
+         */
+        @Override
+        public boolean hasNext() {
+            return _elseStatement != null ? _index < 3 : _index < 2;
+        }
+
+        /**
+         * Retrieves the next element in the iterator.
+         *
+         * @return The next element.
+         */
+        @Override
+        public BoundNode next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+
+            return switch (_index++) {
+                case 0 -> _condition;
+                case 1 -> _thenStatement;
+                case 2 -> _elseStatement == null ? next() : _elseStatement;
+                default -> throw new NoSuchElementException();
+            };
+        }
     }
 }

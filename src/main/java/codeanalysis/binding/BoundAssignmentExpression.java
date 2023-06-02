@@ -2,6 +2,9 @@ package codeanalysis.binding;
 
 import codeanalysis.VariableSymbol;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 /**
  * Represents a bound assignment expression in the code analysis process.
  *
@@ -60,5 +63,49 @@ public class BoundAssignmentExpression extends BoundExpression {
     @Override
     public BoundNodeType getType() {
         return BoundNodeType.AssignmentExpression;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    @Override
+    public Iterator<BoundNode> getChildren() {
+        return new ChildrenIterator();
+    }
+
+    /**
+     * Iterator class that iterates over the children of the bound node.
+     */
+    private class ChildrenIterator implements Iterator<BoundNode> {
+        private int _index = 0;
+
+        /**
+         * Checks whether there is a next element in the iterator.
+         *
+         * @return True if there is a next element, false otherwise.
+         */
+        @Override
+        public boolean hasNext() {
+            return _index < 1;
+        }
+
+        /**
+         * Retrieves the next element in the iterator.
+         *
+         * @return The next element.
+         */
+        @Override
+        public BoundNode next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+
+            return switch (_index++) {
+                case 0 -> _boundExpression;
+                default -> throw new NoSuchElementException();
+            };
+        }
     }
 }

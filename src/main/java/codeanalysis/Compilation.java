@@ -5,6 +5,8 @@ import codeanalysis.binding.BoundExpression;
 import codeanalysis.binding.BoundGlobalScope;
 import codeanalysis.syntax.SyntaxTree;
 
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -96,5 +98,9 @@ public class Compilation {
         Evaluator evaluator = new Evaluator(getGlobalScope().getBoundStatement(), variables);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
+    }
+
+    public void emitTree(PrintWriter printWriter) throws IOException {
+        getGlobalScope().getBoundStatement().writeTo(printWriter);
     }
 }

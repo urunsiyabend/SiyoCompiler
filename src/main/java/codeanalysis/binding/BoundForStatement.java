@@ -1,5 +1,8 @@
 package codeanalysis.binding;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 /**
  * The BoundForStatement class represents a for statement in the bound tree.
  * It consists of a bound statement representing the initializer, a bound expression representing the condition,
@@ -74,5 +77,48 @@ public class BoundForStatement extends BoundStatement {
      */
     public BoundStatement getBody() {
         return _body;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    public Iterator<BoundNode> getChildren() {
+        return new ChildrenIterator();
+    }
+
+    /**
+     * Iterator class that iterates over the children of the bound node.
+     */
+    private class ChildrenIterator implements Iterator<BoundNode> {
+        private int _index = 0;
+
+        /**
+         * Checks whether there is a next element in the iterator.
+         *
+         * @return True if there is a next element, false otherwise.
+         */
+        @Override
+        public boolean hasNext() {
+            return _index < 1;
+        }
+
+        /**
+         * Retrieves the next element in the iterator.
+         *
+         * @return The next element.
+         */
+        @Override
+        public BoundNode next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+
+            return switch (_index++) {
+                case 0 -> _body;
+                default -> throw new NoSuchElementException();
+            };
+        }
     }
 }

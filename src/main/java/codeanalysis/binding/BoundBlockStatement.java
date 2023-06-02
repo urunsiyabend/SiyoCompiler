@@ -1,6 +1,7 @@
 package codeanalysis.binding;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 
 /**
  * Class for representing bound block statements in the code analysis process.
@@ -41,5 +42,16 @@ public class BoundBlockStatement extends BoundStatement {
     @Override
     public BoundNodeType getType() {
         return BoundNodeType.BlockStatement;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    @Override
+    public Iterator<BoundNode> getChildren() {
+        ArrayList<BoundNode> boundNodes = new ArrayList<>(_statements);
+        return boundNodes.iterator();
     }
 }

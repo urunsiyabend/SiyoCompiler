@@ -1,5 +1,7 @@
 package codeanalysis.binding;
 
+import java.util.*;
+
 /**
  * Represents a bound literal expression in the code analysis process.
  *
@@ -55,5 +57,15 @@ public class BoundLiteralExpression extends BoundExpression {
      */
     public void setValue(Object value) {
         this.value = value;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    @Override
+    public Iterator<BoundNode> getChildren() {
+        return Collections.emptyIterator();
     }
 }

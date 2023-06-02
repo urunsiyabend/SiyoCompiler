@@ -1,5 +1,8 @@
 package codeanalysis.binding;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 /**
  * Represents a bound unary expression in the code analysis process.
  *
@@ -59,5 +62,49 @@ public class BoundUnaryExpression extends BoundExpression {
      */
     public BoundUnaryOperator getOperator() {
         return _operator;
+    }
+
+    /**
+     * Gets an iterator that iterates over the children of the bound node.
+     *
+     * @return The iterator.
+     */
+    @Override
+    public Iterator<BoundNode> getChildren() {
+        return new ChildrenIterator();
+    }
+
+    /**
+     * Iterator class that iterates over the children of the bound node.
+     */
+    private class ChildrenIterator implements Iterator<BoundNode> {
+        private int _index = 0;
+
+        /**
+         * Checks whether there is a next element in the iterator.
+         *
+         * @return True if there is a next element, false otherwise.
+         */
+        @Override
+        public boolean hasNext() {
+            return _index < 1;
+        }
+
+        /**
+         * Retrieves the next element in the iterator.
+         *
+         * @return The next element.
+         */
+        @Override
+        public BoundNode next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+
+            return switch (_index++) {
+                case 0 -> getOperand();
+                default -> throw new NoSuchElementException();
+            };
+        }
     }
 }

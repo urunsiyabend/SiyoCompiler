@@ -47,7 +47,7 @@ public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
      */
     @Override
     public Iterator<SyntaxNode> getChildren() {
-        return new ParanthesizedExpressionSyntax.ChildrenIterator();
+        return new ChildrenIterator();
     }
 
     /**
@@ -119,7 +119,7 @@ public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
          */
         @Override
         public boolean hasNext() {
-            return index < 2;
+            return index < 3;
         }
 
         /**
@@ -141,11 +141,14 @@ public final class ParanthesizedExpressionSyntax extends ExpressionSyntax {
                 }
                 case 1 -> {
                     index++;
+                    return _expression;
+                }
+                case 2 -> {
+                    index++;
                     return getCloseParenthesisToken();
                 }
                 default -> throw new NoSuchElementException();
             }
         }
-
     }
 }
