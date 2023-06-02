@@ -17,7 +17,7 @@ import java.util.NoSuchElementException;
 public class BoundConditionalGotoStatement extends BoundStatement {
     private final LabelSymbol _label;
     private final BoundExpression _condition;
-    private final boolean _jumpIfFalse;
+    private final boolean _jumpIfTrue;
 
     /**
      * Constructs a BoundConditionalGotoStatement object with the specified label and condition.
@@ -27,7 +27,7 @@ public class BoundConditionalGotoStatement extends BoundStatement {
      * @param condition The condition to be checked.
      */
     public BoundConditionalGotoStatement(LabelSymbol label, BoundExpression condition) {
-        this(label, condition, false);
+        this(label, condition, true);
     }
 
     /**
@@ -39,10 +39,10 @@ public class BoundConditionalGotoStatement extends BoundStatement {
      * @param condition The condition to be checked.
      * @param jumpIfFalse The boolean value that indicates whether the jump should be made if the condition is false.
      */
-    public BoundConditionalGotoStatement(LabelSymbol label, BoundExpression condition, boolean jumpIfFalse) {
+    public BoundConditionalGotoStatement(LabelSymbol label, BoundExpression condition, boolean jumpIfTrue) {
         _label = label;
         _condition = condition;
-        _jumpIfFalse = jumpIfFalse;
+        _jumpIfTrue = jumpIfTrue;
     }
 
     /**
@@ -69,8 +69,8 @@ public class BoundConditionalGotoStatement extends BoundStatement {
      *
      * @return The boolean value that indicates whether the jump should be made if the condition is false.
      */
-    public boolean getJumpIfFalse() {
-        return _jumpIfFalse;
+    public boolean getJumpIfTrue() {
+        return _jumpIfTrue;
     }
 
     /**

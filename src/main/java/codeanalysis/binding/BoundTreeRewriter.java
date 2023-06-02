@@ -177,7 +177,7 @@ public abstract class BoundTreeRewriter {
         if (condition == node.getCondition()) {
             return node;
         }
-        return new BoundConditionalGotoStatement(node.getLabel(), condition, node.getJumpIfFalse());
+        return new BoundConditionalGotoStatement(node.getLabel(), condition, node.getJumpIfTrue());
     }
 
     /**

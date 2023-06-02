@@ -112,7 +112,7 @@ public class Lowerer extends BoundTreeRewriter {
         var gotoCheck = new BoundGotoStatement(checkLabel);
         var continueLabelStatement = new BoundLabelStatement(continueLabel);
         var checkLabelStatement = new BoundLabelStatement(checkLabel);
-        var gotoTrue = new BoundConditionalGotoStatement(continueLabel, node.getCondition(), false);
+        var gotoTrue = new BoundConditionalGotoStatement(continueLabel, node.getCondition(), true);
         var endLabelStatement = new BoundLabelStatement(endLabel);
 
         ArrayList<BoundStatement> resultStatements = new ArrayList<>();
@@ -139,7 +139,7 @@ public class Lowerer extends BoundTreeRewriter {
     protected BoundStatement rewriteIfStatement(BoundIfStatement node) {
         if (node.getElseStatement() == null) {
             LabelSymbol endLabel = generateLabel();
-            BoundConditionalGotoStatement gotoFalse = new BoundConditionalGotoStatement(endLabel, node.getCondition(), true);
+            BoundConditionalGotoStatement gotoFalse = new BoundConditionalGotoStatement(endLabel, node.getCondition(), false);
             BoundLabelStatement endLabelStatement = new BoundLabelStatement(endLabel);
             ArrayList<BoundStatement> resultStatements = new ArrayList<>();
 
@@ -154,7 +154,7 @@ public class Lowerer extends BoundTreeRewriter {
             LabelSymbol elseLabel = generateLabel();
             LabelSymbol endLabel = generateLabel();
 
-            BoundConditionalGotoStatement gotoFalse = new BoundConditionalGotoStatement(elseLabel, node.getCondition(), true);
+            BoundConditionalGotoStatement gotoFalse = new BoundConditionalGotoStatement(elseLabel, node.getCondition(), false);
             BoundGotoStatement gotoEndStatement = new BoundGotoStatement(endLabel);
             BoundLabelStatement elseLabelStatement = new BoundLabelStatement(elseLabel);
             BoundLabelStatement endLabelStatement = new BoundLabelStatement(endLabel);

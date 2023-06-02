@@ -58,7 +58,7 @@ public class Evaluator {
                 case ConditionalGotoStatement -> {
                     BoundConditionalGotoStatement cgs = (BoundConditionalGotoStatement) s;
                     boolean condition = (boolean) evaluateExpression(cgs.getCondition());
-                    if (condition && !cgs.getJumpIfFalse() || !condition && cgs.getJumpIfFalse()) {
+                    if (condition == cgs.getJumpIfTrue()) {
                         index = labelToIndex.get(cgs.getLabel());
                     }
                     else {
