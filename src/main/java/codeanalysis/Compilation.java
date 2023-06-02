@@ -3,6 +3,8 @@ package codeanalysis;
 import codeanalysis.binding.Binder;
 import codeanalysis.binding.BoundExpression;
 import codeanalysis.binding.BoundGlobalScope;
+import codeanalysis.binding.BoundStatement;
+import codeanalysis.lowering.Lowerer;
 import codeanalysis.syntax.SyntaxTree;
 
 import java.io.IOException;
@@ -95,12 +97,34 @@ public class Compilation {
             return new EvaluationResult(diagnostics, null);
         }
 
-        Evaluator evaluator = new Evaluator(getGlobalScope().getBoundStatement(), variables);
+        BoundStatement statement = getStatement();
+        Evaluator evaluator = new Evaluator(statement, variables);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
     }
 
+    /**
+     * Emits the tree representing the compilation unit to the specified print writer.
+     *
+     * @param printWriter The print writer to emit the tree to.
+     * @throws IOException if an error occurs during the emitting process.
+     */
     public void emitTree(PrintWriter printWriter) throws IOException {
-        getGlobalScope().getBoundStatement().writeTo(printWriter);
+        BoundStatement statement = getStatement();
+        statement.writeTo(printWriter);
     }
+
+    /**
+     * Gets the bound statement representing the compilation unit.
+     * If the bound statement is not yet created, creates it and returns it.
+     * The bound statement is created by lowering the global scope.
+     *
+     * @return The bound statement representing the compilation unit.
+     */
+    private BoundStatement getStatement() {
+        var result = getGlobalScope().getBoundStatement();
+        return Lowerer.lower(result);
+    }
+
+
 }
