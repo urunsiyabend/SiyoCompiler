@@ -26,6 +26,9 @@ public abstract class BoundTreeRewriter {
             case IfStatement -> rewriteIfStatement((BoundIfStatement) node);
             case WhileStatement -> rewriteWhileStatement((BoundWhileStatement) node);
             case ForStatement -> rewriteForStatement((BoundForStatement) node);
+            case LabelStatement -> rewriteLabelStatement((BoundLabelStatement) node);
+            case GotoStatement -> rewriteGotoStatement((BoundGotoStatement) node);
+            case ConditionalGotoStatement -> rewriteConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ExpressionStatement -> rewriteExpressionStatement((BoundExpressionStatement) node);
             default -> throw new UnsupportedOperationException("Unexpected value: " + node.getType());
         };
@@ -91,7 +94,7 @@ public abstract class BoundTreeRewriter {
      * @param node The if statement to rewrite.
      * @return The rewritten if statement.
      */
-    private BoundStatement rewriteIfStatement(BoundIfStatement node) {
+    protected BoundStatement rewriteIfStatement(BoundIfStatement node) {
         BoundExpression condition = rewriteExpression(node.getCondition());
         BoundStatement thenStatement = rewriteStatement(node.getThenStatement());
         BoundStatement elseStatement = node.getElseStatement() == null ? null : rewriteStatement(node.getElseStatement());
@@ -109,7 +112,7 @@ public abstract class BoundTreeRewriter {
      * @param node The while statement to rewrite.
      * @return The rewritten while statement.
      */
-    private BoundStatement rewriteWhileStatement(BoundWhileStatement node) {
+    protected BoundStatement rewriteWhileStatement(BoundWhileStatement node) {
         BoundExpression condition = rewriteExpression(node.getCondition());
         BoundStatement body = rewriteStatement(node.getBody());
         if (condition == node.getCondition() && body == node.getBody()) {
@@ -126,7 +129,7 @@ public abstract class BoundTreeRewriter {
      * @param node The for statement to rewrite.
      * @return The rewritten for statement.
      */
-    private BoundStatement rewriteForStatement(BoundForStatement node) {
+    protected BoundStatement rewriteForStatement(BoundForStatement node) {
         BoundStatement initializer = rewriteStatement(node.getInitializer());
         BoundExpression condition = rewriteExpression(node.getCondition());
         BoundExpression iterator = rewriteExpression(node.getIterator());
@@ -138,6 +141,46 @@ public abstract class BoundTreeRewriter {
     }
 
     /**
+     * Rewrites a label statement in the bound tree.
+     * When a label statement is rewritten, it rewrites the label of the label statement.
+     * If the label of the label statement does not change, it returns the label statement itself.
+     *
+     * @param node The label statement to rewrite.
+     * @return The rewritten label statement.
+     */
+    protected BoundStatement rewriteLabelStatement(BoundLabelStatement node) {
+        return node;
+    }
+
+    /**
+     * Rewrites a goto statement in the bound tree.
+     * When a goto statement is rewritten, it rewrites the label of the goto statement.
+     * If the label of the goto statement does not change, it returns the goto statement itself.
+     *
+     * @param node The goto statement to rewrite.
+     * @return The rewritten goto statement.
+     */
+    protected BoundStatement rewriteGotoStatement(BoundGotoStatement node) {
+        return node;
+    }
+
+    /**
+     * Rewrites a conditional goto statement in the bound tree.
+     * When a conditional goto statement is rewritten, it rewrites the condition of the conditional goto statement.
+     * If the condition of the conditional goto statement does not change, it returns the conditional goto statement itself.
+     *
+     * @param node The conditional goto statement to rewrite.
+     * @return The rewritten conditional goto statement.
+     */
+    protected BoundStatement rewriteConditionalGotoStatement(BoundConditionalGotoStatement node) {
+        BoundExpression condition = rewriteExpression(node.getCondition());
+        if (condition == node.getCondition()) {
+            return node;
+        }
+        return new BoundConditionalGotoStatement(node.getLabel(), condition, node.getJumpIfFalse());
+    }
+
+    /**
      * Rewrites an expression statement in the bound tree.
      * When an expression statement is rewritten, it rewrites the expression of the expression statement.
      * If the expression of the expression statement does not change, it returns the expression statement itself.
@@ -145,7 +188,7 @@ public abstract class BoundTreeRewriter {
      * @param node The expression statement to rewrite.
      * @return The rewritten expression statement.
      */
-    private BoundStatement rewriteExpressionStatement(BoundExpressionStatement node) {
+    protected BoundStatement rewriteExpressionStatement(BoundExpressionStatement node) {
         var expression = rewriteExpression(node.getExpression());
         if (expression == node.getExpression()) {
             return node;
@@ -179,7 +222,7 @@ public abstract class BoundTreeRewriter {
      * @param node The assignment expression to rewrite.
      * @return The rewritten assignment expression.
      */
-    private BoundExpression rewriteAssignmentExpression(BoundAssignmentExpression node) {
+    protected BoundExpression rewriteAssignmentExpression(BoundAssignmentExpression node) {
         var expression = rewriteExpression(node.getExpression());
         if (expression == node.getExpression()) {
             return node;
@@ -195,7 +238,7 @@ public abstract class BoundTreeRewriter {
      * @param node The binary expression to rewrite.
      * @return The rewritten binary expression.
      */
-    private BoundExpression rewriteBinaryExpression(BoundBinaryExpression node) {
+    protected BoundExpression rewriteBinaryExpression(BoundBinaryExpression node) {
         var left = rewriteExpression(node.getLeft());
         var right = rewriteExpression(node.getRight());
         if (left == node.getLeft() && right == node.getRight()) {
@@ -212,7 +255,7 @@ public abstract class BoundTreeRewriter {
      * @param node The unary expression to rewrite.
      * @return The rewritten unary expression.
      */
-    private BoundExpression rewriteUnaryExpression(BoundUnaryExpression node) {
+    protected BoundExpression rewriteUnaryExpression(BoundUnaryExpression node) {
         var operand = rewriteExpression(node.getOperand());
         if (operand == node.getOperand()) {
             return node;
@@ -227,7 +270,7 @@ public abstract class BoundTreeRewriter {
      * @param node The literal expression to rewrite.
      * @return The rewritten literal expression.
      */
-    private BoundExpression rewriteLiteralExpression(BoundLiteralExpression node) {
+    protected BoundExpression rewriteLiteralExpression(BoundLiteralExpression node) {
         return node;
     }
 
@@ -238,7 +281,7 @@ public abstract class BoundTreeRewriter {
      * @param node The variable expression to rewrite.
      * @return The rewritten variable expression.
      */
-    private BoundExpression rewriteVariableExpression(BoundVariableExpression node) {
+    protected BoundExpression rewriteVariableExpression(BoundVariableExpression node) {
         return node;
     }
 }

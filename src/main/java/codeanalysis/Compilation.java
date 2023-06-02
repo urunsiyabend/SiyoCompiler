@@ -1,9 +1,6 @@
 package codeanalysis;
 
-import codeanalysis.binding.Binder;
-import codeanalysis.binding.BoundExpression;
-import codeanalysis.binding.BoundGlobalScope;
-import codeanalysis.binding.BoundStatement;
+import codeanalysis.binding.*;
 import codeanalysis.lowering.Lowerer;
 import codeanalysis.syntax.SyntaxTree;
 
@@ -25,7 +22,7 @@ public class Compilation {
 
     private SyntaxTree _syntaxTree;
     private final Compilation _previous;
-    private final AtomicReference<BoundGlobalScope> _globalScope = new AtomicReference<>(null);;
+    private final AtomicReference<BoundGlobalScope> _globalScope = new AtomicReference<>(null);
 
     /**
      * Constructs a Compilation object with the specified syntax tree.
@@ -97,7 +94,7 @@ public class Compilation {
             return new EvaluationResult(diagnostics, null);
         }
 
-        BoundStatement statement = getStatement();
+        BoundBlockStatement statement = getStatement();
         Evaluator evaluator = new Evaluator(statement, variables);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
@@ -121,7 +118,7 @@ public class Compilation {
      *
      * @return The bound statement representing the compilation unit.
      */
-    private BoundStatement getStatement() {
+    private BoundBlockStatement getStatement() {
         var result = getGlobalScope().getBoundStatement();
         return Lowerer.lower(result);
     }

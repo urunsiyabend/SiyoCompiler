@@ -2,6 +2,7 @@ package codeanalysis;
 
 import codeanalysis.binding.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -16,18 +17,61 @@ import java.util.Map;
  * @version 1.0
  */
 public class Evaluator {
-    private final BoundStatement _root;
+    private final BoundBlockStatement _root;
     private final Map<VariableSymbol, Object> _variables;
     private Object _lastValue;
 
     /**
      * Evaluates the expression syntax tree and computes the result.
+     * The evaluator supports evaluating different types of expressions, including numbers, binary expressions
+     * (addition, subtraction, multiplication, and division), and parenthesized expressions.
+     * Note: The evaluator throws an exception if it encounters an unexpected node or operator during evaluation.
      *
      * @return The computed result of the expression.
      * @throws Exception if an error occurs during evaluation.
      */
     public Object evaluate() throws Exception {
-        evaluateStatement(_root);
+        HashMap<LabelSymbol, Integer> labelToIndex = new HashMap<>();
+
+        for (int i = 0; i < _root.getStatements().size(); i++) {
+            if (_root.getStatements().get(i) instanceof BoundLabelStatement l) {
+                labelToIndex.put(l.getLabel(), i + 1);
+            }
+        }
+
+        int index = 0;
+        while (index < _root.getStatements().size()) {
+            BoundStatement s = _root.getStatements().get(index);
+            switch (s.getType()) {
+                case VariableDeclaration -> {
+                    evaluateVariableDeclaration((BoundVariableDeclaration) s);
+                    index++;
+                }
+                case ExpressionStatement -> {
+                    evaluateExpressionStatement((BoundExpressionStatement) s);
+                    index++;
+                }
+                case GotoStatement -> {
+                    BoundGotoStatement gs = (BoundGotoStatement) s;
+                    index = labelToIndex.get(gs.getLabel());
+                }
+                case ConditionalGotoStatement -> {
+                    BoundConditionalGotoStatement cgs = (BoundConditionalGotoStatement) s;
+                    boolean condition = (boolean) evaluateExpression(cgs.getCondition());
+                    if (condition && !cgs.getJumpIfFalse() || !condition && cgs.getJumpIfFalse()) {
+                        index = labelToIndex.get(cgs.getLabel());
+                    }
+                    else {
+                        index++;
+                    }
+                }
+                case LabelStatement -> {
+                    index++;
+                }
+                default -> throw new Exception("Unexpected node: " + s.getType());
+            };
+        }
+
         return _lastValue;
     }
 
@@ -37,39 +81,9 @@ public class Evaluator {
      * @param root      The root expression syntax to evaluate.
      * @param variables The variables of the evaluator.
      */
-    public Evaluator(BoundStatement root, Map<VariableSymbol, Object> variables) {
+    public Evaluator(BoundBlockStatement root, Map<VariableSymbol, Object> variables) {
         _root = root;
-        this._variables = variables;
-    }
-
-    /**
-     * Recursively evaluates the specified expression syntax node and computes the result.
-     *
-     * @param node The bound statement node to evaluate.
-     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
-     */
-    private void evaluateStatement(BoundStatement node) throws Exception {
-        switch (node.getType()) {
-            case BlockStatement -> evaluateBlockStatement((BoundBlockStatement) node);
-            case VariableDeclaration -> evaluateVariableDeclaration((BoundVariableDeclaration) node);
-            case ExpressionStatement -> evaluateExpressionStatement((BoundExpressionStatement) node);
-            case IfStatement -> evaluateIfStatement((BoundIfStatement) node);
-            case WhileStatement -> evaluateWhileStatement((BoundWhileStatement) node);
-            case ForStatement -> evaluateForStatement((BoundForStatement) node);
-            default -> throw new Exception("Unexpected node: " + node.getType());
-        };
-    }
-
-    /**
-     * Recursively evaluates the specified expression syntax node and computes the result.
-     *
-     * @param statement The bound statement node to evaluate.
-     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
-     */
-    private void evaluateBlockStatement(BoundBlockStatement statement) throws Exception {
-        for (BoundStatement boundStatement : statement.getStatements()) {
-            evaluateStatement(boundStatement);
-        }
+        _variables = variables;
     }
 
     /**
@@ -92,58 +106,6 @@ public class Evaluator {
         Object value = evaluateExpression(node.getInitializer());
         _variables.put(node.getVariable(), value);
         _lastValue = value;
-    }
-
-    /**
-     * Evaluates the specified if statement syntax node and computes the result.
-     * If the condition is true, the then statement is evaluated.
-     * Otherwise, if the else statement is not null, it is evaluated.
-     * Otherwise, nothing happens.
-     *
-     * @param node The bound expression node to evaluate.
-     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
-     */
-    private void evaluateIfStatement(BoundIfStatement node) throws Exception {
-        var condition = (boolean) evaluateExpression(node.getCondition());
-        if (condition) {
-            evaluateStatement(node.getThenStatement());
-        } else if (node.getElseStatement() != null) {
-            evaluateStatement(node.getElseStatement());
-        }
-    }
-
-    /**
-     * Evaluates the specified while statement syntax node and computes the result.
-     * If the condition is true the body statement is evaluated and the condition is checked again.
-     * This continues until the condition becomes false.
-     *
-     * @param node The bound expression node to evaluate.
-     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
-     */
-    private void evaluateWhileStatement(BoundWhileStatement node) throws Exception {
-        while ((boolean) evaluateExpression(node.getCondition())) {
-            evaluateStatement(node.getBody());
-        }
-    }
-
-    /**
-     * Evaluates the specified for statement syntax node and computes the result.
-     * The initializer is evaluated first, then the condition is checked.
-     * If the condition is true the body statement is evaluated and the iterator is evaluated.
-     * This continues until the condition becomes false.
-     *
-     * @param node The bound expression node to evaluate.
-     * @throws Exception if an error occurs during evaluation or if an unexpected node is encountered.
-     */
-    private void evaluateForStatement(BoundForStatement node) throws Exception {
-        evaluateStatement(node.getInitializer());
-        Object conditionValue = evaluateExpression(node.getCondition());
-
-        while ((boolean) conditionValue) {
-            evaluateStatement(node.getBody());
-            evaluateExpression(node.getIterator());
-            conditionValue = evaluateExpression(node.getCondition());
-        }
     }
 
     /**

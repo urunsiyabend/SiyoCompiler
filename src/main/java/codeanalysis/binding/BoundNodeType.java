@@ -20,4 +20,7 @@ public enum BoundNodeType {
     IfStatement,
     WhileStatement,
     ForStatement,
+    LabelStatement,
+    GotoStatement,
+    ConditionalGotoStatement,
 }

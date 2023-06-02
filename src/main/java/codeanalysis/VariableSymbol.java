@@ -51,4 +51,15 @@ public class VariableSymbol {
     public Class<?> getType() {
         return _type;
     }
+
+    /**
+     * Returns a string representation of the variable symbol.
+     * The string representation consists of the name of the variable.
+     *
+     * @return A string representation of the variable symbol.
+     */
+    @Override
+    public String toString() {
+        return _name;
+    }
 }
