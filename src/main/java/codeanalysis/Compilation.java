@@ -1,6 +1,7 @@
 package codeanalysis;
 
 import codeanalysis.binding.*;
+import codeanalysis.emit.BytecodeEmitter;
 import codeanalysis.lowering.Lowerer;
 import codeanalysis.syntax.SyntaxTree;
 
@@ -123,5 +124,21 @@ public class Compilation {
         return Lowerer.lower(result);
     }
 
+    /**
+     * Emits JVM bytecode for the compiled program.
+     *
+     * @param className The name of the generated class (without .class extension).
+     * @return An EmitResult containing either the bytecode or diagnostics.
+     */
+    public EmitResult emitBytecode(String className) {
+        DiagnosticBox diagnostics = _syntaxTree.diagnostics().addAll(getGlobalScope().getDiagnostics());
+        if (diagnostics.hasNext()) {
+            return new EmitResult(diagnostics, null);
+        }
 
+        BoundBlockStatement statement = getStatement();
+        BytecodeEmitter emitter = new BytecodeEmitter(statement, className);
+        byte[] bytecode = emitter.emit();
+        return new EmitResult(new DiagnosticBox(), bytecode);
+    }
 }
