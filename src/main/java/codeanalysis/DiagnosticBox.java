@@ -212,4 +212,117 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Unexpected expression syntax '%s'", type);
         report(span, message);
     }
+
+    /**
+     * Reports an undefined type diagnostic with the specified span and name.
+     *
+     * @param span The text span where the undefined type occurs.
+     * @param name The undefined type name.
+     */
+    public void reportUndefinedType(TextSpan span, String name) {
+        String message = String.format("Type '%s' does not exist", name);
+        report(span, message);
+    }
+
+    /**
+     * Reports a duplicate parameter diagnostic with the specified span and name.
+     *
+     * @param span The text span where the duplicate parameter is declared.
+     * @param name The name of the duplicate parameter.
+     */
+    public void reportDuplicateParameter(TextSpan span, String name) {
+        String message = String.format("Parameter '%s' is already declared", name);
+        report(span, message);
+    }
+
+    /**
+     * Reports a function already declared diagnostic with the specified span and name.
+     *
+     * @param span The text span where the function is already declared.
+     * @param name The name of the function.
+     */
+    public void reportFunctionAlreadyDeclared(TextSpan span, String name) {
+        String message = String.format("Function '%s' is already declared", name);
+        report(span, message);
+    }
+
+    /**
+     * Reports an undefined function diagnostic with the specified span and name.
+     *
+     * @param span The text span where the undefined function is called.
+     * @param name The undefined function name.
+     */
+    public void reportUndefinedFunction(TextSpan span, String name) {
+        String message = String.format("Function '%s' does not exist", name);
+        report(span, message);
+    }
+
+    /**
+     * Reports a wrong argument count diagnostic.
+     *
+     * @param span     The text span where the wrong argument count occurs.
+     * @param name     The function name.
+     * @param expected The expected argument count.
+     * @param actual   The actual argument count.
+     */
+    public void reportWrongArgumentCount(TextSpan span, String name, int expected, int actual) {
+        String message = String.format("Function '%s' expects %d argument(s) but was given %d", name, expected, actual);
+        report(span, message);
+    }
+
+    /**
+     * Reports a wrong argument type diagnostic.
+     *
+     * @param span      The text span where the wrong argument type occurs.
+     * @param paramName The parameter name.
+     * @param expected  The expected type.
+     * @param actual    The actual type.
+     */
+    public void reportWrongArgumentType(TextSpan span, String paramName, Class<?> expected, Class<?> actual) {
+        String message = String.format("Parameter '%s' expects type <%s> but was given <%s>", paramName, expected, actual);
+        report(span, message);
+    }
+
+    /**
+     * Reports a return outside function diagnostic.
+     *
+     * @param span The text span where the return statement occurs.
+     */
+    public void reportReturnOutsideFunction(TextSpan span) {
+        String message = "Return statement is not allowed outside of a function";
+        report(span, message);
+    }
+
+    /**
+     * Reports a return with value in void function diagnostic.
+     *
+     * @param span The text span where the return statement with value occurs.
+     */
+    public void reportReturnWithValueInVoidFunction(TextSpan span) {
+        String message = "Cannot return a value from a void function";
+        report(span, message);
+    }
+
+    /**
+     * Reports a missing return value diagnostic.
+     *
+     * @param span         The text span where the return statement occurs.
+     * @param expectedType The expected return type.
+     */
+    public void reportMissingReturnValue(TextSpan span, Class<?> expectedType) {
+        String message = String.format("Function must return a value of type <%s>", expectedType);
+        report(span, message);
+    }
+
+    /**
+     * Reports a return type mismatch diagnostic.
+     *
+     * @param span     The text span where the return statement occurs.
+     * @param actual   The actual return type.
+     * @param expected The expected return type.
+     */
+    public void reportReturnTypeMismatch(TextSpan span, Class<?> actual, Class<?> expected) {
+        String message = String.format("Cannot return type <%s>, expected <%s>", actual, expected);
+        report(span, message);
+    }
 }

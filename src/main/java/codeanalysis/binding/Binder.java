@@ -1,10 +1,16 @@
 package codeanalysis.binding;
 
 import codeanalysis.DiagnosticBox;
+import codeanalysis.FunctionSymbol;
+import codeanalysis.ParameterSymbol;
 import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Stack;
 
 /**
@@ -18,6 +24,8 @@ import java.util.Stack;
 public class Binder {
     DiagnosticBox _diagnostics = new DiagnosticBox();
     private BoundScope _scope;
+    private FunctionSymbol _currentFunction = null;
+    private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
 
     /**
      * Initializes a new instance of the Binder class with the specified variables.
@@ -31,10 +39,12 @@ public class Binder {
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
         var parentScope = createParentScopes(previous);
         Binder binder = new Binder(parentScope);
-        BoundStatement expression = binder.bindStatement(syntax.getStatement());
+        BoundStatement statement = binder.bindStatement(syntax.getStatement());
+        Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
+        Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
         Iterable<VariableSymbol> variables = binder._scope.getDeclaredVariables();
         DiagnosticBox diagnostics = binder._diagnostics;
-        return new BoundGlobalScope(previous, diagnostics, variables, expression);
+        return new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
     }
 
     private static BoundScope createParentScopes(BoundGlobalScope previous) {
@@ -48,6 +58,9 @@ public class Binder {
         while (scopeStack.size() > 0) {
             previous = scopeStack.pop();
             BoundScope scope = new BoundScope(parent);
+            for (FunctionSymbol function : previous.getFunctionSymbols()) {
+                scope.tryDeclareFunction(function);
+            }
             for (VariableSymbol variable : previous.getVariableSymbols()) {
                 scope.tryDeclare(variable);
             }
@@ -70,6 +83,8 @@ public class Binder {
             case IfStatement -> bindIfStatement((IfStatementSyntax)syntax);
             case WhileStatement -> bindWhileStatement((WhileStatementSyntax)syntax);
             case ForStatement -> bindForStatement((ForStatementSyntax)syntax);
+            case FunctionDeclaration -> bindFunctionDeclaration((FunctionDeclarationSyntax)syntax);
+            case ReturnStatement -> bindReturnStatement((ReturnStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -185,6 +200,7 @@ public class Binder {
             case AssignmentExpression -> bindAssignmentExpression((AssignmentExpressionSyntax) syntax);
             case UnaryExpression -> bindUnaryExpression((UnaryExpressionSyntax) syntax);
             case BinaryExpression -> bindBinaryExpression((BinaryExpressionSyntax) syntax);
+            case CallExpression -> bindCallExpression((CallExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -308,5 +324,169 @@ public class Binder {
         }
 
         return new BoundAssignmentExpression(variable, boundExpression);
+    }
+
+    /**
+     * Binds a function declaration syntax to a bound statement.
+     *
+     * @param syntax The function declaration syntax to bind.
+     * @return A bound expression statement (functions are bound but not executed during declaration).
+     */
+    private BoundStatement bindFunctionDeclaration(FunctionDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+
+        // Parse parameters
+        List<ParameterSymbol> parameters = new ArrayList<>();
+        HashSet<String> seenParameterNames = new HashSet<>();
+
+        for (ParameterSyntax parameterSyntax : syntax.getParameters()) {
+            String parameterName = parameterSyntax.getIdentifier().getData();
+            String typeName = parameterSyntax.getTypeToken().getData();
+            Class<?> parameterType = lookupType(typeName);
+
+            if (parameterType == null) {
+                _diagnostics.reportUndefinedType(parameterSyntax.getTypeToken().getSpan(), typeName);
+                parameterType = Integer.class; // Default to int for error recovery
+            }
+
+            if (!seenParameterNames.add(parameterName)) {
+                _diagnostics.reportDuplicateParameter(parameterSyntax.getIdentifier().getSpan(), parameterName);
+            } else {
+                ParameterSymbol parameter = new ParameterSymbol(parameterName, parameterType);
+                parameters.add(parameter);
+            }
+        }
+
+        // Parse return type
+        Class<?> returnType = null;
+        if (syntax.getTypeClause() != null) {
+            String returnTypeName = syntax.getTypeClause().getIdentifier().getData();
+            returnType = lookupType(returnTypeName);
+            if (returnType == null) {
+                _diagnostics.reportUndefinedType(syntax.getTypeClause().getIdentifier().getSpan(), returnTypeName);
+            }
+        }
+
+        // Create function symbol
+        FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
+
+        // Try to declare the function
+        if (!_scope.tryDeclareFunction(function)) {
+            _diagnostics.reportFunctionAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        }
+
+        // Bind the function body in a new scope with parameters
+        _scope = new BoundScope(_scope);
+        FunctionSymbol previousFunction = _currentFunction;
+        _currentFunction = function;
+
+        // Add parameters to scope as variables
+        for (ParameterSymbol parameter : parameters) {
+            _scope.tryDeclare(parameter);
+        }
+
+        // Bind the body statements
+        ArrayList<BoundStatement> statements = new ArrayList<>();
+        for (StatementSyntax statementSyntax : syntax.getBody().getStatements()) {
+            BoundStatement boundStatement = bindStatement(statementSyntax);
+            statements.add(boundStatement);
+        }
+        BoundBlockStatement boundBody = new BoundBlockStatement(statements);
+
+        // Store the function body for evaluation
+        _functionBodies.put(function, boundBody);
+
+        _currentFunction = previousFunction;
+        _scope = _scope.getParent();
+
+        // Return a placeholder statement (function declarations don't produce values)
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * Binds a return statement syntax to a bound return statement.
+     *
+     * @param syntax The return statement syntax to bind.
+     * @return The bound return statement.
+     */
+    private BoundStatement bindReturnStatement(ReturnStatementSyntax syntax) {
+        BoundExpression expression = syntax.getExpression() == null ? null : bindExpression(syntax.getExpression());
+
+        if (_currentFunction == null) {
+            _diagnostics.reportReturnOutsideFunction(syntax.getReturnKeyword().getSpan());
+            return new BoundReturnStatement(expression);
+        }
+
+        if (_currentFunction.getReturnType() == null) {
+            // Void function
+            if (expression != null) {
+                _diagnostics.reportReturnWithValueInVoidFunction(syntax.getExpression().getSpan());
+            }
+        } else {
+            // Non-void function
+            if (expression == null) {
+                _diagnostics.reportMissingReturnValue(syntax.getReturnKeyword().getSpan(), _currentFunction.getReturnType());
+            } else if (expression.getClassType() != _currentFunction.getReturnType()) {
+                _diagnostics.reportReturnTypeMismatch(syntax.getExpression().getSpan(), expression.getClassType(), _currentFunction.getReturnType());
+            }
+        }
+
+        return new BoundReturnStatement(expression);
+    }
+
+    /**
+     * Binds a call expression syntax to a bound call expression.
+     *
+     * @param syntax The call expression syntax to bind.
+     * @return The bound call expression.
+     */
+    private BoundExpression bindCallExpression(CallExpressionSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+
+        if (!_scope.tryLookupFunction(name)) {
+            _diagnostics.reportUndefinedFunction(syntax.getIdentifier().getSpan(), name);
+            return new BoundLiteralExpression(0);
+        }
+
+        FunctionSymbol function = _scope.lookupFunction(name);
+
+        // Bind arguments
+        List<BoundExpression> boundArguments = new ArrayList<>();
+        for (ExpressionSyntax argumentSyntax : syntax.getArguments()) {
+            BoundExpression boundArgument = bindExpression(argumentSyntax);
+            boundArguments.add(boundArgument);
+        }
+
+        // Check argument count
+        if (boundArguments.size() != function.getParameters().size()) {
+            _diagnostics.reportWrongArgumentCount(syntax.getSpan(), name, function.getParameters().size(), boundArguments.size());
+            return new BoundLiteralExpression(0);
+        }
+
+        // Check argument types
+        for (int i = 0; i < boundArguments.size(); i++) {
+            BoundExpression argument = boundArguments.get(i);
+            ParameterSymbol parameter = function.getParameters().get(i);
+
+            if (argument.getClassType() != parameter.getType()) {
+                _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), parameter.getName(), parameter.getType(), argument.getClassType());
+            }
+        }
+
+        return new BoundCallExpression(function, boundArguments);
+    }
+
+    /**
+     * Looks up a type by name.
+     *
+     * @param name The type name.
+     * @return The Class representing the type, or null if not found.
+     */
+    private Class<?> lookupType(String name) {
+        return switch (name) {
+            case "int" -> Integer.class;
+            case "bool" -> Boolean.class;
+            default -> null;
+        };
     }
 }

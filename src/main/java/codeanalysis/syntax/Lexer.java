@@ -101,7 +101,12 @@ public class Lexer {
             }
             case '-' -> {
                 next();
-                _type = SyntaxType.MinusToken;
+                if (currentChar() == '>') {
+                    next();
+                    _type = SyntaxType.ArrowToken;
+                } else {
+                    _type = SyntaxType.MinusToken;
+                }
             }
             case '*' -> {
                 next();
@@ -138,6 +143,14 @@ public class Lexer {
             case '^' -> {
                 next();
                 _type = SyntaxType.CaretToken;
+            }
+            case ':' -> {
+                next();
+                _type = SyntaxType.ColonToken;
+            }
+            case ',' -> {
+                next();
+                _type = SyntaxType.CommaToken;
             }
             case '&' -> {
                 next();

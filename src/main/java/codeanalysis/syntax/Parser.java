@@ -4,6 +4,7 @@ import codeanalysis.DiagnosticBox;
 import codeanalysis.text.SourceText;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The Parser class is responsible for parsing the input text and generating a syntax tree.
@@ -133,6 +134,8 @@ public class Parser {
             case IfKeyword -> parseIfStatement();
             case WhileKeyword -> parseWhileStatement();
             case ForKeyword -> parseForStatement();
+            case FnKeyword -> parseFunctionDeclaration();
+            case ReturnKeyword -> parseReturnStatement();
             default -> parseExpressionStatement();
         };
     }
@@ -257,6 +260,93 @@ public class Parser {
     }
 
     /**
+     * Parses a function declaration.
+     * A function declaration consists of the fn keyword, identifier, parameters, optional type clause, and body.
+     *
+     * @return The parsed function declaration syntax.
+     */
+    private StatementSyntax parseFunctionDeclaration() {
+        SyntaxToken fnKeyword = match(SyntaxType.FnKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
+        SeparatedSyntaxList<ParameterSyntax> parameters = parseParameterList();
+        SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);
+        TypeClauseSyntax typeClause = parseOptionalTypeClause();
+        BlockStatementSyntax body = parseBlockStatement();
+        return new FunctionDeclarationSyntax(fnKeyword, identifier, openParenthesis, parameters, closeParenthesis, typeClause, body);
+    }
+
+    /**
+     * Parses a comma-separated list of parameters.
+     *
+     * @return The separated syntax list of parameters.
+     */
+    private SeparatedSyntaxList<ParameterSyntax> parseParameterList() {
+        List<SyntaxNode> nodesAndSeparators = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.CloseParenthesisToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            ParameterSyntax parameter = parseParameter();
+            nodesAndSeparators.add(parameter);
+
+            if (current().getType() != SyntaxType.CloseParenthesisToken) {
+                SyntaxToken comma = match(SyntaxType.CommaToken);
+                nodesAndSeparators.add(comma);
+            }
+        }
+
+        return new SeparatedSyntaxList<>(nodesAndSeparators);
+    }
+
+    /**
+     * Parses a single parameter.
+     * A parameter consists of an identifier, a colon, and a type.
+     *
+     * @return The parsed parameter syntax.
+     */
+    private ParameterSyntax parseParameter() {
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken colon = match(SyntaxType.ColonToken);
+        SyntaxToken type = match(SyntaxType.IdentifierToken);
+        return new ParameterSyntax(identifier, colon, type);
+    }
+
+    /**
+     * Parses an optional type clause.
+     * A type clause consists of an arrow token and a type identifier.
+     *
+     * @return The parsed type clause syntax, or null if no type clause is present.
+     */
+    private TypeClauseSyntax parseOptionalTypeClause() {
+        if (current().getType() != SyntaxType.ArrowToken) {
+            return null;
+        }
+        SyntaxToken arrowToken = match(SyntaxType.ArrowToken);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        return new TypeClauseSyntax(arrowToken, identifier);
+    }
+
+    /**
+     * Parses a return statement.
+     * A return statement consists of the return keyword and an optional expression.
+     *
+     * @return The parsed return statement syntax.
+     */
+    private StatementSyntax parseReturnStatement() {
+        SyntaxToken returnKeyword = match(SyntaxType.ReturnKeyword);
+        ExpressionSyntax expression = null;
+
+        // Check if there's an expression following the return keyword
+        // Don't parse expression if we're at end of statement (closing brace or EOF)
+        if (current().getType() != SyntaxType.CloseBraceToken &&
+            current().getType() != SyntaxType.EOFToken) {
+            expression = parseExpression();
+        }
+
+        return new ReturnStatementSyntax(returnKeyword, expression);
+    }
+
+    /**
      * Parses the input text and generates an expression syntax.
      *
      * @return The parsed expression syntax.
@@ -328,6 +418,12 @@ public class Parser {
             case OpenParenthesisToken -> parseParenthesizedExpression();
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
             case NumberToken -> parseNumberLiteral();
+            case IdentifierToken -> {
+                if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
+                    yield parseCallExpression();
+                }
+                yield parseNameExpression();
+            }
             default -> parseNameExpression();
         };
     }
@@ -377,6 +473,42 @@ public class Parser {
     private ExpressionSyntax parseNameExpression() {
         SyntaxToken identifierToken = match(SyntaxType.IdentifierToken);
         return new NameExpressionSyntax(identifierToken);
+    }
+
+    /**
+     * Parses a call expression.
+     * A call expression consists of an identifier followed by arguments in parentheses.
+     *
+     * @return The parsed call expression syntax.
+     */
+    private ExpressionSyntax parseCallExpression() {
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
+        SeparatedSyntaxList<ExpressionSyntax> arguments = parseArguments();
+        SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);
+        return new CallExpressionSyntax(identifier, openParenthesis, arguments, closeParenthesis);
+    }
+
+    /**
+     * Parses a comma-separated list of arguments.
+     *
+     * @return The separated syntax list of arguments.
+     */
+    private SeparatedSyntaxList<ExpressionSyntax> parseArguments() {
+        List<SyntaxNode> nodesAndSeparators = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.CloseParenthesisToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            ExpressionSyntax expression = parseExpression();
+            nodesAndSeparators.add(expression);
+
+            if (current().getType() != SyntaxType.CloseParenthesisToken) {
+                SyntaxToken comma = match(SyntaxType.CommaToken);
+                nodesAndSeparators.add(comma);
+            }
+        }
+
+        return new SeparatedSyntaxList<>(nodesAndSeparators);
     }
 }
 

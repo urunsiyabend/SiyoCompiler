@@ -16,6 +16,8 @@ This document describes the grammar of the Siyo programming language.
 | `else`  | Else clause |
 | `while` | While loop |
 | `for`   | For loop |
+| `fn`    | Function declaration |
+| `return`| Return statement |
 
 ### Operators
 
@@ -65,6 +67,9 @@ This document describes the grammar of the Siyo programming language.
 | `)`   | Close parenthesis |
 | `{`   | Open brace |
 | `}`   | Close brace |
+| `:`   | Type annotation separator |
+| `,`   | Parameter/argument separator |
+| `->`  | Return type indicator |
 
 ### Literals
 
@@ -104,6 +109,8 @@ statement
     | if_statement
     | while_statement
     | for_statement
+    | function_declaration
+    | return_statement
     | expression_statement
     ;
 
@@ -129,6 +136,31 @@ while_statement
 
 for_statement
     : 'for' statement expression expression statement
+    ;
+
+function_declaration
+    : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause? block_statement
+    ;
+
+parameter_list
+    : parameter (',' parameter)*
+    ;
+
+parameter
+    : IDENTIFIER ':' type_identifier
+    ;
+
+type_clause
+    : '->' type_identifier
+    ;
+
+type_identifier
+    : 'int'
+    | 'bool'
+    ;
+
+return_statement
+    : 'return' expression?
     ;
 
 expression_statement
@@ -159,6 +191,7 @@ unary_expression
 
 primary_expression
     : literal_expression
+    | call_expression
     | name_expression
     | parenthesized_expression
     ;
@@ -169,6 +202,14 @@ literal_expression
     | 'false'
     ;
 
+call_expression
+    : IDENTIFIER '(' argument_list? ')'
+    ;
+
+argument_list
+    : expression (',' expression)*
+    ;
+
 name_expression
     : IDENTIFIER
     ;
@@ -177,6 +218,8 @@ parenthesized_expression
     : '(' expression ')'
     ;
 ```
+
+Note: `call_expression` is matched when an identifier is followed by `(`. Otherwise, `name_expression` is matched.
 
 ## Type System
 
@@ -211,6 +254,18 @@ parenthesized_expression
 
 5. **Control Flow**
    - Condition in `if`, `while`, and `for` statements must be `bool`
+
+6. **Functions**
+   - Function parameters have explicit types
+   - Return type is specified after `->`, or omitted for void functions
+   - Return statement expression type must match function return type
+   - Return without expression is only valid in void functions
+   - Return with expression is only valid in non-void functions
+
+7. **Function Calls**
+   - Number of arguments must match number of parameters
+   - Each argument type must match corresponding parameter type
+   - Call expression type is the function's return type (or void)
 
 ## Examples
 
@@ -273,6 +328,41 @@ true || false       // true
 5 != 3              // true
 ```
 
+### Functions
+
+```siyo
+// Simple function with return type
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+// Function with boolean return
+fn isPositive(n: int) -> bool {
+    return n > 0
+}
+
+// Void function (no return type)
+fn doNothing() {
+    return
+}
+
+// Function call
+{
+    mut result = add(10, 20)    // 30
+    isPositive(result)          // true
+}
+
+// Recursion
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+factorial(5)                    // 120
+```
+
 ### Scoping
 
 ```siyo
@@ -284,5 +374,21 @@ true || false       // true
         x               // true
     }
     x                   // 10
+}
+```
+
+### Function Scoping
+
+```siyo
+// Functions have their own scope
+fn compute(x: int) -> int {
+    mut y = x * 2       // y is local to the function
+    return y + 1
+}
+
+{
+    mut y = 100         // This y is separate from function's y
+    compute(5)          // Returns 11, does not affect outer y
+    y                   // Still 100
 }
 ```

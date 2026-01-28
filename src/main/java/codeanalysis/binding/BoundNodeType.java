@@ -23,4 +23,7 @@ public enum BoundNodeType {
     LabelStatement,
     GotoStatement,
     ConditionalGotoStatement,
+    FunctionDeclaration,
+    ReturnStatement,
+    CallExpression,
 }

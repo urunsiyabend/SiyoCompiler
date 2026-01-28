@@ -30,6 +30,7 @@ public abstract class BoundTreeRewriter {
             case GotoStatement -> rewriteGotoStatement((BoundGotoStatement) node);
             case ConditionalGotoStatement -> rewriteConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ExpressionStatement -> rewriteExpressionStatement((BoundExpressionStatement) node);
+            case ReturnStatement -> rewriteReturnStatement((BoundReturnStatement) node);
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -210,6 +211,7 @@ public abstract class BoundTreeRewriter {
             case UnaryExpression -> rewriteUnaryExpression((BoundUnaryExpression) node);
             case LiteralExpression -> rewriteLiteralExpression((BoundLiteralExpression) node);
             case VariableExpression -> rewriteVariableExpression((BoundVariableExpression) node);
+            case CallExpression -> rewriteCallExpression((BoundCallExpression) node);
             default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -283,5 +285,56 @@ public abstract class BoundTreeRewriter {
      */
     protected BoundExpression rewriteVariableExpression(BoundVariableExpression node) {
         return node;
+    }
+
+    /**
+     * Rewrites a return statement in the bound tree.
+     * When a return statement is rewritten, it rewrites the expression of the return statement.
+     * If the expression of the return statement does not change, it returns the return statement itself.
+     *
+     * @param node The return statement to rewrite.
+     * @return The rewritten return statement.
+     */
+    protected BoundStatement rewriteReturnStatement(BoundReturnStatement node) {
+        var expression = node.getExpression() == null ? null : rewriteExpression(node.getExpression());
+        if (expression == node.getExpression()) {
+            return node;
+        }
+        return new BoundReturnStatement(expression);
+    }
+
+    /**
+     * Rewrites a call expression in the bound tree.
+     * When a call expression is rewritten, it rewrites the arguments of the call expression.
+     * If the arguments of the call expression do not change, it returns the call expression itself.
+     *
+     * @param node The call expression to rewrite.
+     * @return The rewritten call expression.
+     */
+    protected BoundExpression rewriteCallExpression(BoundCallExpression node) {
+        ArrayList<BoundExpression> arguments = null;
+
+        for (int i = 0; i < node.getArguments().size(); i++) {
+            BoundExpression oldArgument = node.getArguments().get(i);
+            BoundExpression newArgument = rewriteExpression(oldArgument);
+            if (newArgument != oldArgument) {
+                if (arguments == null) {
+                    arguments = new ArrayList<>();
+                    for (int j = 0; j < i; j++) {
+                        arguments.add(node.getArguments().get(j));
+                    }
+                }
+            }
+
+            if (arguments != null) {
+                arguments.add(newArgument);
+            }
+        }
+
+        if (arguments == null) {
+            return node;
+        }
+
+        return new BoundCallExpression(node.getFunction(), arguments);
     }
 }

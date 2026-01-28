@@ -28,6 +28,8 @@ public class SyntaxRules {
             case "else" -> SyntaxType.ElseKeyword;
             case "while" -> SyntaxType.WhileKeyword;
             case "for" -> SyntaxType.ForKeyword;
+            case "fn" -> SyntaxType.FnKeyword;
+            case "return" -> SyntaxType.ReturnKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -74,6 +76,11 @@ public class SyntaxRules {
             case MutableKeyword -> "mut";
             case WhileKeyword -> "while";
             case ForKeyword -> "for";
+            case FnKeyword -> "fn";
+            case ReturnKeyword -> "return";
+            case ColonToken -> ":";
+            case CommaToken -> ",";
+            case ArrowToken -> "->";
             default -> null;
         };
     }

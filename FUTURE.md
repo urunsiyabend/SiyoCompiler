@@ -2,89 +2,106 @@
 
 This document outlines the current state of the Siyo language/compiler and a technical, phased roadmap to reach a stable core language. IO, networking, and stdlib work are intentionally out of scope for now.
 
-## Current State (Phase 0 Complete)
+## Current State (Phase 1 Complete)
 
 ### Capabilities
-- **Syntax**: expressions, blocks, variable declarations (`mut`/`imut`), if/else, while, for loops
+- **Syntax**: expressions, blocks, variable declarations (`mut`/`imut`), if/else, while, for loops, **function declarations, function calls, return statements**
 - **Types**: `int` (32-bit signed integer) and `bool`
+- **Functions**: `fn name(params) -> Type { body }` with full type checking
 - **Operators**: arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`<`, `<=`, `>`, `>=`, `==`, `!=`), logical (`&&`, `||`, `!`), bitwise (`&`, `|`, `^`, `~`, `<<`, `>>`)
 - **Pipeline**: parse -> bind -> lower -> interpret (Evaluator)
-- **REPL**: basic loop with diagnostics
+- **REPL**: basic loop with diagnostics, now supports function definitions
 - **Documentation**: `GRAMMAR.md` with complete lexical/syntactic grammar and type rules
 
 ### Test Coverage
-- **1049 tests** passing
-- Parser tests for expressions, operators, and statements
-- Binder tests for type checking, scoping, and control flow
-- Evaluator tests for computation correctness
+- **1049+ tests** passing
+- Parser tests for expressions, operators, statements, and functions
+- Binder tests for type checking, scoping, control flow, and function validation
+- Evaluator tests for computation correctness including function calls
 - Lexer tests for tokenization
 
-### Recent Improvements (Phase 0)
-- Fixed critical bug: removed `System.exit(1)` calls in Binder that terminated JVM on errors
-- Cleaned up dead code in `BoundNode.java`
-- Improved error messages in `BoundTreeRewriter` (now indicates compiler bugs clearly)
-- Created comprehensive grammar documentation
-- Added extensive parser statement tests
-- Added binder tests for type checking and scoping
+### Recent Improvements (Phase 1)
+- **Function Declarations**: `fn name(param: Type, ...) -> Type { body }`
+- **Function Calls**: `name(arg1, arg2)` with argument type checking
+- **Return Statements**: `return expr` with return type validation
+- **New Tokens**: `fn`, `return`, `:`, `,`, `->`
+- **New AST Nodes**: `FunctionDeclarationSyntax`, `ParameterSyntax`, `TypeClauseSyntax`, `ReturnStatementSyntax`, `CallExpressionSyntax`, `SeparatedSyntaxList`
+- **New Bound Nodes**: `BoundReturnStatement`, `BoundCallExpression`
+- **New Symbols**: `FunctionSymbol`, `ParameterSymbol`
+- **Call Stack**: `StackFrame` for function execution with local variable scoping
+- **Recursion Support**: Functions can call themselves
+- **10 new diagnostic messages** for function-related errors
 
 ## Gaps and Risks
-- No functions (definitions/calls/return)
 - No strings or composite types (arrays/records)
 - No module system or standard library packaging
 - Error recovery in parser could be improved
 - Tooling is REPL-only; no script runner or build target
 - No bytecode generation yet (interpreter only)
+- No control flow analysis (missing return detection, unreachable code)
 
 ---
 
 ## Roadmap
 
-### Phase 1 - Functions and Control Flow
+### Phase 1 - Functions and Control Flow ✅ COMPLETE
 **Goal**: Enable real programs beyond single expressions.
 
-**Priority: HIGH** - This is the next major milestone.
+**Status: COMPLETE**
 
-#### Tasks
-1. **Function Declarations**
+#### Implemented Features
+1. **Function Declarations** ✅
    - Syntax: `fn name(param: Type, ...) -> Type { ... }`
-   - New AST nodes: `FunctionDeclarationSyntax`, `ParameterSyntax`, `ReturnStatementSyntax`
-   - Support for void functions (no return type)
+   - New AST nodes: `FunctionDeclarationSyntax`, `ParameterSyntax`, `TypeClauseSyntax`
+   - Void functions supported (omit `-> Type`)
 
-2. **Function Calls**
+2. **Function Calls** ✅
    - Syntax: `name(arg1, arg2, ...)`
    - New AST node: `CallExpressionSyntax`
    - Argument count and type checking
 
-3. **Symbol Table Enhancement**
-   - Function symbol type with parameter types and return type
-   - Overload detection (report duplicate function names)
-   - Forward declaration support (optional)
+3. **Symbol Table Enhancement** ✅
+   - `FunctionSymbol` with parameter types and return type
+   - `ParameterSymbol` extending `VariableSymbol`
+   - Duplicate function detection
+   - Function lookup in `BoundScope`
 
-4. **Control Flow Analysis**
-   - Return statements in function bodies
-   - Ensure all code paths return a value (for non-void functions)
-   - Unreachable code detection (optional)
+4. **Return Statements** ✅
+   - `return expr` for non-void functions
+   - `return` for void functions
+   - Return type validation
 
-5. **Runtime Changes**
-   - Call stack with stack frames
+5. **Runtime Changes** ✅
+   - `StackFrame` class for call stack
    - Local variable storage per frame
    - Return value handling
+   - Recursion support
 
-6. **Diagnostics**
-   - Undefined function
-   - Wrong argument count
-   - Wrong argument types
-   - Missing return statement
-   - Return type mismatch
+6. **Diagnostics** ✅
+   - `reportUndefinedFunction`
+   - `reportWrongArgumentCount`
+   - `reportWrongArgumentType`
+   - `reportReturnOutsideFunction`
+   - `reportReturnWithValueInVoidFunction`
+   - `reportMissingReturnValue`
+   - `reportReturnTypeMismatch`
+   - `reportUndefinedType`
+   - `reportDuplicateParameter`
+   - `reportFunctionAlreadyDeclared`
 
-#### Acceptance Criteria
+#### Not Implemented (Deferred)
+- Forward declarations (functions must be declared before use)
+- Control flow analysis for missing returns
+- Unreachable code detection
+
+#### Verified Example
 ```siyo
 fn add(a: int, b: int) -> int {
-    a + b
+    return a + b
 }
 
 fn isPositive(n: int) -> bool {
-    n > 0
+    return n > 0
 }
 
 {
@@ -100,6 +117,8 @@ fn isPositive(n: int) -> bool {
 
 ### Phase 2 - Strings and Core Types
 **Goal**: Add practical data handling without IO.
+
+**Priority: HIGH** - This is the next major milestone.
 
 #### Tasks
 1. **String Literals**
@@ -228,17 +247,23 @@ fn distance(p: Point) -> int {
 
 ## Near-Term Priorities (Next Steps)
 
-### Immediate (Phase 1 Start)
-1. Add `FunctionDeclarationSyntax` and `ParameterSyntax` to parser
-2. Add `CallExpressionSyntax` for function calls
-3. Extend `Binder` with function symbol table
-4. Add `ReturnStatementSyntax` parsing and binding
-5. Implement call stack in `Evaluator`
+### Immediate (Phase 2 Start)
+1. Add `StringToken` to lexer with escape sequence handling
+2. Add `string` as third built-in type in `Binder.lookupType()`
+3. Add string literal expressions (`"hello"`)
+4. Implement string concatenation operator (`+`)
+5. Add built-in `len(s)` function for string length
 
 ### Short-Term
-1. Complete Phase 1 (functions)
-2. Add basic string support (Phase 2)
-3. Consider bytecode generation for performance
+1. Complete Phase 2 (strings)
+2. Add string indexing and substring operations
+3. Add type conversion functions (`toString`, `parseInt`)
+4. Consider bytecode generation for performance
+
+### Optional Enhancements (Phase 1 Follow-up)
+1. Control flow analysis for missing return statements
+2. Unreachable code detection
+3. Forward declaration support
 
 ---
 
@@ -258,6 +283,9 @@ fn distance(p: Point) -> int {
 ---
 
 ## Notes
-- IO and networking should wait until functions, strings, and modules are stable
+- IO and networking should wait until strings and modules are stable
 - Keep the interpreter as the reference backend; codegen can be added later
 - Consider adding a `--debug` flag for internal tree dumps
+- Phase 1 functions use explicit `return` statements (implicit last-expression return not implemented)
+- Function bodies are stored in `BoundGlobalScope` and passed to `Evaluator` via `Compilation`
+- The `SeparatedSyntaxList<T>` generic class can be reused for other comma-separated lists (e.g., array literals)

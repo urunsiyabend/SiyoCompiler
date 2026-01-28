@@ -6,6 +6,7 @@ import codeanalysis.syntax.SyntaxTree;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -95,7 +96,8 @@ public class Compilation {
         }
 
         BoundBlockStatement statement = getStatement();
-        Evaluator evaluator = new Evaluator(statement, variables);
+        Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
+        Evaluator evaluator = new Evaluator(statement, variables, functions);
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
     }
@@ -123,5 +125,25 @@ public class Compilation {
         return Lowerer.lower(result);
     }
 
-
+    /**
+     * Gets the function bodies from all global scopes in the compilation chain.
+     *
+     * @return A map of function symbols to their bound bodies.
+     */
+    private Map<FunctionSymbol, BoundBlockStatement> getFunctions() {
+        Map<FunctionSymbol, BoundBlockStatement> functions = new HashMap<>();
+        BoundGlobalScope scope = getGlobalScope();
+        while (scope != null) {
+            if (scope.getFunctionBodies() != null) {
+                // Lower each function body
+                for (Map.Entry<FunctionSymbol, BoundBlockStatement> entry : scope.getFunctionBodies().entrySet()) {
+                    if (!functions.containsKey(entry.getKey())) {
+                        functions.put(entry.getKey(), Lowerer.lower(entry.getValue()));
+                    }
+                }
+            }
+            scope = scope.getPrevious();
+        }
+        return functions;
+    }
 }

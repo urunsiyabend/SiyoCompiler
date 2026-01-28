@@ -163,4 +163,34 @@ public enum SyntaxType {
 
     /* Represents a caret (^) token. */
     CaretToken,
+
+    /* Represents a colon (:) token. */
+    ColonToken,
+
+    /* Represents a comma (,) token. */
+    CommaToken,
+
+    /* Represents an arrow (->) token. */
+    ArrowToken,
+
+    /* Represents a 'fn' keyword. */
+    FnKeyword,
+
+    /* Represents a 'return' keyword. */
+    ReturnKeyword,
+
+    /* Represents a parameter in function declaration. */
+    Parameter,
+
+    /* Represents a type clause (-> Type). */
+    TypeClause,
+
+    /* Represents a function declaration. */
+    FunctionDeclaration,
+
+    /* Represents a return statement. */
+    ReturnStatement,
+
+    /* Represents a call expression. */
+    CallExpression,
     }

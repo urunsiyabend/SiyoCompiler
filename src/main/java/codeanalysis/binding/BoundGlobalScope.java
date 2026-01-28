@@ -1,7 +1,10 @@
 package codeanalysis.binding;
 
 import codeanalysis.DiagnosticBox;
+import codeanalysis.FunctionSymbol;
 import codeanalysis.VariableSymbol;
+
+import java.util.Map;
 
 /**
  * The `BoundGlobalScope` class is responsible for binding global scope syntax to bound global scope.
@@ -15,6 +18,8 @@ import codeanalysis.VariableSymbol;
 public class BoundGlobalScope {
     private final BoundGlobalScope _previous;
     private final DiagnosticBox _diagnostics;
+    private final Iterable<FunctionSymbol> _functionSymbols;
+    private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies;
     private final Iterable<VariableSymbol> _variableSymbols;
     private final BoundStatement _boundStatement;
 
@@ -23,12 +28,16 @@ public class BoundGlobalScope {
      *
      * @param previous The previous bound global scope.
      * @param diagnostics The diagnostic box.
+     * @param functionSymbols The function symbols.
+     * @param functionBodies The map of function symbols to their bound bodies.
      * @param variableSymbols The variable symbols.
-     * @param boundExpression The bound expression.
+     * @param statement The bound statement.
      */
-    public BoundGlobalScope(BoundGlobalScope previous, DiagnosticBox diagnostics, Iterable<VariableSymbol> variableSymbols, BoundStatement statement) {
+    public BoundGlobalScope(BoundGlobalScope previous, DiagnosticBox diagnostics, Iterable<FunctionSymbol> functionSymbols, Map<FunctionSymbol, BoundBlockStatement> functionBodies, Iterable<VariableSymbol> variableSymbols, BoundStatement statement) {
         _previous = previous;
         _diagnostics = diagnostics;
+        _functionSymbols = functionSymbols;
+        _functionBodies = functionBodies;
         _variableSymbols = variableSymbols;
         _boundStatement = statement;
     }
@@ -40,6 +49,24 @@ public class BoundGlobalScope {
      */
     public DiagnosticBox getDiagnostics() {
         return _diagnostics;
+    }
+
+    /**
+     * Gets the function symbols.
+     *
+     * @return The function symbols of the bound global scope.
+     */
+    public Iterable<FunctionSymbol> getFunctionSymbols() {
+        return _functionSymbols;
+    }
+
+    /**
+     * Gets the function bodies map.
+     *
+     * @return The map of function symbols to their bound bodies.
+     */
+    public Map<FunctionSymbol, BoundBlockStatement> getFunctionBodies() {
+        return _functionBodies;
     }
 
     /**
