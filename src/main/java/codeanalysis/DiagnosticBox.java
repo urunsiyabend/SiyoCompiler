@@ -201,4 +201,15 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Name '%s' is read-only and cannot be assigned", name);
         report(span, message);
     }
+
+    /**
+     * Reports an unexpected expression type with the specified span and type.
+     *
+     * @param span The text span where the unexpected expression occurs.
+     * @param type The unexpected syntax type.
+     */
+    public void reportUnexpectedExpression(TextSpan span, SyntaxType type) {
+        String message = String.format("Unexpected expression syntax '%s'", type);
+        report(span, message);
+    }
 }

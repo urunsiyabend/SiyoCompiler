@@ -178,52 +178,18 @@ public class Binder {
      * @return The bound expression.
      */
     public BoundExpression bindExpression(ExpressionSyntax syntax) {
-        switch (syntax.getType()) {
-            case ParenthesizedExpression -> {
-                try {
-                    return bindParenthesizedExpression(((ParanthesizedExpressionSyntax)syntax));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
+        return switch (syntax.getType()) {
+            case ParenthesizedExpression -> bindParenthesizedExpression((ParanthesizedExpressionSyntax) syntax);
+            case LiteralExpression -> bindLiteralExpression((LiteralExpressionSyntax) syntax);
+            case NameExpression -> bindNameExpression((NameExpressionSyntax) syntax);
+            case AssignmentExpression -> bindAssignmentExpression((AssignmentExpressionSyntax) syntax);
+            case UnaryExpression -> bindUnaryExpression((UnaryExpressionSyntax) syntax);
+            case BinaryExpression -> bindBinaryExpression((BinaryExpressionSyntax) syntax);
+            default -> {
+                _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
+                yield new BoundLiteralExpression(0);
             }
-            case LiteralExpression -> {
-                return bindLiteralExpression((LiteralExpressionSyntax)syntax);
-            }
-            case NameExpression -> {
-                try {
-                    return bindNameExpression(((NameExpressionSyntax)syntax));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
-            }
-            case AssignmentExpression -> {
-                try {
-                    return bindAssignmentExpression(((AssignmentExpressionSyntax)syntax));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
-            }
-            case UnaryExpression -> {
-                try {
-                    return bindUnaryExpression((UnaryExpressionSyntax)syntax);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
-            }
-            case BinaryExpression -> {
-                try {
-                    return bindBinaryExpression((BinaryExpressionSyntax)syntax);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    System.exit(1);
-                }
-            }
-        }
-        return null;
+        };
     }
 
     /**
@@ -253,7 +219,7 @@ public class Binder {
      * @param syntax The expression syntax to bind.
      * @return The bound unary expression.
      */
-    private BoundExpression bindUnaryExpression(UnaryExpressionSyntax syntax) throws Exception {
+    private BoundExpression bindUnaryExpression(UnaryExpressionSyntax syntax) {
         BoundExpression boundOperand = bindExpression(syntax.getOperand());
         BoundUnaryOperator boundOperator = BoundUnaryOperator.bind(syntax.getOperator().getType(), boundOperand.getClassType());
         if (boundOperator == null) {
@@ -269,7 +235,7 @@ public class Binder {
      * @param syntax The expression syntax to bind.
      * @return The bound binary expression.
      */
-    private BoundExpression bindBinaryExpression(BinaryExpressionSyntax syntax) throws Exception {
+    private BoundExpression bindBinaryExpression(BinaryExpressionSyntax syntax) {
         BoundExpression boundLeft = bindExpression(syntax.getLeft());
         BoundExpression boundRight = bindExpression(syntax.getRight());
         BoundBinaryOperator boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
@@ -317,9 +283,8 @@ public class Binder {
      *
      * @param syntax The assignment expression syntax to bind.
      * @return The bound expression.
-     * @throws Exception If an error occurs during binding.
      */
-    private BoundExpression bindAssignmentExpression(AssignmentExpressionSyntax syntax) throws Exception {
+    private BoundExpression bindAssignmentExpression(AssignmentExpressionSyntax syntax) {
         String name = syntax.getIdentifierToken().getData();
         BoundExpression boundExpression = bindExpression(syntax.getExpressionSyntax());
         VariableSymbol variable;

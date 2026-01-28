@@ -1,8 +1,6 @@
 package codeanalysis.binding;
 
 import codeanalysis.text.TextSpan;
-import com.sun.security.auth.module.UnixLoginModule;
-import jdk.jshell.spi.ExecutionControl;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -88,12 +86,6 @@ public abstract class BoundNode {
         String text = getTextRepresentation(node);
         writer.write(text);
     }
-
-    private static void writeProperties(Writer writer, BoundNode node) throws IOException {
-        // TODO: Implement this method.
-        throw new UnsupportedOperationException();
-    }
-
 
     private static String getTextRepresentation(BoundNode node) {
         if (node instanceof BoundBinaryExpression b) {

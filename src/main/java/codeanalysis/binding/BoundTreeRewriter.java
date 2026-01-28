@@ -30,7 +30,7 @@ public abstract class BoundTreeRewriter {
             case GotoStatement -> rewriteGotoStatement((BoundGotoStatement) node);
             case ConditionalGotoStatement -> rewriteConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ExpressionStatement -> rewriteExpressionStatement((BoundExpressionStatement) node);
-            default -> throw new UnsupportedOperationException("Unexpected value: " + node.getType());
+            default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
 
@@ -210,7 +210,7 @@ public abstract class BoundTreeRewriter {
             case UnaryExpression -> rewriteUnaryExpression((BoundUnaryExpression) node);
             case LiteralExpression -> rewriteLiteralExpression((BoundLiteralExpression) node);
             case VariableExpression -> rewriteVariableExpression((BoundVariableExpression) node);
-            default -> throw new UnsupportedOperationException("Unexpected value: " + node.getType());
+            default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };
     }
 
