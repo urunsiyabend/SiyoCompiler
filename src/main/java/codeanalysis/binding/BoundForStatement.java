@@ -1,5 +1,6 @@
 package codeanalysis.binding;
 
+import codeanalysis.LabelSymbol;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -17,21 +18,24 @@ public class BoundForStatement extends BoundStatement {
     private final BoundExpression _condition;
     private final BoundExpression _iterator;
     private final BoundStatement _body;
+    private final LabelSymbol _breakLabel;
+    private final LabelSymbol _continueLabel;
 
-    /**
-     * Creates a new instance of the BoundForStatement class with the specified initializer, condition, iterator, and body.
-     *
-     * @param initializer   The initializer.
-     * @param condition     The condition.
-     * @param iterator      The iterator.
-     * @param body          The body.
-     */
     public BoundForStatement(BoundStatement initializer, BoundExpression condition, BoundExpression iterator, BoundStatement body) {
+        this(initializer, condition, iterator, body, null, null);
+    }
+
+    public BoundForStatement(BoundStatement initializer, BoundExpression condition, BoundExpression iterator, BoundStatement body, LabelSymbol breakLabel, LabelSymbol continueLabel) {
         _initializer = initializer;
         _condition = condition;
         _iterator = iterator;
         _body = body;
+        _breakLabel = breakLabel;
+        _continueLabel = continueLabel;
     }
+
+    public LabelSymbol getBreakLabel() { return _breakLabel; }
+    public LabelSymbol getContinueLabel() { return _continueLabel; }
 
     /**
      * Retrieves the type of the bound node.

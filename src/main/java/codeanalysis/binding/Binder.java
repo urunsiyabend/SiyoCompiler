@@ -3,6 +3,7 @@ package codeanalysis.binding;
 import codeanalysis.BuiltinFunctions;
 import codeanalysis.DiagnosticBox;
 import codeanalysis.FunctionSymbol;
+import codeanalysis.LabelSymbol;
 import codeanalysis.ParameterSymbol;
 import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
@@ -27,6 +28,14 @@ public class Binder {
     private BoundScope _scope;
     private FunctionSymbol _currentFunction = null;
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
+    private final Stack<LoopLabels> _loopStack = new Stack<>();
+    private int _labelCounter = 0;
+
+    private LabelSymbol generateLabel(String prefix) {
+        return new LabelSymbol(prefix + _labelCounter++);
+    }
+
+    private record LoopLabels(LabelSymbol breakLabel, LabelSymbol continueLabel) {}
 
     /**
      * Initializes a new instance of the Binder class with the specified variables.
@@ -90,6 +99,8 @@ public class Binder {
             case ForStatement -> bindForStatement((ForStatementSyntax)syntax);
             case FunctionDeclaration -> bindFunctionDeclaration((FunctionDeclarationSyntax)syntax);
             case ReturnStatement -> bindReturnStatement((ReturnStatementSyntax)syntax);
+            case BreakStatement -> bindBreakStatement((BreakStatementSyntax)syntax);
+            case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -104,6 +115,14 @@ public class Binder {
         ArrayList<BoundStatement> statements = new ArrayList<>();
         _scope = new BoundScope(_scope);
 
+        // First pass: register function declarations (forward declarations)
+        for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
+                registerFunctionDeclaration(funcSyntax);
+            }
+        }
+
+        // Second pass: bind all statements (function bodies can now reference each other)
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
             BoundStatement boundStatement = bindStatement(statementSyntax);
             statements.add(boundStatement);
@@ -111,6 +130,36 @@ public class Binder {
 
         _scope = _scope.getParent();
         return new BoundBlockStatement(statements);
+    }
+
+    /**
+     * Registers a function declaration in the current scope without binding the body.
+     * This enables forward declarations.
+     */
+    private void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+
+        // Don't re-register if already declared
+        if (_scope.tryLookupFunction(name)) {
+            return;
+        }
+
+        List<ParameterSymbol> parameters = new ArrayList<>();
+        for (ParameterSyntax parameterSyntax : syntax.getParameters()) {
+            String parameterName = parameterSyntax.getIdentifier().getData();
+            String typeName = parameterSyntax.getTypeToken().getData();
+            Class<?> parameterType = lookupType(typeName);
+            if (parameterType == null) parameterType = Integer.class;
+            parameters.add(new ParameterSymbol(parameterName, parameterType));
+        }
+
+        Class<?> returnType = null;
+        if (syntax.getTypeClause() != null) {
+            returnType = lookupType(syntax.getTypeClause().getIdentifier().getData());
+        }
+
+        FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
+        _scope.tryDeclareFunction(function);
     }
 
     /**
@@ -164,8 +213,12 @@ public class Binder {
      */
     private BoundStatement bindWhileStatement(WhileStatementSyntax syntax) {
         BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
+        LabelSymbol breakLabel = generateLabel("break");
+        LabelSymbol continueLabel = generateLabel("continue");
+        _loopStack.push(new LoopLabels(breakLabel, continueLabel));
         BoundStatement body = bindStatement(syntax.getBody());
-        return new BoundWhileStatement(condition, body);
+        _loopStack.pop();
+        return new BoundWhileStatement(condition, body, breakLabel, continueLabel);
     }
 
     /**
@@ -178,9 +231,12 @@ public class Binder {
         BoundStatement initializer = bindStatement(syntax.getInitializer());
         BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
         BoundExpression iterator = bindExpression(syntax.getIterator());
+        LabelSymbol breakLabel = generateLabel("break");
+        LabelSymbol continueLabel = generateLabel("continue");
+        _loopStack.push(new LoopLabels(breakLabel, continueLabel));
         BoundStatement body = bindStatement(syntax.getBody());
-
-        return new BoundForStatement(initializer, condition, iterator, body);
+        _loopStack.pop();
+        return new BoundForStatement(initializer, condition, iterator, body, breakLabel, continueLabel);
     }
 
     public BoundExpression bindExpression(ExpressionSyntax syntax, Class<?> expectedType) {
@@ -375,12 +431,15 @@ public class Binder {
             }
         }
 
-        // Create function symbol
-        FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
-
-        // Try to declare the function
-        if (!_scope.tryDeclareFunction(function)) {
-            _diagnostics.reportFunctionAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        // Use pre-registered function symbol if available, otherwise create and declare
+        FunctionSymbol function;
+        if (_scope.tryLookupFunction(name)) {
+            function = _scope.lookupFunction(name);
+        } else {
+            function = new FunctionSymbol(name, parameters, returnType);
+            if (!_scope.tryDeclareFunction(function)) {
+                _diagnostics.reportFunctionAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+            }
         }
 
         // Bind the function body in a new scope with parameters
@@ -388,8 +447,8 @@ public class Binder {
         FunctionSymbol previousFunction = _currentFunction;
         _currentFunction = function;
 
-        // Add parameters to scope as variables
-        for (ParameterSymbol parameter : parameters) {
+        // Add the function's own parameter symbols to scope (important for consistency with evaluator)
+        for (ParameterSymbol parameter : function.getParameters()) {
             _scope.tryDeclare(parameter);
         }
 
@@ -491,10 +550,27 @@ public class Binder {
      * @param name The type name.
      * @return The Class representing the type, or null if not found.
      */
+    private BoundStatement bindBreakStatement(BreakStatementSyntax syntax) {
+        if (_loopStack.isEmpty()) {
+            _diagnostics.reportBreakOutsideLoop(syntax.getKeyword().getSpan());
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+        return new BoundBreakStatement(_loopStack.peek().breakLabel());
+    }
+
+    private BoundStatement bindContinueStatement(ContinueStatementSyntax syntax) {
+        if (_loopStack.isEmpty()) {
+            _diagnostics.reportContinueOutsideLoop(syntax.getKeyword().getSpan());
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+        return new BoundContinueStatement(_loopStack.peek().continueLabel());
+    }
+
     private Class<?> lookupType(String name) {
         return switch (name) {
             case "int" -> Integer.class;
             case "bool" -> Boolean.class;
+            case "float" -> Double.class;
             case "string" -> String.class;
             default -> null;
         };

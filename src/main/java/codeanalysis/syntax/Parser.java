@@ -136,6 +136,8 @@ public class Parser {
             case ForKeyword -> parseForStatement();
             case FnKeyword -> parseFunctionDeclaration();
             case ReturnKeyword -> parseReturnStatement();
+            case BreakKeyword -> parseBreakStatement();
+            case ContinueKeyword -> parseContinueStatement();
             default -> parseExpressionStatement();
         };
     }
@@ -346,6 +348,16 @@ public class Parser {
         return new ReturnStatementSyntax(returnKeyword, expression);
     }
 
+    private StatementSyntax parseBreakStatement() {
+        SyntaxToken keyword = match(SyntaxType.BreakKeyword);
+        return new BreakStatementSyntax(keyword);
+    }
+
+    private StatementSyntax parseContinueStatement() {
+        SyntaxToken keyword = match(SyntaxType.ContinueKeyword);
+        return new ContinueStatementSyntax(keyword);
+    }
+
     /**
      * Parses the input text and generates an expression syntax.
      *
@@ -418,6 +430,7 @@ public class Parser {
             case OpenParenthesisToken -> parseParenthesizedExpression();
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
             case NumberToken -> parseNumberLiteral();
+            case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
             case IdentifierToken -> {
                 if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
@@ -463,6 +476,16 @@ public class Parser {
     private ExpressionSyntax parseNumberLiteral() {
         SyntaxToken numberToken = match(SyntaxType.NumberToken);
         return new LiteralExpressionSyntax(numberToken);
+    }
+
+    /**
+     * Parses a float literal.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseFloatLiteral() {
+        SyntaxToken floatToken = match(SyntaxType.FloatToken);
+        return new LiteralExpressionSyntax(floatToken);
     }
 
     /**

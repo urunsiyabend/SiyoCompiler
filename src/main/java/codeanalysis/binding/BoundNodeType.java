@@ -26,4 +26,6 @@ public enum BoundNodeType {
     FunctionDeclaration,
     ReturnStatement,
     CallExpression,
+    BreakStatement,
+    ContinueStatement,
 }

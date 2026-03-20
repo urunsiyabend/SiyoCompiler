@@ -292,6 +292,26 @@ public class Lexer {
         while (Character.isDigit(currentChar())) {
             next();
         }
+
+        // Check for decimal point (float literal)
+        if (currentChar() == '.' && Character.isDigit(peek(1))) {
+            next(); // consume '.'
+            while (Character.isDigit(currentChar())) {
+                next();
+            }
+            int length = _position - _start;
+            String text = _text.toString(_start, _start + length);
+            double value = 0.0;
+            try {
+                value = Double.parseDouble(text);
+            } catch (NumberFormatException e) {
+                _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Integer.class);
+            }
+            _value = value;
+            _type = SyntaxType.FloatToken;
+            return;
+        }
+
         int length = _position - _start;
         String text = _text.toString(_start, _start + length);
         int value = 0;

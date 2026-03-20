@@ -1,5 +1,6 @@
 package codeanalysis.binding;
 
+import codeanalysis.LabelSymbol;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -15,17 +16,22 @@ import java.util.NoSuchElementException;
 public class BoundWhileStatement extends BoundStatement {
     private final BoundExpression _condition;
     private final BoundStatement _body;
+    private final LabelSymbol _breakLabel;
+    private final LabelSymbol _continueLabel;
 
-    /**
-     * Constructs a new instance of the BoundWhileStatement class.
-     *
-     * @param condition The condition of the while statement.
-     * @param body      The statement to be executed while the condition is true.
-     */
     public BoundWhileStatement(BoundExpression condition, BoundStatement body) {
+        this(condition, body, null, null);
+    }
+
+    public BoundWhileStatement(BoundExpression condition, BoundStatement body, LabelSymbol breakLabel, LabelSymbol continueLabel) {
         _condition = condition;
         _body = body;
+        _breakLabel = breakLabel;
+        _continueLabel = continueLabel;
     }
+
+    public LabelSymbol getBreakLabel() { return _breakLabel; }
+    public LabelSymbol getContinueLabel() { return _continueLabel; }
 
     /**
      * Gets the condition expression of the bound node.

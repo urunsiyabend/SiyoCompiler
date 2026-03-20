@@ -327,6 +327,48 @@ class EvaluatorTest {
                 // Functions with strings
                 {"{ fn greet(name: string) -> string { return \"Hello, \" + name + \"!\" } greet(\"World\") }", "Hello, World!"},
                 {"{ fn strLen(s: string) -> int { return len(s) } strLen(\"hello\") }", 5},
+
+                // Float literals
+                {"3.14", 3.14},
+                {"0.5", 0.5},
+                {"+3.14", 3.14},
+                {"-3.14", -3.14},
+
+                // Float arithmetic
+                {"1.5 + 2.5", 4.0},
+                {"5.0 - 2.0", 3.0},
+                {"2.5 * 4.0", 10.0},
+                {"10.0 / 4.0", 2.5},
+                {"10.0 % 3.0", 1.0},
+
+                // Float comparison
+                {"1.5 < 2.5", true},
+                {"2.5 > 1.5", true},
+                {"1.5 == 1.5", true},
+                {"1.5 != 2.5", true},
+                {"1.5 >= 1.5", true},
+                {"1.5 <= 2.5", true},
+
+                // Float variables
+                {"{ mut pi = 3.14 pi }", 3.14},
+                {"{ mut x = 1.5 x = 2.5 x }", 2.5},
+
+                // Float conversion functions
+                {"toFloat(42)", 42.0},
+                {"toInt(3.14)", 3},
+                {"parseFloat(\"3.14\")", 3.14},
+                {"toString(3.14)", "3.14"},
+
+                // Break statement
+                {"{ mut x = 0 while true { x = x + 1 if x == 5 break } x }", 5},
+                {"{ mut result = 0 for mut i = 0 i < 100 i = i + 1 { if i == 10 break result = i } result }", 9},
+
+                // Continue statement
+                {"{ mut sum = 0 for mut i = 0 i < 10 i = i + 1 { if i == 5 continue sum = sum + i } sum }", 40},
+
+                // Forward declarations (call before definition)
+                {"{ fn isEven(n: int) -> bool { if n == 0 return true return isOdd(n - 1) } fn isOdd(n: int) -> bool { if n == 0 return false return isEven(n - 1) } isEven(4) }", true},
+                {"{ fn isEven(n: int) -> bool { if n == 0 return true return isOdd(n - 1) } fn isOdd(n: int) -> bool { if n == 0 return false return isEven(n - 1) } isOdd(3) }", true},
         };
     }
 

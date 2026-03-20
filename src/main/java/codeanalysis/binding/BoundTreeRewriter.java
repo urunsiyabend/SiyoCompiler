@@ -31,6 +31,8 @@ public abstract class BoundTreeRewriter {
             case ConditionalGotoStatement -> rewriteConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ExpressionStatement -> rewriteExpressionStatement((BoundExpressionStatement) node);
             case ReturnStatement -> rewriteReturnStatement((BoundReturnStatement) node);
+            case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
+            case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -195,6 +197,14 @@ public abstract class BoundTreeRewriter {
             return node;
         }
         return new BoundExpressionStatement(expression);
+    }
+
+    protected BoundStatement rewriteBreakStatement(BoundBreakStatement node) {
+        return new BoundGotoStatement(node.getBreakLabel());
+    }
+
+    protected BoundStatement rewriteContinueStatement(BoundContinueStatement node) {
+        return new BoundGotoStatement(node.getContinueLabel());
     }
 
     /**

@@ -17,6 +17,9 @@ public enum SyntaxType {
     /* Represents a string token. */
     StringToken,
 
+    /* Represents a float token. */
+    FloatToken,
+
     /* Represents a plus token. */
     PlusToken,
 
@@ -196,4 +199,16 @@ public enum SyntaxType {
 
     /* Represents a call expression. */
     CallExpression,
+
+    /* Represents a 'break' keyword. */
+    BreakKeyword,
+
+    /* Represents a 'continue' keyword. */
+    ContinueKeyword,
+
+    /* Represents a break statement. */
+    BreakStatement,
+
+    /* Represents a continue statement. */
+    ContinueStatement,
     }

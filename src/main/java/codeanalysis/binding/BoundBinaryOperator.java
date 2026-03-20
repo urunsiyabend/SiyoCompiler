@@ -47,6 +47,18 @@ public class BoundBinaryOperator {
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Boolean.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Boolean.class, Boolean.class),
 
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Double.class),
+            new BoundBinaryOperator(SyntaxType.MinusToken, BoundBinaryOperatorType.Subtraction, Double.class),
+            new BoundBinaryOperator(SyntaxType.AsteriskToken, BoundBinaryOperatorType.Multiplication, Double.class),
+            new BoundBinaryOperator(SyntaxType.SlashToken, BoundBinaryOperatorType.Division, Double.class),
+            new BoundBinaryOperator(SyntaxType.PercentToken, BoundBinaryOperatorType.Modulo, Double.class),
+            new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Double.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Double.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessToken, BoundBinaryOperatorType.LessThan, Double.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessOrEqualsToken, BoundBinaryOperatorType.LessOrEqualsThan, Double.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, Double.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, Double.class, Boolean.class),
+
             new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, String.class),
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, String.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, String.class, Boolean.class),

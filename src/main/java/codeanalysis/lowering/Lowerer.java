@@ -81,18 +81,30 @@ public class Lowerer extends BoundTreeRewriter {
      */
     @Override
     protected BoundStatement rewriteForStatement(BoundForStatement node) {
-        BoundStatement variableDeclaration = node.getInitializer();
+        // For loops need special handling for continue: continue should jump to iterator, not check
+        // Layout: initializer → gotoCheck → bodyLabel: body → continueLabel: iterator → checkLabel: condition → gotoTrue(bodyLabel) → breakLabel:
+        BoundStatement initializer = node.getInitializer();
         BoundExpression condition = node.getCondition();
         BoundExpression iterator = node.getIterator();
-        ArrayList<BoundStatement> whileBodyStatements = new ArrayList<>();
-        whileBodyStatements.add(node.getBody());
-        whileBodyStatements.add(new BoundExpressionStatement(iterator));
-        BoundBlockStatement whileBody = new BoundBlockStatement(whileBodyStatements);
-        BoundWhileStatement whileStatement = new BoundWhileStatement(condition, whileBody);
-        ArrayList<BoundStatement> whileStatements = new ArrayList<>();
-        whileStatements.add(variableDeclaration);
-        whileStatements.add(whileStatement);
-        BoundBlockStatement result = new BoundBlockStatement(whileStatements);
+
+        var bodyLabel = generateLabel();
+        var checkLabel = generateLabel();
+        var continueLabel = node.getContinueLabel() != null ? node.getContinueLabel() : generateLabel();
+        var breakLabel = node.getBreakLabel() != null ? node.getBreakLabel() : generateLabel();
+
+        ArrayList<BoundStatement> resultStatements = new ArrayList<>();
+
+        resultStatements.add(initializer);
+        resultStatements.add(new BoundGotoStatement(checkLabel));
+        resultStatements.add(new BoundLabelStatement(bodyLabel));
+        resultStatements.add(node.getBody());
+        resultStatements.add(new BoundLabelStatement(continueLabel));
+        resultStatements.add(new BoundExpressionStatement(iterator));
+        resultStatements.add(new BoundLabelStatement(checkLabel));
+        resultStatements.add(new BoundConditionalGotoStatement(bodyLabel, condition, true));
+        resultStatements.add(new BoundLabelStatement(breakLabel));
+
+        BoundBlockStatement result = new BoundBlockStatement(resultStatements);
         return rewriteStatement(result);
     }
 
@@ -105,24 +117,29 @@ public class Lowerer extends BoundTreeRewriter {
      */
     @Override
     protected BoundStatement rewriteWhileStatement(BoundWhileStatement node) {
-        var continueLabel = generateLabel();
+        var bodyLabel = generateLabel();
         var checkLabel = generateLabel();
-        var endLabel = generateLabel();
+        var continueLabel = node.getContinueLabel() != null ? node.getContinueLabel() : checkLabel;
+        var breakLabel = node.getBreakLabel() != null ? node.getBreakLabel() : generateLabel();
 
         var gotoCheck = new BoundGotoStatement(checkLabel);
+        var bodyLabelStatement = new BoundLabelStatement(bodyLabel);
         var continueLabelStatement = new BoundLabelStatement(continueLabel);
-        var checkLabelStatement = new BoundLabelStatement(checkLabel);
-        var gotoTrue = new BoundConditionalGotoStatement(continueLabel, node.getCondition(), true);
-        var endLabelStatement = new BoundLabelStatement(endLabel);
+        var checkLabelStatement = continueLabel == checkLabel ? continueLabelStatement : new BoundLabelStatement(checkLabel);
+        var gotoTrue = new BoundConditionalGotoStatement(bodyLabel, node.getCondition(), true);
+        var breakLabelStatement = new BoundLabelStatement(breakLabel);
 
         ArrayList<BoundStatement> resultStatements = new ArrayList<>();
 
         resultStatements.add(gotoCheck);
-        resultStatements.add(continueLabelStatement);
+        resultStatements.add(bodyLabelStatement);
         resultStatements.add(node.getBody());
+        if (continueLabel != checkLabel) {
+            resultStatements.add(continueLabelStatement);
+        }
         resultStatements.add(checkLabelStatement);
         resultStatements.add(gotoTrue);
-        resultStatements.add(endLabelStatement);
+        resultStatements.add(breakLabelStatement);
 
         BoundBlockStatement result = new BoundBlockStatement(resultStatements);
         return rewriteStatement(result);

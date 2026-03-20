@@ -23,6 +23,8 @@ public class BoundUnaryOperator {
             new BoundUnaryOperator(SyntaxType.PlusToken, BoundUnaryOperatorType.Identity, Integer.class),
             new BoundUnaryOperator(SyntaxType.MinusToken, BoundUnaryOperatorType.Negation, Integer.class),
             new BoundUnaryOperator(SyntaxType.TildeToken, BoundUnaryOperatorType.OnesComplement, Integer.class),
+            new BoundUnaryOperator(SyntaxType.PlusToken, BoundUnaryOperatorType.Identity, Double.class),
+            new BoundUnaryOperator(SyntaxType.MinusToken, BoundUnaryOperatorType.Negation, Double.class),
     };
 
     /**

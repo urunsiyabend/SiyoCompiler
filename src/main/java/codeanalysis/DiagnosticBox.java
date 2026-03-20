@@ -346,4 +346,12 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Invalid escape character '\\%s'", character);
         report(span, message);
     }
+
+    public void reportBreakOutsideLoop(TextSpan span) {
+        report(span, "Break statement is not allowed outside of a loop");
+    }
+
+    public void reportContinueOutsideLoop(TextSpan span) {
+        report(span, "Continue statement is not allowed outside of a loop");
+    }
 }

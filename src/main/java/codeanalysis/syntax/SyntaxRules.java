@@ -30,6 +30,8 @@ public class SyntaxRules {
             case "for" -> SyntaxType.ForKeyword;
             case "fn" -> SyntaxType.FnKeyword;
             case "return" -> SyntaxType.ReturnKeyword;
+            case "break" -> SyntaxType.BreakKeyword;
+            case "continue" -> SyntaxType.ContinueKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -81,6 +83,8 @@ public class SyntaxRules {
             case ColonToken -> ":";
             case CommaToken -> ",";
             case ArrowToken -> "->";
+            case BreakKeyword -> "break";
+            case ContinueKeyword -> "continue";
             default -> null;
         };
     }

@@ -247,8 +247,8 @@ public class Evaluator {
     private Object evaluateUnaryExpression(BoundUnaryExpression u) throws Exception {
         Object operand = evaluateExpression(u.getOperand());
         return switch (u.getOperator().getType()) {
-            case Identity -> (int) operand;
-            case Negation -> -(int) operand;
+            case Identity -> operand instanceof Double d ? d : (int) operand;
+            case Negation -> operand instanceof Double d ? -d : -(int) operand;
             case LogicalNegation -> !(boolean) operand;
             case OnesComplement -> ~(int) operand;
             default -> throw new Exception(String.format("Unexpected unary operator: %s", u.getOperator().getType()));
@@ -270,12 +270,14 @@ public class Evaluator {
             case Addition -> {
                 if (left instanceof String l && right instanceof String r)
                     yield l + r;
+                if (left instanceof Double l && right instanceof Double r)
+                    yield l + r;
                 yield (int) left + (int) right;
             }
-            case Subtraction -> (int) left - (int) right;
-            case Multiplication -> (int) left * (int) right;
-            case Division -> (int) left / (int) right;
-            case Modulo -> (int) left % (int) right;
+            case Subtraction -> left instanceof Double l && right instanceof Double r ? l - r : (int) left - (int) right;
+            case Multiplication -> left instanceof Double l && right instanceof Double r ? l * r : (int) left * (int) right;
+            case Division -> left instanceof Double l && right instanceof Double r ? l / r : (int) left / (int) right;
+            case Modulo -> left instanceof Double l && right instanceof Double r ? l % r : (int) left % (int) right;
             case BitwiseAnd -> b.getClassType() == Boolean.class ? (boolean) left & (boolean) right : (int) left & (int) right;
             case BitwiseOr -> b.getClassType() == Boolean.class ? (boolean) left | (boolean) right : (int) left | (int) right;
             case BitwiseXor -> b.getClassType() == Boolean.class ? (boolean) left ^ (boolean) right : (int) left ^ (int) right;
@@ -285,10 +287,10 @@ public class Evaluator {
             case LogicalOr -> (boolean) left || (boolean) right;
             case Equals -> left.equals(right);
             case NotEquals -> !left.equals(right);
-            case LessThan -> (int) left < (int) right;
-            case LessOrEqualsThan -> (int) left <= (int) right;
-            case GreaterThan -> (int) left > (int) right;
-            case GreaterOrEqualsThen -> (int) left >= (int) right;
+            case LessThan -> left instanceof Double l && right instanceof Double r ? l < r : (int) left < (int) right;
+            case LessOrEqualsThan -> left instanceof Double l && right instanceof Double r ? l <= r : (int) left <= (int) right;
+            case GreaterThan -> left instanceof Double l && right instanceof Double r ? l > r : (int) left > (int) right;
+            case GreaterOrEqualsThen -> left instanceof Double l && right instanceof Double r ? l >= r : (int) left >= (int) right;
             default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
         };
     }
@@ -369,6 +371,19 @@ public class Evaluator {
             } catch (NumberFormatException e) {
                 return 0;
             }
+        }
+        if (function == BuiltinFunctions.PARSE_FLOAT) {
+            try {
+                return Double.parseDouble((String) arguments[0]);
+            } catch (NumberFormatException e) {
+                return 0.0;
+            }
+        }
+        if (function == BuiltinFunctions.TO_INT) {
+            return ((Double) arguments[0]).intValue();
+        }
+        if (function == BuiltinFunctions.TO_FLOAT) {
+            return ((Integer) arguments[0]).doubleValue();
         }
         throw new Exception("Unknown built-in function: " + function.getName());
     }
