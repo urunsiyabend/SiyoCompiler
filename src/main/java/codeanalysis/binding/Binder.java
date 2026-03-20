@@ -1,5 +1,6 @@
 package codeanalysis.binding;
 
+import codeanalysis.BuiltinFunctions;
 import codeanalysis.DiagnosticBox;
 import codeanalysis.FunctionSymbol;
 import codeanalysis.ParameterSymbol;
@@ -34,6 +35,10 @@ public class Binder {
      */
     public Binder(BoundScope parent) {
         _scope = new BoundScope(parent);
+
+        for (FunctionSymbol builtin : BuiltinFunctions.getAll()) {
+            _scope.tryDeclareFunction(builtin);
+        }
     }
 
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
@@ -224,7 +229,10 @@ public class Binder {
      * @return The bound expression.
      */
     private BoundExpression bindLiteralExpression(LiteralExpressionSyntax syntax) {
-        Object value = syntax.getValue() != null ? syntax.getValue() : 0;
+        Object value = syntax.getValue();
+        if (value == null) {
+            value = 0;
+        }
         return new BoundLiteralExpression(value);
     }
 
@@ -468,7 +476,8 @@ public class Binder {
             BoundExpression argument = boundArguments.get(i);
             ParameterSymbol parameter = function.getParameters().get(i);
 
-            if (argument.getClassType() != parameter.getType()) {
+            // Object.class accepts any type (used by built-in functions like toString)
+            if (parameter.getType() != Object.class && argument.getClassType() != parameter.getType()) {
                 _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), parameter.getName(), parameter.getType(), argument.getClassType());
             }
         }
@@ -486,6 +495,7 @@ public class Binder {
         return switch (name) {
             case "int" -> Integer.class;
             case "bool" -> Boolean.class;
+            case "string" -> String.class;
             default -> null;
         };
     }

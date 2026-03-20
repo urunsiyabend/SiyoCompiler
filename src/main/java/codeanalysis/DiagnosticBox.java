@@ -325,4 +325,25 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Cannot return type <%s>, expected <%s>", actual, expected);
         report(span, message);
     }
+
+    /**
+     * Reports an unterminated string literal diagnostic.
+     *
+     * @param span The text span where the unterminated string starts.
+     */
+    public void reportUnterminatedString(TextSpan span) {
+        String message = "Unterminated string literal";
+        report(span, message);
+    }
+
+    /**
+     * Reports an invalid escape character in a string literal.
+     *
+     * @param span The text span where the invalid escape character occurs.
+     * @param character The invalid escape character.
+     */
+    public void reportInvalidEscapeCharacter(TextSpan span, char character) {
+        String message = String.format("Invalid escape character '\\%s'", character);
+        report(span, message);
+    }
 }

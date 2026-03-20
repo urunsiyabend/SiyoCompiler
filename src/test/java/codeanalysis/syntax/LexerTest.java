@@ -203,6 +203,12 @@ class LexerTest {
         if (t1Type == SyntaxType.GreaterToken && t2Type == SyntaxType.GreaterOrEqualsToken)
             return true;
 
+        if (t1Type == SyntaxType.MinusToken && t2Type == SyntaxType.GreaterToken)
+            return true;
+
+        if (t1Type == SyntaxType.MinusToken && t2Type == SyntaxType.GreaterOrEqualsToken)
+            return true;
+
         return false;
     }
 
@@ -234,6 +240,9 @@ class LexerTest {
         tokens.add(new Token(SyntaxType.DoublePipeToken, "||"));
         tokens.add(new Token(SyntaxType.EqualsEqualsToken, "=="));
         tokens.add(new Token(SyntaxType.BangEqualsToken, "!="));
+        tokens.add(new Token(SyntaxType.StringToken, "\"test\""));
+        tokens.add(new Token(SyntaxType.StringToken, "\"\""));
+        tokens.add(new Token(SyntaxType.StringToken, "\"hello world\""));
         return tokens;
     }
 

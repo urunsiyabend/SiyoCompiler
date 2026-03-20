@@ -276,6 +276,57 @@ class EvaluatorTest {
                 {"{ mut result = 0 for mut x = 0 x < 10 x = x + 1 {result = x} result}", 9},
                 {"{ mut result = 0 for mut x = 10 x > 0 x = x - 1 {result = x} result}", 1},
                 {"{ mut result = 0 for mut x = 2 x < 100 x = x * x {result = x} result}", 16},
+
+                // String literals
+                {"\"hello\"", "hello"},
+                {"\"\"", ""},
+                {"\"hello world\"", "hello world"},
+
+                // String escape sequences
+                {"\"hello\\nworld\"", "hello\nworld"},
+                {"\"hello\\tworld\"", "hello\tworld"},
+                {"\"hello\\\\world\"", "hello\\world"},
+                {"\"hello\\\"world\"", "hello\"world"},
+
+                // String concatenation
+                {"\"hello\" + \" \" + \"world\"", "hello world"},
+                {"\"abc\" + \"def\"", "abcdef"},
+                {"\"\" + \"hello\"", "hello"},
+
+                // String equality
+                {"\"hello\" == \"hello\"", true},
+                {"\"hello\" == \"world\"", false},
+                {"\"hello\" != \"world\"", true},
+                {"\"hello\" != \"hello\"", false},
+
+                // String variables
+                {"{ mut s = \"hello\" s }", "hello"},
+                {"{ imut s = \"hello\" s }", "hello"},
+                {"{ mut s = \"hello\" s = \"world\" s }", "world"},
+
+                // Built-in: len
+                {"len(\"hello\")", 5},
+                {"len(\"\")", 0},
+                {"len(\"hello world\")", 11},
+
+                // Built-in: toString
+                {"toString(42)", "42"},
+                {"toString(true)", "true"},
+                {"toString(false)", "false"},
+
+                // Built-in: parseInt
+                {"parseInt(\"42\")", 42},
+                {"parseInt(\"0\")", 0},
+                {"parseInt(\"invalid\")", 0},
+
+                // String functions
+                {"{ mut name = \"World\" \"Hello, \" + name + \"!\" }", "Hello, World!"},
+                {"len(\"abc\" + \"def\")", 6},
+                {"toString(len(\"hello\"))", "5"},
+
+                // Functions with strings
+                {"{ fn greet(name: string) -> string { return \"Hello, \" + name + \"!\" } greet(\"World\") }", "Hello, World!"},
+                {"{ fn strLen(s: string) -> int { return len(s) } strLen(\"hello\") }", 5},
         };
     }
 

@@ -5,6 +5,7 @@ import codeanalysis.binding.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Stack;
+import java.util.List;
 
 /**
  * The {@code Evaluator} class is responsible for evaluating an expression syntax tree and computing the result.
@@ -266,7 +267,11 @@ public class Evaluator {
         Object right = evaluateExpression(b.getRight());
 
         return switch (b.getOperator().getType()) {
-            case Addition -> (int) left + (int) right;
+            case Addition -> {
+                if (left instanceof String l && right instanceof String r)
+                    yield l + r;
+                yield (int) left + (int) right;
+            }
             case Subtraction -> (int) left - (int) right;
             case Multiplication -> (int) left * (int) right;
             case Division -> (int) left / (int) right;
@@ -299,9 +304,15 @@ public class Evaluator {
         FunctionSymbol function = c.getFunction();
 
         // Evaluate arguments
-        Object[] arguments = new Object[c.getArguments().size()];
-        for (int i = 0; i < c.getArguments().size(); i++) {
-            arguments[i] = evaluateExpression(c.getArguments().get(i));
+        List<BoundExpression> args = c.getArguments();
+        Object[] arguments = new Object[args.size()];
+        for (int i = 0; i < args.size(); i++) {
+            arguments[i] = evaluateExpression(args.get(i));
+        }
+
+        // Handle built-in functions
+        if (BuiltinFunctions.isBuiltin(function)) {
+            return evaluateBuiltinFunction(function, arguments);
         }
 
         // Get the function body
@@ -335,6 +346,31 @@ public class Evaluator {
         _returnValue = null;
 
         return result;
+    }
+
+    /**
+     * Evaluates a built-in function call.
+     *
+     * @param function  The built-in function symbol.
+     * @param arguments The evaluated arguments.
+     * @return The result of the built-in function.
+     * @throws Exception if the function is not recognized.
+     */
+    private Object evaluateBuiltinFunction(FunctionSymbol function, Object[] arguments) throws Exception {
+        if (function == BuiltinFunctions.LEN) {
+            return ((String) arguments[0]).length();
+        }
+        if (function == BuiltinFunctions.TO_STRING) {
+            return arguments[0].toString();
+        }
+        if (function == BuiltinFunctions.PARSE_INT) {
+            try {
+                return Integer.parseInt((String) arguments[0]);
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
+        throw new Exception("Unknown built-in function: " + function.getName());
     }
 }
 

@@ -14,6 +14,9 @@ public enum SyntaxType {
     /* Represents a number token. */
     NumberToken,
 
+    /* Represents a string token. */
+    StringToken,
+
     /* Represents a plus token. */
     PlusToken,
 

@@ -418,6 +418,7 @@ public class Parser {
             case OpenParenthesisToken -> parseParenthesizedExpression();
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
             case NumberToken -> parseNumberLiteral();
+            case StringToken -> parseStringLiteral();
             case IdentifierToken -> {
                 if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
                     yield parseCallExpression();
@@ -462,6 +463,17 @@ public class Parser {
     private ExpressionSyntax parseNumberLiteral() {
         SyntaxToken numberToken = match(SyntaxType.NumberToken);
         return new LiteralExpressionSyntax(numberToken);
+    }
+
+    /**
+     * Parses a string literal.
+     * LiteralExpressionSyntax has a string token and a value.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseStringLiteral() {
+        SyntaxToken stringToken = match(SyntaxType.StringToken);
+        return new LiteralExpressionSyntax(stringToken);
     }
 
     /**

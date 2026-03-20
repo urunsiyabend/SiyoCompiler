@@ -216,6 +216,7 @@ public class Lexer {
                     _type = SyntaxType.GreaterToken;
                 }
             }
+            case '"' -> readStringToken();
             case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> readNumberToken();
             case ' ', '\t', '\n', '\r' -> readWhitespaceToken();
             default -> {
@@ -236,6 +237,52 @@ public class Lexer {
             text = _text.toString(_start, _start + length);
         }
         return new SyntaxToken(_type, _start, text, _value);
+    }
+
+    /**
+     * Reads a string token from the text being analyzed and moves the cursor.
+     * Handles escape sequences: \n, \t, \\, \", \0.
+     */
+    private void readStringToken() {
+        // Skip opening quote
+        next();
+
+        StringBuilder sb = new StringBuilder();
+        boolean done = false;
+
+        while (!done) {
+            switch (currentChar()) {
+                case '\0', '\r', '\n' -> {
+                    _diagnostics.reportUnterminatedString(new TextSpan(_start, _position - _start));
+                    done = true;
+                }
+                case '\\' -> {
+                    next();
+                    switch (currentChar()) {
+                        case 'n' -> { sb.append('\n'); next(); }
+                        case 't' -> { sb.append('\t'); next(); }
+                        case '\\' -> { sb.append('\\'); next(); }
+                        case '"' -> { sb.append('"'); next(); }
+                        case '0' -> { sb.append('\0'); next(); }
+                        default -> {
+                            _diagnostics.reportInvalidEscapeCharacter(new TextSpan(_position - 1, 2), currentChar());
+                            next();
+                        }
+                    }
+                }
+                case '"' -> {
+                    next();
+                    done = true;
+                }
+                default -> {
+                    sb.append(currentChar());
+                    next();
+                }
+            }
+        }
+
+        _type = SyntaxType.StringToken;
+        _value = sb.toString();
     }
 
     /**
