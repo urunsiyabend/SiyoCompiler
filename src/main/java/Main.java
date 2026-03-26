@@ -28,11 +28,47 @@ public class Main {
             runFile(args[1]);
             return;
         }
+        if (args.length >= 2 && args[0].equals("compile")) {
+            compileFile(args[1]);
+            return;
+        }
         if (args.length >= 1 && !args[0].equals("repl")) {
             runFile(args[0]);
             return;
         }
         repl();
+    }
+
+    private static void compileFile(String path) {
+        try {
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)));
+            SyntaxTree tree = SyntaxTree.parse(source);
+            Compilation compilation = new Compilation(tree);
+
+            // Derive class name from file name
+            String fileName = java.nio.file.Paths.get(path).getFileName().toString();
+            String className = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+            // Capitalize first letter
+            className = Character.toUpperCase(className.charAt(0)) + className.substring(1);
+
+            byte[] bytecode = compilation.compile(className);
+            if (bytecode == null) {
+                DiagnosticBox diagnostics = tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                while (diagnostics.hasNext()) {
+                    System.err.println(diagnostics.next());
+                }
+                System.exit(1);
+            }
+
+            // Write .class file
+            String outputPath = className + ".class";
+            java.nio.file.Files.write(java.nio.file.Paths.get(outputPath), bytecode);
+            System.out.println("Compiled to " + outputPath);
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
     }
 
     private static void runFile(String path) {

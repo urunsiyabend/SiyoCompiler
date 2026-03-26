@@ -108,6 +108,24 @@ public class Compilation {
      * @param printWriter The print writer to emit the tree to.
      * @throws IOException if an error occurs during the emitting process.
      */
+    /**
+     * Compiles the program to JVM bytecode.
+     *
+     * @param className The name of the generated class.
+     * @return The class file bytes, or null if there are errors.
+     */
+    public byte[] compile(String className) {
+        DiagnosticBox diagnostics = _syntaxTree.diagnostics().addAll(getGlobalScope().getDiagnostics());
+        if (diagnostics.hasNext()) {
+            return null;
+        }
+
+        BoundBlockStatement statement = getStatement();
+        Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
+        codeanalysis.emitting.Emitter emitter = new codeanalysis.emitting.Emitter(statement, functions);
+        return emitter.emit(className);
+    }
+
     public void emitTree(PrintWriter printWriter) throws IOException {
         BoundStatement statement = getStatement();
         statement.writeTo(printWriter);

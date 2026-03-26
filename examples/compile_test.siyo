@@ -1,0 +1,12 @@
+fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn factorial(n: int) -> int {
+    if n <= 1 return 1
+    return n * factorial(n - 1)
+}
+
+println("Hello from compiled Siyo!")
+println(toString(add(3, 4)))
+println(toString(factorial(10)))
