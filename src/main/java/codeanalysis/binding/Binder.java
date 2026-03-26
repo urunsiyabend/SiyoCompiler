@@ -278,7 +278,8 @@ public class Binder {
 
     public BoundExpression bindExpression(ExpressionSyntax syntax, Class<?> expectedType) {
         BoundExpression boundExpression = bindExpression(syntax);
-        if (boundExpression.getClassType() != expectedType) {
+        if (boundExpression.getClassType() != expectedType
+                && boundExpression.getClassType() != Object.class) {
             _diagnostics.reportCannotConvert(syntax.getSpan(), boundExpression.getClassType(), expectedType);
         }
         return boundExpression;

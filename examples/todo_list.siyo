@@ -1,0 +1,76 @@
+// Simple todo list manager
+
+enum Priority { Low, Medium, High }
+
+struct Todo {
+    title: string,
+    done: bool,
+    priority: int
+}
+
+fn priorityName(p: int) -> string {
+    if p == Priority.Low return "Low"
+    if p == Priority.Medium return "Medium"
+    if p == Priority.High return "High"
+    "Unknown"
+}
+
+fn todoToString(t: Todo) -> string {
+    mut status = "[x]"
+    if !t.done {
+        status = "[ ]"
+    }
+    status + " " + t.title + " (" + priorityName(t.priority) + ")"
+}
+
+fn countDone(todos: Todo[], count: int) -> int {
+    mut done = 0
+    for mut i = 0 i < count i = i + 1 {
+        if todos[i].done {
+            done = done + 1
+        }
+    }
+    done
+}
+
+fn countByPriority(todos: Todo[], count: int, priority: int) -> int {
+    mut result = 0
+    for mut i = 0 i < count i = i + 1 {
+        if todos[i].priority == priority {
+            result = result + 1
+        }
+    }
+    result
+}
+
+// Create some todos
+mut todos = [
+    Todo { title: "Learn Siyo", done: true, priority: Priority.High },
+    Todo { title: "Write compiler", done: true, priority: Priority.High },
+    Todo { title: "Add arrays", done: true, priority: Priority.Medium },
+    Todo { title: "Add modules", done: false, priority: Priority.Medium },
+    Todo { title: "Write docs", done: false, priority: Priority.Low },
+    Todo { title: "Add generics", done: false, priority: Priority.High }
+]
+
+mut count = 6
+
+println("=== Todo List ===")
+for mut i = 0 i < count i = i + 1 {
+    println(todoToString(todos[i]))
+}
+
+println("")
+println("=== Stats ===")
+println("Total: " + toString(count))
+println("Done: " + toString(countDone(todos, count)))
+println("Remaining: " + toString(count - countDone(todos, count)))
+println("High priority: " + toString(countByPriority(todos, count, Priority.High)))
+println("Medium priority: " + toString(countByPriority(todos, count, Priority.Medium)))
+println("Low priority: " + toString(countByPriority(todos, count, Priority.Low)))
+
+// Mark one as done
+todos[3].done = true
+println("")
+println("=== After completing 'Add modules' ===")
+println("Done: " + toString(countDone(todos, count)))
