@@ -5,6 +5,9 @@ import codeanalysis.DiagnosticBox;
 import codeanalysis.FunctionSymbol;
 import codeanalysis.LabelSymbol;
 import codeanalysis.ParameterSymbol;
+import codeanalysis.SiyoArray;
+import codeanalysis.SiyoStruct;
+import codeanalysis.StructSymbol;
 import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
 
@@ -29,6 +32,9 @@ public class Binder {
     private FunctionSymbol _currentFunction = null;
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
+    private final Map<String, StructSymbol> _structTypes = new HashMap<>();
+    private final Map<VariableSymbol, Class<?>> _arrayElementTypes = new HashMap<>();
+    private final Map<VariableSymbol, StructSymbol> _variableStructTypes = new HashMap<>();
     private int _labelCounter = 0;
 
     private LabelSymbol generateLabel(String prefix) {
@@ -101,6 +107,7 @@ public class Binder {
             case ReturnStatement -> bindReturnStatement((ReturnStatementSyntax)syntax);
             case BreakStatement -> bindBreakStatement((BreakStatementSyntax)syntax);
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
+            case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -115,10 +122,12 @@ public class Binder {
         ArrayList<BoundStatement> statements = new ArrayList<>();
         _scope = new BoundScope(_scope);
 
-        // First pass: register function declarations (forward declarations)
+        // First pass: register function and struct declarations (forward declarations)
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
             if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
                 registerFunctionDeclaration(funcSyntax);
+            } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
+                registerStructDeclaration(structSyntax);
             }
         }
 
@@ -168,6 +177,21 @@ public class Binder {
      * @param syntax The expression statement syntax to bind.
      * @return The bound expression statement.
      */
+    private void registerStructDeclaration(StructDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        if (_structTypes.containsKey(name)) return;
+
+        java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
+        for (ParameterSyntax field : syntax.getFields()) {
+            String fieldName = field.getIdentifier().getData();
+            String typeName = field.getTypeToken().getData();
+            Class<?> fieldType = lookupType(typeName);
+            if (fieldType == null) fieldType = Integer.class;
+            fields.put(fieldName, fieldType);
+        }
+        _structTypes.put(name, new StructSymbol(name, fields));
+    }
+
     private BoundStatement bindExpressionStatement(ExpressionStatementSyntax syntax) {
         BoundExpression expression = bindExpression(syntax.getExpression());
         return new BoundExpressionStatement(expression);
@@ -187,6 +211,13 @@ public class Binder {
 
         if (!_scope.tryDeclare(variableSymbol)) {
             _diagnostics.reportVariableAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        }
+
+        // Track element/struct types for type resolution
+        if (initializer instanceof BoundArrayLiteralExpression arr) {
+            _arrayElementTypes.put(variableSymbol, arr.getElementType());
+        } else if (initializer instanceof BoundStructLiteralExpression structLit) {
+            _variableStructTypes.put(variableSymbol, structLit.getStructType());
         }
 
         return new BoundVariableDeclaration(variableSymbol, initializer);
@@ -262,6 +293,10 @@ public class Binder {
             case UnaryExpression -> bindUnaryExpression((UnaryExpressionSyntax) syntax);
             case BinaryExpression -> bindBinaryExpression((BinaryExpressionSyntax) syntax);
             case CallExpression -> bindCallExpression((CallExpressionSyntax) syntax);
+            case ArrayLiteralExpression -> bindArrayLiteralExpression((ArrayLiteralExpressionSyntax) syntax);
+            case IndexExpression -> bindIndexExpression((IndexExpressionSyntax) syntax);
+            case MemberAccessExpression -> bindMemberAccessExpression((MemberAccessExpressionSyntax) syntax);
+            case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -536,7 +571,7 @@ public class Binder {
             ParameterSymbol parameter = function.getParameters().get(i);
 
             // Object.class accepts any type (used by built-in functions like toString)
-            if (parameter.getType() != Object.class && argument.getClassType() != parameter.getType()) {
+            if (parameter.getType() != Object.class && argument.getClassType() != Object.class && argument.getClassType() != parameter.getType()) {
                 _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), parameter.getName(), parameter.getType(), argument.getClassType());
             }
         }
@@ -564,6 +599,135 @@ public class Binder {
             return new BoundExpressionStatement(new BoundLiteralExpression(0));
         }
         return new BoundContinueStatement(_loopStack.peek().continueLabel());
+    }
+
+    private BoundExpression bindArrayLiteralExpression(ArrayLiteralExpressionSyntax syntax) {
+        List<BoundExpression> boundElements = new ArrayList<>();
+        Class<?> elementType = null;
+
+        for (ExpressionSyntax element : syntax.getElements()) {
+            BoundExpression boundElement = bindExpression(element);
+            boundElements.add(boundElement);
+            if (elementType == null) {
+                elementType = boundElement.getClassType();
+            } else if (elementType != boundElement.getClassType()) {
+                _diagnostics.reportCannotConvert(element.getSpan(), boundElement.getClassType(), elementType);
+            }
+        }
+
+        if (elementType == null) {
+            elementType = Object.class;
+        }
+
+        return new BoundArrayLiteralExpression(boundElements, elementType);
+    }
+
+    private BoundExpression bindIndexExpression(IndexExpressionSyntax syntax) {
+        BoundExpression target = bindExpression(syntax.getTarget());
+        BoundExpression index = bindExpression(syntax.getIndex());
+
+        if (index.getClassType() != Integer.class) {
+            _diagnostics.reportCannotConvert(syntax.getIndex().getSpan(), index.getClassType(), Integer.class);
+        }
+
+        Class<?> resultType;
+        if (target.getClassType() == SiyoArray.class) {
+            resultType = resolveArrayElementType(target);
+        } else if (target.getClassType() == String.class) {
+            resultType = String.class;
+        } else {
+            _diagnostics.reportCannotIndex(syntax.getOpenBracket().getSpan(), target.getClassType());
+            return new BoundLiteralExpression(0);
+        }
+
+        return new BoundIndexExpression(target, index, resultType);
+    }
+
+    private Class<?> resolveArrayElementType(BoundExpression target) {
+        if (target instanceof BoundArrayLiteralExpression arr) {
+            return arr.getElementType();
+        }
+        if (target instanceof BoundVariableExpression varExpr) {
+            // Look up the variable's element type from its declaration
+            Class<?> elemType = _arrayElementTypes.get(varExpr.getVariable());
+            if (elemType != null) return elemType;
+        }
+        return Object.class;
+    }
+
+    private BoundExpression bindMemberAccessExpression(MemberAccessExpressionSyntax syntax) {
+        BoundExpression target = bindExpression(syntax.getTarget());
+        String memberName = syntax.getMember().getData();
+
+        if (target.getClassType() != SiyoStruct.class) {
+            _diagnostics.reportCannotAccessMember(syntax.getDot().getSpan(), target.getClassType());
+            return new BoundLiteralExpression(0);
+        }
+
+        // Resolve struct type from variable to get field type
+        Class<?> memberType = Object.class;
+        StructSymbol structType = resolveStructType(target);
+        if (structType != null && structType.hasField(memberName)) {
+            memberType = structType.getFieldType(memberName);
+        }
+
+        return new BoundMemberAccessExpression(target, memberName, memberType);
+    }
+
+    private StructSymbol resolveStructType(BoundExpression target) {
+        if (target instanceof BoundVariableExpression varExpr) {
+            StructSymbol type = _variableStructTypes.get(varExpr.getVariable());
+            if (type != null) return type;
+        }
+        if (target instanceof BoundStructLiteralExpression structLit) {
+            return structLit.getStructType();
+        }
+        return null;
+    }
+
+    private BoundExpression bindStructLiteralExpression(StructLiteralExpressionSyntax syntax) {
+        String typeName = syntax.getTypeName().getData();
+        StructSymbol structType = _structTypes.get(typeName);
+
+        if (structType == null) {
+            _diagnostics.reportUndefinedType(syntax.getTypeName().getSpan(), typeName);
+            return new BoundLiteralExpression(0);
+        }
+
+        java.util.LinkedHashMap<String, BoundExpression> fieldValues = new java.util.LinkedHashMap<>();
+        for (SyntaxNode node : syntax.getFieldAssignments()) {
+            FieldAssignmentSyntax field = (FieldAssignmentSyntax) node;
+            String fieldName = field.getFieldName().getData();
+            BoundExpression value = bindExpression(field.getValue());
+            fieldValues.put(fieldName, value);
+        }
+
+        return new BoundStructLiteralExpression(structType, fieldValues);
+    }
+
+    private BoundStatement bindStructDeclaration(StructDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
+
+        for (ParameterSyntax field : syntax.getFields()) {
+            String fieldName = field.getIdentifier().getData();
+            String typeName = field.getTypeToken().getData();
+            Class<?> fieldType = lookupType(typeName);
+            if (fieldType == null) {
+                _diagnostics.reportUndefinedType(field.getTypeToken().getSpan(), typeName);
+                fieldType = Integer.class;
+            }
+            fields.put(fieldName, fieldType);
+        }
+
+        StructSymbol structSymbol = new StructSymbol(name, fields);
+        _structTypes.put(name, structSymbol);
+
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    public Map<String, StructSymbol> getStructTypes() {
+        return _structTypes;
     }
 
     private Class<?> lookupType(String name) {

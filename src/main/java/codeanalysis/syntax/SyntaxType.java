@@ -211,4 +211,34 @@ public enum SyntaxType {
 
     /* Represents a continue statement. */
     ContinueStatement,
+
+    /* Represents an open bracket ([) token. */
+    OpenBracketToken,
+
+    /* Represents a close bracket (]) token. */
+    CloseBracketToken,
+
+    /* Represents a dot (.) token. */
+    DotToken,
+
+    /* Represents a 'struct' keyword. */
+    StructKeyword,
+
+    /* Represents an array literal expression. */
+    ArrayLiteralExpression,
+
+    /* Represents an index expression (arr[0]). */
+    IndexExpression,
+
+    /* Represents a struct declaration. */
+    StructDeclaration,
+
+    /* Represents a struct literal expression (Point { x: 1, y: 2 }). */
+    StructLiteralExpression,
+
+    /* Represents a member access expression (p.x). */
+    MemberAccessExpression,
+
+    /* Represents a field assignment (name: value in struct literals). */
+    FieldAssignment,
     }

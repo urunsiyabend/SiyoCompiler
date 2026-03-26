@@ -181,11 +181,15 @@ public class Evaluator {
     private Object evaluateExpression(BoundExpression node) throws Exception {
         return switch (node.getType()) {
             case LiteralExpression -> evaluateLiteralExpression((BoundLiteralExpression) node);
+            case StructLiteralExpression -> evaluateStructLiteralExpression((BoundStructLiteralExpression) node);
             case VariableExpression -> evaluateVariableExpression((BoundVariableExpression) node);
             case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
             case CallExpression -> evaluateCallExpression((BoundCallExpression) node);
+            case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
+            case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
+            case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
         };
     }
@@ -350,6 +354,43 @@ public class Evaluator {
         return result;
     }
 
+    private Object evaluateStructLiteralExpression(BoundStructLiteralExpression node) throws Exception {
+        java.util.LinkedHashMap<String, Object> fields = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<String, BoundExpression> entry : node.getFieldValues().entrySet()) {
+            fields.put(entry.getKey(), evaluateExpression(entry.getValue()));
+        }
+        return new SiyoStruct(node.getStructType(), fields);
+    }
+
+    private Object evaluateArrayLiteralExpression(BoundArrayLiteralExpression node) throws Exception {
+        java.util.List<Object> elements = new java.util.ArrayList<>();
+        for (BoundExpression element : node.getElements()) {
+            elements.add(evaluateExpression(element));
+        }
+        return new SiyoArray(elements, node.getElementType());
+    }
+
+    private Object evaluateIndexExpression(BoundIndexExpression node) throws Exception {
+        Object target = evaluateExpression(node.getTarget());
+        Object indexValue = evaluateExpression(node.getIndex());
+        int index = (int) indexValue;
+
+        if (target instanceof SiyoArray arr) {
+            return arr.get(index);
+        } else if (target instanceof String str) {
+            return String.valueOf(str.charAt(index));
+        }
+        throw new Exception("Cannot index type: " + target.getClass());
+    }
+
+    private Object evaluateMemberAccessExpression(BoundMemberAccessExpression node) throws Exception {
+        Object target = evaluateExpression(node.getTarget());
+        if (target instanceof SiyoStruct struct) {
+            return struct.getField(node.getMemberName());
+        }
+        throw new Exception("Cannot access member on type: " + target.getClass());
+    }
+
     /**
      * Evaluates a built-in function call.
      *
@@ -360,6 +401,9 @@ public class Evaluator {
      */
     private Object evaluateBuiltinFunction(FunctionSymbol function, Object[] arguments) throws Exception {
         if (function == BuiltinFunctions.LEN) {
+            if (arguments[0] instanceof SiyoArray arr) {
+                return arr.length();
+            }
             return ((String) arguments[0]).length();
         }
         if (function == BuiltinFunctions.TO_STRING) {

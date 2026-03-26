@@ -8,7 +8,7 @@ import java.util.List;
 public class BuiltinFunctions {
     public static final FunctionSymbol LEN = new FunctionSymbol(
             "len",
-            List.of(new ParameterSymbol("s", String.class)),
+            List.of(new ParameterSymbol("s", Object.class)),
             Integer.class
     );
 

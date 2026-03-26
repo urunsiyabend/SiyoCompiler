@@ -222,6 +222,10 @@ public abstract class BoundTreeRewriter {
             case LiteralExpression -> rewriteLiteralExpression((BoundLiteralExpression) node);
             case VariableExpression -> rewriteVariableExpression((BoundVariableExpression) node);
             case CallExpression -> rewriteCallExpression((BoundCallExpression) node);
+            case ArrayLiteralExpression -> node;
+            case IndexExpression -> node;
+            case MemberAccessExpression -> node;
+            case StructLiteralExpression -> node;
             default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };
     }

@@ -32,6 +32,7 @@ public class SyntaxRules {
             case "return" -> SyntaxType.ReturnKeyword;
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
+            case "struct" -> SyntaxType.StructKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -85,6 +86,10 @@ public class SyntaxRules {
             case ArrowToken -> "->";
             case BreakKeyword -> "break";
             case ContinueKeyword -> "continue";
+            case StructKeyword -> "struct";
+            case OpenBracketToken -> "[";
+            case CloseBracketToken -> "]";
+            case DotToken -> ".";
             default -> null;
         };
     }

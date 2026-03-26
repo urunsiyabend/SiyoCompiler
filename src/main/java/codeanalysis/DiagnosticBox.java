@@ -354,4 +354,19 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     public void reportContinueOutsideLoop(TextSpan span) {
         report(span, "Continue statement is not allowed outside of a loop");
     }
+
+    public void reportCannotIndex(TextSpan span, Class<?> type) {
+        String message = String.format("Type <%s> cannot be indexed", type);
+        report(span, message);
+    }
+
+    public void reportCannotAccessMember(TextSpan span, Class<?> type) {
+        String message = String.format("Type <%s> does not have members", type);
+        report(span, message);
+    }
+
+    public void reportIndexOutOfBounds(TextSpan span, int index, int length) {
+        String message = String.format("Index %d is out of bounds for length %d", index, length);
+        report(span, message);
+    }
 }

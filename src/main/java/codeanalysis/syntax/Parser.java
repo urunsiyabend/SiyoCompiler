@@ -138,6 +138,7 @@ public class Parser {
             case ReturnKeyword -> parseReturnStatement();
             case BreakKeyword -> parseBreakStatement();
             case ContinueKeyword -> parseContinueStatement();
+            case StructKeyword -> parseStructDeclaration();
             default -> parseExpressionStatement();
         };
     }
@@ -358,6 +359,29 @@ public class Parser {
         return new ContinueStatementSyntax(keyword);
     }
 
+    private StatementSyntax parseStructDeclaration() {
+        SyntaxToken structKeyword = match(SyntaxType.StructKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+
+        List<ParameterSyntax> fields = new ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
+            SyntaxToken colon = match(SyntaxType.ColonToken);
+            SyntaxToken fieldType = match(SyntaxType.IdentifierToken);
+            fields.add(new ParameterSyntax(fieldName, colon, fieldType));
+
+            // Optional comma between fields
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+        }
+
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new StructDeclarationSyntax(structKeyword, identifier, openBrace, fields, closeBrace);
+    }
+
     /**
      * Parses the input text and generates an expression syntax.
      *
@@ -426,20 +450,90 @@ public class Parser {
      * @return The parsed expression syntax.
      */
     private ExpressionSyntax parsePrimary() {
-        return switch (current().getType()) {
+        ExpressionSyntax expr = switch (current().getType()) {
             case OpenParenthesisToken -> parseParenthesizedExpression();
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
             case NumberToken -> parseNumberLiteral();
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
+            case OpenBracketToken -> parseArrayLiteral();
             case IdentifierToken -> {
                 if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
                     yield parseCallExpression();
+                }
+                if (peek(1).getType() == SyntaxType.OpenBraceToken &&
+                    peek(2).getType() == SyntaxType.IdentifierToken &&
+                    peek(3).getType() == SyntaxType.ColonToken) {
+                    yield parseStructLiteral();
                 }
                 yield parseNameExpression();
             }
             default -> parseNameExpression();
         };
+
+        // Postfix: indexing and member access
+        while (true) {
+            if (current().getType() == SyntaxType.OpenBracketToken) {
+                SyntaxToken openBracket = match(SyntaxType.OpenBracketToken);
+                ExpressionSyntax index = parseExpression();
+                SyntaxToken closeBracket = match(SyntaxType.CloseBracketToken);
+                expr = new IndexExpressionSyntax(expr, openBracket, index, closeBracket);
+            } else if (current().getType() == SyntaxType.DotToken) {
+                SyntaxToken dot = match(SyntaxType.DotToken);
+                SyntaxToken member = match(SyntaxType.IdentifierToken);
+                expr = new MemberAccessExpressionSyntax(expr, dot, member);
+            } else {
+                break;
+            }
+        }
+
+        return expr;
+    }
+
+    private ExpressionSyntax parseArrayLiteral() {
+        SyntaxToken openBracket = match(SyntaxType.OpenBracketToken);
+        SeparatedSyntaxList<ExpressionSyntax> elements = parseArrayElements();
+        SyntaxToken closeBracket = match(SyntaxType.CloseBracketToken);
+        return new ArrayLiteralExpressionSyntax(openBracket, elements, closeBracket);
+    }
+
+    private ExpressionSyntax parseStructLiteral() {
+        SyntaxToken typeName = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+
+        // Parse field: value pairs
+        List<SyntaxNode> fieldAssignments = new ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
+            SyntaxToken colon = match(SyntaxType.ColonToken);
+            ExpressionSyntax value = parseExpression();
+            fieldAssignments.add(new FieldAssignmentSyntax(fieldName, colon, value));
+
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+        }
+
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new StructLiteralExpressionSyntax(typeName, openBrace, fieldAssignments, closeBrace);
+    }
+
+    private SeparatedSyntaxList<ExpressionSyntax> parseArrayElements() {
+        List<SyntaxNode> nodesAndSeparators = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.CloseBracketToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            ExpressionSyntax expression = parseExpression();
+            nodesAndSeparators.add(expression);
+
+            if (current().getType() != SyntaxType.CloseBracketToken) {
+                SyntaxToken comma = match(SyntaxType.CommaToken);
+                nodesAndSeparators.add(comma);
+            }
+        }
+
+        return new SeparatedSyntaxList<>(nodesAndSeparators);
     }
 
     /**

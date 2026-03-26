@@ -163,10 +163,16 @@ class EvaluatorTest {
      * Test if the evaluator correctly reports diagnostics for empty string initializers.
      */
     @Test
-    public void evaluatorNameExpressionNoErrorForInsertedToken() {
-        String text = "[]";
-        var diagnostics = "ERROR: Unexpected token: <EOFToken>, expected <IdentifierToken>";
-        assertHasDiagnostics(text, diagnostics);
+    public void evaluatorArrayLiteralEmptyIsValid() {
+        // [] is now a valid empty array literal, not an error
+        SyntaxTree tree = SyntaxTree.parse("[]");
+        Compilation compilation = new Compilation(tree);
+        try {
+            EvaluationResult result = compilation.evaluate(new HashMap<>());
+            assertFalse(result._diagnostics.hasNext());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -369,6 +375,28 @@ class EvaluatorTest {
                 // Forward declarations (call before definition)
                 {"{ fn isEven(n: int) -> bool { if n == 0 return true return isOdd(n - 1) } fn isOdd(n: int) -> bool { if n == 0 return false return isEven(n - 1) } isEven(4) }", true},
                 {"{ fn isEven(n: int) -> bool { if n == 0 return true return isOdd(n - 1) } fn isOdd(n: int) -> bool { if n == 0 return false return isEven(n - 1) } isOdd(3) }", true},
+
+                // Array literals
+                {"{ mut arr = [1, 2, 3] arr[0] }", 1},
+                {"{ mut arr = [1, 2, 3] arr[1] }", 2},
+                {"{ mut arr = [1, 2, 3] arr[2] }", 3},
+                {"{ mut arr = [10, 20, 30] arr[0] + arr[2] }", 40},
+                {"len([1, 2, 3])", 3},
+                {"len([])", 0},
+
+                // String indexing
+                {"{ mut s = \"hello\" s[0] }", "h"},
+                {"{ mut s = \"hello\" s[4] }", "o"},
+
+                // Struct declaration and usage
+                {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.x }", 3},
+                {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.y }", 4},
+                {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.x + p.y }", 7},
+                {"{ struct Pair { a: string, b: int } mut p = Pair { a: \"hello\", b: 42 } p.a }", "hello"},
+                {"{ struct Pair { a: string, b: int } mut p = Pair { a: \"hello\", b: 42 } p.b }", 42},
+
+                // Nested array with functions
+                {"{ mut arr = [10, 20, 30] fn sum(a: int, b: int) -> int { return a + b } sum(arr[0], arr[1]) }", 30},
         };
     }
 

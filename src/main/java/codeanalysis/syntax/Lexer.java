@@ -136,6 +136,18 @@ public class Lexer {
                 next();
                 _type = SyntaxType.CloseBraceToken;
             }
+            case '[' -> {
+                next();
+                _type = SyntaxType.OpenBracketToken;
+            }
+            case ']' -> {
+                next();
+                _type = SyntaxType.CloseBracketToken;
+            }
+            case '.' -> {
+                next();
+                _type = SyntaxType.DotToken;
+            }
             case '~' -> {
                 next();
                 _type = SyntaxType.TildeToken;
