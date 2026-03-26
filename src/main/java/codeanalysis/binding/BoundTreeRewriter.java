@@ -33,6 +33,7 @@ public abstract class BoundTreeRewriter {
             case ReturnStatement -> rewriteReturnStatement((BoundReturnStatement) node);
             case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
             case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
+            case TryCatchStatement -> node; // pass through
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }

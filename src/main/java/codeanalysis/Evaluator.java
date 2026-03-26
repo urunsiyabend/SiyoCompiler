@@ -94,6 +94,10 @@ public class Evaluator {
                     _returnValue = rs.getExpression() == null ? null : evaluateExpression(rs.getExpression());
                     _returnTriggered = true;
                 }
+                case TryCatchStatement -> {
+                    evaluateTryCatchStatement((BoundTryCatchStatement) s);
+                    index++;
+                }
                 default -> throw new Exception("Unexpected node: " + s.getType());
             };
         }
@@ -356,6 +360,18 @@ public class Evaluator {
         return result;
     }
 
+    private void evaluateTryCatchStatement(BoundTryCatchStatement node) throws Exception {
+        try {
+            BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
+            evaluateBlock(tryBlock);
+        } catch (Exception e) {
+            // Assign error message to the catch variable
+            assignVariable(node.getErrorVariable(), e.getMessage() != null ? e.getMessage() : e.toString());
+            BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
+            evaluateBlock(catchBlock);
+        }
+    }
+
     private Object evaluateIndexAssignment(BoundIndexAssignmentExpression node) throws Exception {
         Object target = evaluateExpression(node.getTarget());
         int index = (int) evaluateExpression(node.getIndex());
@@ -473,6 +489,9 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.CONTAINS) {
             return ((String) arguments[0]).contains((String) arguments[1]);
+        }
+        if (function == BuiltinFunctions.ERROR) {
+            throw new RuntimeException((String) arguments[0]);
         }
         if (function == BuiltinFunctions.INPUT) {
             System.out.print(arguments[0]);

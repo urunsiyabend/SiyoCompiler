@@ -34,6 +34,8 @@ public class SyntaxRules {
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
             case "enum" -> SyntaxType.EnumKeyword;
+            case "try" -> SyntaxType.TryKeyword;
+            case "catch" -> SyntaxType.CatchKeyword;
             case "in" -> SyntaxType.InKeyword;
             case "null" -> SyntaxType.NullKeyword;
             default -> SyntaxType.IdentifierToken;
@@ -91,6 +93,8 @@ public class SyntaxRules {
             case ContinueKeyword -> "continue";
             case StructKeyword -> "struct";
             case EnumKeyword -> "enum";
+            case TryKeyword -> "try";
+            case CatchKeyword -> "catch";
             case InKeyword -> "in";
             case NullKeyword -> "null";
             case OpenBracketToken -> "[";

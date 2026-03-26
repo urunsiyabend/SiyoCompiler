@@ -164,6 +164,7 @@ public class Parser {
             case ContinueKeyword -> parseContinueStatement();
             case StructKeyword -> parseStructDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
+            case TryKeyword -> parseTryCatchStatement();
             default -> parseExpressionStatement();
         };
     }
@@ -411,6 +412,15 @@ public class Parser {
     private StatementSyntax parseContinueStatement() {
         SyntaxToken keyword = match(SyntaxType.ContinueKeyword);
         return new ContinueStatementSyntax(keyword);
+    }
+
+    private StatementSyntax parseTryCatchStatement() {
+        SyntaxToken tryKeyword = match(SyntaxType.TryKeyword);
+        StatementSyntax tryBody = parseBlockStatement();
+        SyntaxToken catchKeyword = match(SyntaxType.CatchKeyword);
+        SyntaxToken errorVar = match(SyntaxType.IdentifierToken);
+        StatementSyntax catchBody = parseBlockStatement();
+        return new TryCatchStatementSyntax(tryKeyword, tryBody, catchKeyword, errorVar, catchBody);
     }
 
     private StatementSyntax parseEnumDeclaration() {

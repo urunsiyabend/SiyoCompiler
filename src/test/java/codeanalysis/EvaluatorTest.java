@@ -452,6 +452,11 @@ class EvaluatorTest {
                 {"contains(\"hello world\", \"world\")", true},
                 {"contains(\"hello\", \"xyz\")", false},
                 {"substring(\"hello world\", 0, 5)", "hello"},
+
+                // Try-catch
+                {"{ mut result = \"ok\"\n try { error(\"boom\") } catch e { result = e }\n result }", "boom"},
+                {"{ mut result = 0\n try { result = 42 } catch e { result = -1 }\n result }", 42},
+                {"{ mut result = \"\"\n try { mut x = [1]\n mut y = x[99] } catch e { result = \"caught\" }\n result }", "caught"},
         };
     }
 

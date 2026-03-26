@@ -36,4 +36,5 @@ public enum BoundNodeType {
     MemberAssignmentExpression,
     StructLiteralExpression,
     EnumDeclaration,
+    TryCatchStatement,
 }

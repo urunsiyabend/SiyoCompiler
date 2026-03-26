@@ -112,6 +112,7 @@ public class Binder {
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
             case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
             case EnumDeclaration -> bindEnumDeclaration((EnumDeclarationSyntax)syntax);
+            case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -889,6 +890,17 @@ public class Binder {
         }
 
         return new BoundStructLiteralExpression(structType, fieldValues);
+    }
+
+    private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {
+        BoundStatement tryBody = bindStatement(syntax.getTryBody());
+        String errorName = syntax.getErrorVariable().getData();
+        VariableSymbol errorVar = new VariableSymbol(errorName, true, String.class);
+        _scope = new BoundScope(_scope);
+        _scope.tryDeclare(errorVar);
+        BoundStatement catchBody = bindStatement(syntax.getCatchBody());
+        _scope = _scope.getParent();
+        return new BoundTryCatchStatement(tryBody, errorVar, catchBody);
     }
 
     private void registerEnumDeclaration(EnumDeclarationSyntax syntax) {

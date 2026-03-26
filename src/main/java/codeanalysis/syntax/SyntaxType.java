@@ -275,6 +275,15 @@ public enum SyntaxType {
     /* Represents a for-in statement. */
     ForInStatement,
 
+    /* Represents a 'try' keyword. */
+    TryKeyword,
+
+    /* Represents a 'catch' keyword. */
+    CatchKeyword,
+
+    /* Represents a try-catch statement. */
+    TryCatchStatement,
+
     /* Represents a 'null' keyword. */
     NullKeyword,
     }

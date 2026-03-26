@@ -84,8 +84,14 @@ public class BuiltinFunctions {
             String.class
     );
 
+    public static final FunctionSymbol ERROR = new FunctionSymbol(
+            "error",
+            List.of(new ParameterSymbol("message", String.class)),
+            null
+    );
+
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS, INPUT);
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS, INPUT, ERROR);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
@@ -93,6 +99,6 @@ public class BuiltinFunctions {
                 || function == PARSE_FLOAT || function == TO_INT || function == TO_FLOAT
                 || function == PRINT || function == PRINTLN || function == RANGE
                 || function == PUSH || function == SUBSTRING || function == CONTAINS
-                || function == RANGE || function == INPUT;
+                || function == RANGE || function == INPUT || function == ERROR;
     }
 }

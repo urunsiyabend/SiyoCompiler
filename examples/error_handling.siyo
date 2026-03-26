@@ -1,0 +1,47 @@
+// Error handling demonstration
+
+fn safeDivide(a: int, b: int) -> string {
+    if b == 0 {
+        error("Division by zero")
+    }
+    toString(a / b)
+}
+
+fn safeParseInt(text: string) -> int {
+    // parseInt returns 0 for invalid input, we can do better
+    if len(text) == 0 {
+        error("Empty string")
+    }
+    for i in range(0, len(text)) {
+        mut ch = text[i]
+        if !contains("0123456789", ch) {
+            error("Invalid number: " + text)
+        }
+    }
+    parseInt(text)
+}
+
+// Safe division
+println("=== Safe Division ===")
+mut pairs = [[10, 2], [15, 3], [10, 0], [100, 4]]
+for pair in pairs {
+    try {
+        mut result = safeDivide(pair[0], pair[1])
+        println(toString(pair[0]) + " / " + toString(pair[1]) + " = " + result)
+    } catch e {
+        println(toString(pair[0]) + " / " + toString(pair[1]) + " => Error: " + e)
+    }
+}
+
+// Safe parsing
+println("")
+println("=== Safe Parsing ===")
+mut inputs = ["42", "hello", "123", "", "99x"]
+for text in inputs {
+    try {
+        mut num = safeParseInt(text)
+        println("'" + text + "' => " + toString(num))
+    } catch e {
+        println("'" + text + "' => Error: " + e)
+    }
+}
