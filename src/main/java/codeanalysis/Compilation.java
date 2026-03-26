@@ -24,22 +24,21 @@ public class Compilation {
     private SyntaxTree _syntaxTree;
     private final Compilation _previous;
     private final AtomicReference<BoundGlobalScope> _globalScope = new AtomicReference<>(null);
+    private ModuleRegistry _registry;
+    private String _filePath;
 
-    /**
-     * Constructs a Compilation object with the specified syntax tree.
-     *
-     * @param syntaxTree The syntax tree representing the code to be compiled.
-     */
     public Compilation(SyntaxTree syntaxTree) {
         this(null, syntaxTree);
         _syntaxTree = syntaxTree;
     }
 
-    /**
-     * Constructs a Compilation object with the specified syntax tree.
-     *
-     * @param syntaxTree The syntax tree representing the code to be compiled.
-     */
+    public Compilation(SyntaxTree syntaxTree, ModuleRegistry registry, String filePath) {
+        this(null, syntaxTree);
+        _syntaxTree = syntaxTree;
+        _registry = registry;
+        _filePath = filePath;
+    }
+
     private Compilation(Compilation previous, SyntaxTree syntaxTree) {
         _previous = previous;
         _syntaxTree = syntaxTree;
@@ -64,10 +63,15 @@ public class Compilation {
         BoundGlobalScope globalScope = _globalScope.get();
         if (globalScope == null) {
             BoundGlobalScope previousScope = _previous == null ? null : _previous.getGlobalScope();
-            globalScope = Binder.bindGlobalScope(previousScope, _syntaxTree.getRoot());
+            ModuleRegistry reg = _registry != null ? _registry : new ModuleRegistry();
+            globalScope = Binder.bindGlobalScope(previousScope, _syntaxTree.getRoot(), reg, _filePath);
             _globalScope.compareAndSet(null, globalScope);
         }
         return globalScope;
+    }
+
+    public ModuleRegistry getRegistry() {
+        return _registry != null ? _registry : new ModuleRegistry();
     }
 
     /**

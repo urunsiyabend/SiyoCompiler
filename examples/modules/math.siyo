@@ -1,0 +1,20 @@
+fn abs(x: int) -> int {
+    if x < 0 return -x
+    x
+}
+
+fn max(a: int, b: int) -> int {
+    if a > b return a
+    b
+}
+
+fn min(a: int, b: int) -> int {
+    if a < b return a
+    b
+}
+
+fn clamp(x: int, lo: int, hi: int) -> int {
+    if x < lo return lo
+    if x > hi return hi
+    x
+}

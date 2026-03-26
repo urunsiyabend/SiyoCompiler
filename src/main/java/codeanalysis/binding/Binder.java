@@ -1,5 +1,7 @@
 package codeanalysis.binding;
 
+import codeanalysis.ModuleRegistry;
+import codeanalysis.ModuleSymbol;
 import codeanalysis.BuiltinFunctions;
 import codeanalysis.DiagnosticBox;
 import codeanalysis.FunctionSymbol;
@@ -35,6 +37,9 @@ public class Binder {
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
     private final Map<VariableSymbol, VariableTypeInfo> _typeInfo = new HashMap<>();
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
+    private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
+    private ModuleRegistry _registry;
+    private String _filePath;
 
     private void trackArrayType(VariableSymbol var, Class<?> elementType) {
         _typeInfo.put(var, VariableTypeInfo.forArray(elementType));
@@ -79,8 +84,14 @@ public class Binder {
     }
 
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
+        return bindGlobalScope(previous, syntax, new ModuleRegistry(), null);
+    }
+
+    public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax, ModuleRegistry registry, String filePath) {
         var parentScope = createParentScopes(previous);
         Binder binder = new Binder(parentScope);
+        binder._registry = registry;
+        binder._filePath = filePath;
         BoundStatement statement = binder.bindStatement(syntax.getStatement());
         Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
         Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
@@ -133,6 +144,7 @@ public class Binder {
             case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
             case EnumDeclaration -> bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
+            case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -147,9 +159,11 @@ public class Binder {
         ArrayList<BoundStatement> statements = new ArrayList<>();
         _scope = new BoundScope(_scope);
 
-        // First pass: register function and struct declarations (forward declarations)
+        // First pass: process imports, register function/struct/enum declarations
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
-            if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
+            if (statementSyntax instanceof ImportStatementSyntax importSyntax) {
+                bindImportStatement(importSyntax);
+            } else if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
                 registerFunctionDeclaration(funcSyntax);
             } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
                 registerStructDeclaration(structSyntax);
@@ -332,6 +346,7 @@ public class Binder {
             case MemberAccessExpression -> bindMemberAccessExpression((MemberAccessExpressionSyntax) syntax);
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
             case CompoundAssignmentExpression -> bindCompoundAssignment((CompoundAssignmentExpressionSyntax) syntax);
+            case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -903,6 +918,157 @@ public class Binder {
         }
 
         return new BoundStructLiteralExpression(structType, fieldValues);
+    }
+
+    private BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
+        String moduleName = (String) syntax.getModuleName().getValue();
+        if (moduleName == null) {
+            moduleName = syntax.getModuleName().getData();
+            // Strip quotes if present
+            if (moduleName != null && moduleName.startsWith("\"")) {
+                moduleName = moduleName.substring(1, moduleName.length() - 1);
+            }
+        }
+
+        if (moduleName == null || _importedModules.contains(moduleName)) {
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+        _importedModules.add(moduleName);
+
+        // Resolve file path
+        String moduleFilePath = resolveModulePath(moduleName);
+        if (moduleFilePath == null) {
+            _diagnostics.reportModuleNotFound(syntax.getModuleName().getSpan(), moduleName);
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+
+        // Circular import check
+        if (_registry != null && _registry.isInProgress(moduleFilePath)) {
+            _diagnostics.reportCircularImport(syntax.getModuleName().getSpan(), moduleName);
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+
+        // Get or compile the module
+        ModuleSymbol module;
+        if (_registry != null && _registry.isCompiled(moduleFilePath)) {
+            module = _registry.getModule(moduleFilePath);
+        } else {
+            module = compileModule(moduleName, moduleFilePath);
+            if (module == null) {
+                return new BoundExpressionStatement(new BoundLiteralExpression(0));
+            }
+        }
+
+        // Register imported functions in scope and store bodies with same symbol instance
+        String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
+        for (FunctionSymbol func : module.getFunctions()) {
+            if (BuiltinFunctions.isBuiltin(func)) continue;
+            FunctionSymbol importedFunc = new FunctionSymbol(
+                    func.getName(), func.getParameters(), func.getReturnType(), className);
+            _scope.tryDeclareFunction(importedFunc);
+            // Store body with same importedFunc instance for evaluator lookup
+            BoundBlockStatement body = module.getFunctionBodies().get(func);
+            if (body != null) {
+                _functionBodies.put(importedFunc, body);
+            }
+        }
+
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    private String resolveModulePath(String moduleName) {
+        String basePath = _filePath != null
+                ? java.nio.file.Paths.get(_filePath).getParent().toString()
+                : System.getProperty("user.dir");
+        java.nio.file.Path candidate = java.nio.file.Paths.get(basePath, moduleName + ".siyo");
+        if (java.nio.file.Files.exists(candidate)) {
+            return candidate.toAbsolutePath().toString();
+        }
+        return null;
+    }
+
+    private ModuleSymbol compileModule(String moduleName, String filePath) {
+        try {
+            if (_registry != null) _registry.markInProgress(filePath);
+
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
+            codeanalysis.syntax.SyntaxTree tree = codeanalysis.syntax.SyntaxTree.parse(source);
+
+            BoundGlobalScope scope = bindGlobalScope(null, tree.getRoot(), _registry, filePath);
+
+            if (scope.getDiagnostics().size() > 0) {
+                // Propagate errors
+                _diagnostics.addAll(scope.getDiagnostics());
+                if (_registry != null) _registry.markComplete(filePath);
+                return null;
+            }
+
+            String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
+
+            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>();
+            if (scope.getFunctionBodies() != null) bodies.putAll(scope.getFunctionBodies());
+
+            // Get function list from bodies (more reliable than scope symbols for multi-statement files)
+            List<FunctionSymbol> functions = new ArrayList<>(bodies.keySet());
+
+            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies);
+            if (_registry != null) {
+                _registry.register(filePath, module);
+                _registry.markComplete(filePath);
+            }
+            return module;
+        } catch (Exception e) {
+            if (_registry != null) _registry.markComplete(filePath);
+            return null;
+        }
+    }
+
+    private BoundExpression bindMemberCallExpression(MemberCallExpressionSyntax syntax) {
+        MemberAccessExpressionSyntax memberAccess = syntax.getMemberAccess();
+
+        // Check if target is a module name
+        if (memberAccess.getTarget() instanceof NameExpressionSyntax nameExpr) {
+            String targetName = nameExpr.getIdentifierToken().getData();
+
+            // Look up function with the module class name as module
+            String className = Character.toUpperCase(targetName.charAt(0)) + targetName.substring(1);
+            String funcName = memberAccess.getMember().getData();
+
+            // Try to find the imported function
+            if (_scope.tryLookupFunction(funcName)) {
+                FunctionSymbol func = _scope.lookupFunction(funcName);
+                if (func.getModuleName() != null && func.getModuleName().equals(className)) {
+                    // Bind arguments
+                    List<BoundExpression> boundArgs = new ArrayList<>();
+                    for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                        boundArgs.add(bindExpression(argSyntax));
+                    }
+
+                    // Type check arguments
+                    if (boundArgs.size() != func.getParameters().size()) {
+                        _diagnostics.reportWrongArgumentCount(syntax.getMemberAccess().getSpan(), funcName, func.getParameters().size(), boundArgs.size());
+                        return new BoundLiteralExpression(0);
+                    }
+
+                    for (int i = 0; i < boundArgs.size(); i++) {
+                        BoundExpression arg = boundArgs.get(i);
+                        ParameterSymbol param = func.getParameters().get(i);
+                        if (param.getType() != Object.class && arg.getClassType() != Object.class && arg.getClassType() != param.getType()) {
+                            _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), param.getName(), param.getType(), arg.getClassType());
+                        }
+                    }
+
+                    return new BoundCallExpression(func, boundArgs);
+                }
+            }
+
+            _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+            return new BoundLiteralExpression(0);
+        }
+
+        // Fall back to regular member access + call (future: method calls on objects)
+        _diagnostics.reportUndefinedFunction(syntax.getMemberAccess().getSpan(), "member call");
+        return new BoundLiteralExpression(0);
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {

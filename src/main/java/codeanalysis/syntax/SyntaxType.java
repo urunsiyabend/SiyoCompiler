@@ -275,6 +275,15 @@ public enum SyntaxType {
     /* Represents a for-in statement. */
     ForInStatement,
 
+    /* Represents an 'import' keyword. */
+    ImportKeyword,
+
+    /* Represents an import statement. */
+    ImportStatement,
+
+    /* Represents a member call expression (module.func(args)). */
+    MemberCallExpression,
+
     /* Represents a 'try' keyword. */
     TryKeyword,
 

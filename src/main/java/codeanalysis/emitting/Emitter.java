@@ -714,7 +714,7 @@ public class Emitter {
         for (BoundExpression arg : node.getArguments()) {
             emitExpression(arg);
         }
-        String owner = _className;
+        String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
         _mv.visitMethodInsn(INVOKESTATIC, owner, function.getName(), descriptor, false);
     }

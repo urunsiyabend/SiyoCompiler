@@ -365,6 +365,14 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         report(span, message);
     }
 
+    public void reportModuleNotFound(TextSpan span, String name) {
+        report(span, String.format("Module '%s' not found", name));
+    }
+
+    public void reportCircularImport(TextSpan span, String name) {
+        report(span, String.format("Circular import detected: '%s'", name));
+    }
+
     public void reportIndexOutOfBounds(TextSpan span, int index, int length) {
         String message = String.format("Index %d is out of bounds for length %d", index, length);
         report(span, message);

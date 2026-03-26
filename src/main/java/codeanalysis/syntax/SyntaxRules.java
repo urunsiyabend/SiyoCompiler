@@ -34,6 +34,7 @@ public class SyntaxRules {
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
             case "enum" -> SyntaxType.EnumKeyword;
+            case "import" -> SyntaxType.ImportKeyword;
             case "try" -> SyntaxType.TryKeyword;
             case "catch" -> SyntaxType.CatchKeyword;
             case "in" -> SyntaxType.InKeyword;

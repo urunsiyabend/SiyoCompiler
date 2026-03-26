@@ -14,19 +14,20 @@ public class FunctionSymbol {
     private final String _name;
     private final List<ParameterSymbol> _parameters;
     private final Class<?> _returnType;
+    private final String _moduleName;
 
-    /**
-     * Creates a new instance of the FunctionSymbol class.
-     *
-     * @param name       The name of the function.
-     * @param parameters The list of parameters.
-     * @param returnType The return type of the function (null for void).
-     */
     public FunctionSymbol(String name, List<ParameterSymbol> parameters, Class<?> returnType) {
+        this(name, parameters, returnType, null);
+    }
+
+    public FunctionSymbol(String name, List<ParameterSymbol> parameters, Class<?> returnType, String moduleName) {
         _name = name;
         _parameters = parameters;
         _returnType = returnType;
+        _moduleName = moduleName;
     }
+
+    public String getModuleName() { return _moduleName; }
 
     /**
      * Gets the name of the function.

@@ -41,14 +41,14 @@ public class Main {
 
     private static void compileFile(String path) {
         try {
-            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)));
+            String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
             SyntaxTree tree = SyntaxTree.parse(source);
-            Compilation compilation = new Compilation(tree);
+            codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
+            Compilation compilation = new Compilation(tree, registry, absPath);
 
-            // Derive class name from file name
             String fileName = java.nio.file.Paths.get(path).getFileName().toString();
             String className = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-            // Capitalize first letter
             className = Character.toUpperCase(className.charAt(0)) + className.substring(1);
 
             byte[] bytecode = compilation.compile(className);
@@ -60,10 +60,26 @@ public class Main {
                 System.exit(1);
             }
 
-            // Write .class file
+            // Write main .class file
             String outputPath = className + ".class";
             java.nio.file.Files.write(java.nio.file.Paths.get(outputPath), bytecode);
             System.out.println("Compiled to " + outputPath);
+
+            // Write dependency .class files
+            for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
+                // Lower function bodies before emitting
+                java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
+                for (var entry : module.getFunctionBodies().entrySet()) {
+                    loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
+                }
+                codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(
+                        new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>()),
+                        loweredBodies);
+                byte[] depBytes = depEmitter.emit(module.getClassName());
+                String depPath = module.getClassName() + ".class";
+                java.nio.file.Files.write(java.nio.file.Paths.get(depPath), depBytes);
+                System.out.println("Compiled to " + depPath);
+            }
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
@@ -73,9 +89,11 @@ public class Main {
 
     private static void runFile(String path) {
         try {
-            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)));
+            String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
             SyntaxTree tree = SyntaxTree.parse(source);
-            Compilation compilation = new Compilation(tree);
+            codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
+            Compilation compilation = new Compilation(tree, registry, absPath);
             Map<VariableSymbol, Object> variables = new HashMap<>();
             EvaluationResult result = compilation.evaluate(variables);
 

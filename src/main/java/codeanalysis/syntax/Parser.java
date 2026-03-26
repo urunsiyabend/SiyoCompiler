@@ -165,6 +165,7 @@ public class Parser {
             case StructKeyword -> parseStructDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
             case TryKeyword -> parseTryCatchStatement();
+            case ImportKeyword -> parseImportStatement();
             default -> parseExpressionStatement();
         };
     }
@@ -414,6 +415,12 @@ public class Parser {
         return new ContinueStatementSyntax(keyword);
     }
 
+    private StatementSyntax parseImportStatement() {
+        SyntaxToken importKeyword = match(SyntaxType.ImportKeyword);
+        SyntaxToken moduleName = match(SyntaxType.StringToken);
+        return new ImportStatementSyntax(importKeyword, moduleName);
+    }
+
     private StatementSyntax parseTryCatchStatement() {
         SyntaxToken tryKeyword = match(SyntaxType.TryKeyword);
         StatementSyntax tryBody = parseBlockStatement();
@@ -596,7 +603,16 @@ public class Parser {
             } else if (current().getType() == SyntaxType.DotToken) {
                 SyntaxToken dot = match(SyntaxType.DotToken);
                 SyntaxToken member = match(SyntaxType.IdentifierToken);
-                expr = new MemberAccessExpressionSyntax(expr, dot, member);
+                MemberAccessExpressionSyntax memberAccess = new MemberAccessExpressionSyntax(expr, dot, member);
+                // Check if this is a member call: module.func(args)
+                if (current().getType() == SyntaxType.OpenParenthesisToken) {
+                    SyntaxToken openParen = match(SyntaxType.OpenParenthesisToken);
+                    SeparatedSyntaxList<ExpressionSyntax> arguments = parseArguments();
+                    SyntaxToken closeParen = match(SyntaxType.CloseParenthesisToken);
+                    expr = new MemberCallExpressionSyntax(memberAccess, openParen, arguments, closeParen);
+                } else {
+                    expr = memberAccess;
+                }
             } else {
                 break;
             }

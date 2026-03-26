@@ -1,0 +1,6 @@
+import "math"
+
+println("abs(-42) = " + toString(math.abs(-42)))
+println("max(10, 20) = " + toString(math.max(10, 20)))
+println("min(10, 20) = " + toString(math.min(10, 20)))
+println("clamp(150, 0, 100) = " + toString(math.clamp(150, 0, 100)))
