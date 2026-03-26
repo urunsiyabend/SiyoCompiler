@@ -114,7 +114,15 @@ public class Lexer {
             }
             case '/' -> {
                 next();
-                _type = SyntaxType.SlashToken;
+                if (currentChar() == '/') {
+                    // Line comment: skip until end of line
+                    while (currentChar() != '\n' && currentChar() != '\r' && currentChar() != '\0') {
+                        next();
+                    }
+                    _type = SyntaxType.WhiteSpaceToken;
+                } else {
+                    _type = SyntaxType.SlashToken;
+                }
             }
             case '%' -> {
                 next();

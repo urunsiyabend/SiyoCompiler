@@ -311,6 +311,12 @@ public class Parser {
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         SyntaxToken colon = match(SyntaxType.ColonToken);
         SyntaxToken type = match(SyntaxType.IdentifierToken);
+        // Handle array type syntax: int[]
+        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+            nextToken(); // consume [
+            nextToken(); // consume ]
+            type = new SyntaxToken(SyntaxType.IdentifierToken, type.getPosition(), type.getData() + "[]", type.getValue());
+        }
         return new ParameterSyntax(identifier, colon, type);
     }
 
@@ -326,6 +332,12 @@ public class Parser {
         }
         SyntaxToken arrowToken = match(SyntaxType.ArrowToken);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        // Handle array return type: -> int[]
+        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+            nextToken();
+            nextToken();
+            identifier = new SyntaxToken(SyntaxType.IdentifierToken, identifier.getPosition(), identifier.getData() + "[]", identifier.getValue());
+        }
         return new TypeClauseSyntax(arrowToken, identifier);
     }
 
@@ -370,6 +382,11 @@ public class Parser {
             SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
             SyntaxToken colon = match(SyntaxType.ColonToken);
             SyntaxToken fieldType = match(SyntaxType.IdentifierToken);
+            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+                nextToken();
+                nextToken();
+                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(), fieldType.getData() + "[]", fieldType.getValue());
+            }
             fields.add(new ParameterSyntax(fieldName, colon, fieldType));
 
             // Optional comma between fields

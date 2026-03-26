@@ -354,9 +354,20 @@ public class Binder {
     private BoundExpression bindBinaryExpression(BinaryExpressionSyntax syntax) {
         BoundExpression boundLeft = bindExpression(syntax.getLeft());
         BoundExpression boundRight = bindExpression(syntax.getRight());
-        BoundBinaryOperator boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), boundLeft.getClassType(), boundRight.getClassType());
+        Class<?> leftType = boundLeft.getClassType();
+        Class<?> rightType = boundRight.getClassType();
+
+        // When one side is Object (e.g., from member access), try matching with the other side's type
+        BoundBinaryOperator boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), leftType, rightType);
+        if (boundOperator == null && leftType == Object.class && rightType != Object.class) {
+            boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), rightType, rightType);
+        }
+        if (boundOperator == null && rightType == Object.class && leftType != Object.class) {
+            boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), leftType, leftType);
+        }
+
         if (boundOperator == null) {
-            _diagnostics.reportUndefinedBinaryOperator(syntax.getOperator().getSpan(), syntax.getOperator().getData(), boundLeft.getClassType(), boundRight.getClassType());
+            _diagnostics.reportUndefinedBinaryOperator(syntax.getOperator().getSpan(), syntax.getOperator().getData(), leftType, rightType);
             return boundLeft;
         }
         return new BoundBinaryExpression(boundLeft, boundOperator, boundRight);
@@ -418,7 +429,9 @@ public class Binder {
             return boundExpression;
         }
 
-        if (boundExpression.getClassType() != variable.getType()) {
+        if (boundExpression.getClassType() != variable.getType()
+                && boundExpression.getClassType() != Object.class
+                && variable.getType() != Object.class) {
             _diagnostics.reportCannotConvert(syntax.getExpressionSyntax().getSpan(), boundExpression.getClassType(), variable.getType());
             return boundExpression;
         }
@@ -484,8 +497,18 @@ public class Binder {
         _currentFunction = function;
 
         // Add the function's own parameter symbols to scope (important for consistency with evaluator)
+        int paramIdx = 0;
         for (ParameterSymbol parameter : function.getParameters()) {
             _scope.tryDeclare(parameter);
+            // Track array element types from parameter type names
+            if (paramIdx < syntax.getParameters().getCount()) {
+                String typeName = syntax.getParameters().get(paramIdx).getTypeToken().getData();
+                Class<?> elemType = lookupElementType(typeName);
+                if (elemType != null) {
+                    _arrayElementTypes.put(parameter, elemType);
+                }
+            }
+            paramIdx++;
         }
 
         // Bind the body statements
@@ -751,12 +774,22 @@ public class Binder {
     }
 
     private Class<?> lookupType(String name) {
+        if (name.endsWith("[]")) {
+            return SiyoArray.class;
+        }
         return switch (name) {
             case "int" -> Integer.class;
             case "bool" -> Boolean.class;
             case "float" -> Double.class;
             case "string" -> String.class;
-            default -> null;
+            default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
+    }
+
+    private Class<?> lookupElementType(String typeName) {
+        if (typeName.endsWith("[]")) {
+            return lookupType(typeName.substring(0, typeName.length() - 2));
+        }
+        return null;
     }
 }

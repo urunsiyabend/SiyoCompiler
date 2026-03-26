@@ -1,0 +1,22 @@
+{
+    struct Node {
+        value: int,
+        next: int
+    }
+
+    mut nodes = [
+        Node { value: 10, next: 1 },
+        Node { value: 20, next: 2 },
+        Node { value: 30, next: -1 }
+    ]
+
+    // Simple traversal without function
+    mut sum = 0
+    mut current = 0
+    while current != -1 {
+        mut node = nodes[current]
+        sum = sum + node.value
+        current = node.next
+    }
+    sum
+}
