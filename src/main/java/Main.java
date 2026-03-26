@@ -24,6 +24,48 @@ public class Main {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
+        if (args.length >= 2 && args[0].equals("run")) {
+            runFile(args[1]);
+            return;
+        }
+        if (args.length >= 1 && !args[0].equals("repl")) {
+            runFile(args[0]);
+            return;
+        }
+        repl();
+    }
+
+    private static void runFile(String path) {
+        try {
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)));
+            SyntaxTree tree = SyntaxTree.parse(source);
+            Compilation compilation = new Compilation(tree);
+            Map<VariableSymbol, Object> variables = new HashMap<>();
+            EvaluationResult result = compilation.evaluate(variables);
+
+            if (result.diagnostics().hasNext()) {
+                DiagnosticBox diagnostics = result.diagnostics();
+                while (diagnostics.hasNext()) {
+                    Diagnostic diagnostic = diagnostics.next();
+                    var lineIndex = tree.getText().getLineIndex(diagnostic.getSpan().getStart());
+                    var lineNumber = lineIndex + 1;
+                    var line = tree.getText().getLines().get(lineIndex);
+                    var character = diagnostic.getSpan().getStart() - line.getStart() + 1;
+                    System.err.printf("(%d, %d): %s%n", lineNumber, character, diagnostic);
+                }
+                System.exit(1);
+            }
+
+            if (result.getValue() != null) {
+                System.out.println(result.getValue());
+            }
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static void repl() {
         Map<VariableSymbol, Object> variables = new HashMap<>();
         StringBuilder builder = new StringBuilder();
         Compilation previous = null;

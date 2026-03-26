@@ -412,7 +412,18 @@ public class Parser {
             ExpressionSyntax right = parseAssignmentExpression();
             return new AssignmentExpressionSyntax(identifierToken, operatorToken, right);
         }
-        return parseBinaryExpression();
+
+        ExpressionSyntax left = parseBinaryExpression();
+
+        // Compound assignment: arr[0] = 5 or p.x = 10
+        if (current().getType() == SyntaxType.EqualsToken &&
+            (left instanceof IndexExpressionSyntax || left instanceof MemberAccessExpressionSyntax)) {
+            SyntaxToken equalsToken = nextToken();
+            ExpressionSyntax right = parseAssignmentExpression();
+            return new CompoundAssignmentExpressionSyntax(left, equalsToken, right);
+        }
+
+        return left;
     }
 
     /**

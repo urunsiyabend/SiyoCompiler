@@ -1,0 +1,26 @@
+{
+    fn greet(name: string) -> string {
+        return "Hello, " + name + "!"
+    }
+
+    fn factorial(n: int) -> int {
+        if n <= 1 return 1
+        return n * factorial(n - 1)
+    }
+
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    mut p = Point { x: 3, y: 4 }
+    mut arr = [1, 2, 3, 4, 5]
+
+    mut sum = 0
+    for mut i = 0 i < len(arr) i = i + 1 {
+        sum = sum + arr[i]
+    }
+
+    mut result = greet("World") + " Sum=" + toString(sum) + " Factorial(5)=" + toString(factorial(5))
+    result
+}

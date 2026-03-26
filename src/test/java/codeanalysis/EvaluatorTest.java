@@ -397,6 +397,14 @@ class EvaluatorTest {
 
                 // Nested array with functions
                 {"{ mut arr = [10, 20, 30] fn sum(a: int, b: int) -> int { return a + b } sum(arr[0], arr[1]) }", 30},
+
+                // Array mutation
+                {"{ mut arr = [1, 2, 3] arr[0] = 99 arr[0] }", 99},
+                {"{ mut arr = [1, 2, 3] arr[2] = arr[0] + arr[1] arr[2] }", 3},
+
+                // Struct mutation
+                {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.x = 10 p.x }", 10},
+                {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.y = p.x + 1 p.y }", 4},
         };
     }
 

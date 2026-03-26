@@ -297,6 +297,7 @@ public class Binder {
             case IndexExpression -> bindIndexExpression((IndexExpressionSyntax) syntax);
             case MemberAccessExpression -> bindMemberAccessExpression((MemberAccessExpressionSyntax) syntax);
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
+            case CompoundAssignmentExpression -> bindCompoundAssignment((CompoundAssignmentExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -683,6 +684,25 @@ public class Binder {
             return structLit.getStructType();
         }
         return null;
+    }
+
+    private BoundExpression bindCompoundAssignment(CompoundAssignmentExpressionSyntax syntax) {
+        BoundExpression value = bindExpression(syntax.getValue());
+
+        if (syntax.getTarget() instanceof IndexExpressionSyntax indexSyntax) {
+            BoundExpression target = bindExpression(indexSyntax.getTarget());
+            BoundExpression index = bindExpression(indexSyntax.getIndex());
+            return new BoundIndexAssignmentExpression(target, index, value);
+        }
+
+        if (syntax.getTarget() instanceof MemberAccessExpressionSyntax memberSyntax) {
+            BoundExpression target = bindExpression(memberSyntax.getTarget());
+            String memberName = memberSyntax.getMember().getData();
+            return new BoundMemberAssignmentExpression(target, memberName, value);
+        }
+
+        _diagnostics.reportCannotAssign(syntax.getEqualsToken().getSpan(), "expression");
+        return value;
     }
 
     private BoundExpression bindStructLiteralExpression(StructLiteralExpressionSyntax syntax) {

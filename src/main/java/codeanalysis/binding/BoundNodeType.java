@@ -33,5 +33,6 @@ public enum BoundNodeType {
     MemberAccessExpression,
     StructDeclaration,
     IndexAssignmentExpression,
+    MemberAssignmentExpression,
     StructLiteralExpression,
 }

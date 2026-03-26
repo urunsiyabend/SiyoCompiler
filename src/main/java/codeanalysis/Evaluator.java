@@ -190,6 +190,8 @@ public class Evaluator {
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
+            case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
+            case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
         };
     }
@@ -352,6 +354,27 @@ public class Evaluator {
         _returnValue = null;
 
         return result;
+    }
+
+    private Object evaluateIndexAssignment(BoundIndexAssignmentExpression node) throws Exception {
+        Object target = evaluateExpression(node.getTarget());
+        int index = (int) evaluateExpression(node.getIndex());
+        Object value = evaluateExpression(node.getValue());
+
+        if (target instanceof SiyoArray arr) {
+            arr.set(index, value);
+        }
+        return value;
+    }
+
+    private Object evaluateMemberAssignment(BoundMemberAssignmentExpression node) throws Exception {
+        Object target = evaluateExpression(node.getTarget());
+        Object value = evaluateExpression(node.getValue());
+
+        if (target instanceof SiyoStruct struct) {
+            struct.setField(node.getMemberName(), value);
+        }
+        return value;
     }
 
     private Object evaluateStructLiteralExpression(BoundStructLiteralExpression node) throws Exception {

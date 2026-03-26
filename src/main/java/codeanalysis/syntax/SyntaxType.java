@@ -241,4 +241,7 @@ public enum SyntaxType {
 
     /* Represents a field assignment (name: value in struct literals). */
     FieldAssignment,
+
+    /* Represents a compound assignment (arr[0] = 5, p.x = 10). */
+    CompoundAssignmentExpression,
     }
