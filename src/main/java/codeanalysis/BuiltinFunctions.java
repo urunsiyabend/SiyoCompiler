@@ -42,12 +42,25 @@ public class BuiltinFunctions {
             Double.class
     );
 
+    public static final FunctionSymbol PRINT = new FunctionSymbol(
+            "print",
+            List.of(new ParameterSymbol("value", Object.class)),
+            null // void
+    );
+
+    public static final FunctionSymbol PRINTLN = new FunctionSymbol(
+            "println",
+            List.of(new ParameterSymbol("value", Object.class)),
+            null // void
+    );
+
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT);
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
         return function == LEN || function == TO_STRING || function == PARSE_INT
-                || function == PARSE_FLOAT || function == TO_INT || function == TO_FLOAT;
+                || function == PARSE_FLOAT || function == TO_INT || function == TO_FLOAT
+                || function == PRINT || function == PRINTLN;
     }
 }

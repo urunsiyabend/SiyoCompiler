@@ -348,8 +348,8 @@ public class Evaluator {
         // Pop frame
         _callStack.pop();
 
-        // Return the result
-        Object result = _returnValue;
+        // Return the result (explicit return or implicit last expression value)
+        Object result = _returnTriggered ? _returnValue : _lastValue;
         _returnTriggered = false;
         _returnValue = null;
 
@@ -451,6 +451,14 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.TO_FLOAT) {
             return ((Integer) arguments[0]).doubleValue();
+        }
+        if (function == BuiltinFunctions.PRINT) {
+            System.out.print(arguments[0]);
+            return null;
+        }
+        if (function == BuiltinFunctions.PRINTLN) {
+            System.out.println(arguments[0]);
+            return null;
         }
         throw new Exception("Unknown built-in function: " + function.getName());
     }

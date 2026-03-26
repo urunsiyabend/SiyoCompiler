@@ -405,6 +405,18 @@ class EvaluatorTest {
                 // Struct mutation
                 {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.x = 10 p.x }", 10},
                 {"{ struct Point { x: int, y: int } mut p = Point { x: 3, y: 4 } p.y = p.x + 1 p.y }", 4},
+
+                // Implicit return (last expression as return value)
+                {"{ fn add(a: int, b: int) -> int { a + b } add(3, 4) }", 7},
+                {"{ fn double(x: int) -> int { x * 2 } double(5) }", 10},
+
+                // Enum declaration and access
+                {"{ enum Color { Red, Green, Blue } Color.Red }", 0},
+                {"{ enum Color { Red, Green, Blue } Color.Green }", 1},
+                {"{ enum Color { Red, Green, Blue } Color.Blue }", 2},
+                {"{ enum Color { Red, Green, Blue } mut c = Color.Green c == Color.Green }", true},
+                {"{ enum Color { Red, Green, Blue } mut c = Color.Red c != Color.Blue }", true},
+                {"{ enum Direction { Up, Down, Left, Right } Direction.Right }", 3},
         };
     }
 

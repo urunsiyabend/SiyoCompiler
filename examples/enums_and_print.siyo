@@ -1,0 +1,44 @@
+{
+    enum Direction { North, East, South, West }
+
+    fn directionName(d: int) -> string {
+        if d == Direction.North return "North"
+        if d == Direction.East return "East"
+        if d == Direction.South return "South"
+        if d == Direction.West return "West"
+        "Unknown"
+    }
+
+    struct Position {
+        x: int,
+        y: int
+    }
+
+    fn move(pos: Position, dir: int, steps: int) {
+        if dir == Direction.North { pos.y = pos.y + steps }
+        if dir == Direction.South { pos.y = pos.y - steps }
+        if dir == Direction.East { pos.x = pos.x + steps }
+        if dir == Direction.West { pos.x = pos.x - steps }
+    }
+
+    // Implicit return: no "return" keyword needed
+    fn posToString(p: Position) -> string {
+        "(" + toString(p.x) + ", " + toString(p.y) + ")"
+    }
+
+    mut pos = Position { x: 0, y: 0 }
+
+    println("Starting at " + posToString(pos))
+
+    move(pos, Direction.North, 3)
+    println("Moved North 3: " + posToString(pos))
+
+    move(pos, Direction.East, 5)
+    println("Moved East 5: " + posToString(pos))
+
+    move(pos, Direction.South, 1)
+    println("Moved South 1: " + posToString(pos))
+
+    println("Final position: " + posToString(pos))
+    "done"
+}

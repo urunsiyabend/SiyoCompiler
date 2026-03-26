@@ -33,6 +33,7 @@ public class SyntaxRules {
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
+            case "enum" -> SyntaxType.EnumKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -87,6 +88,7 @@ public class SyntaxRules {
             case BreakKeyword -> "break";
             case ContinueKeyword -> "continue";
             case StructKeyword -> "struct";
+            case EnumKeyword -> "enum";
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";

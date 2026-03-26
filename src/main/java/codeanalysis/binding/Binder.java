@@ -35,6 +35,7 @@ public class Binder {
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
     private final Map<VariableSymbol, Class<?>> _arrayElementTypes = new HashMap<>();
     private final Map<VariableSymbol, StructSymbol> _variableStructTypes = new HashMap<>();
+    private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
     private int _labelCounter = 0;
 
     private LabelSymbol generateLabel(String prefix) {
@@ -108,6 +109,7 @@ public class Binder {
             case BreakStatement -> bindBreakStatement((BreakStatementSyntax)syntax);
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
             case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
+            case EnumDeclaration -> bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -128,6 +130,8 @@ public class Binder {
                 registerFunctionDeclaration(funcSyntax);
             } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
                 registerStructDeclaration(structSyntax);
+            } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
+                registerEnumDeclaration(enumSyntax);
             }
         }
 
@@ -697,6 +701,21 @@ public class Binder {
     }
 
     private BoundExpression bindMemberAccessExpression(MemberAccessExpressionSyntax syntax) {
+        // Check for enum access: EnumName.MemberName
+        if (syntax.getTarget() instanceof NameExpressionSyntax nameExpr) {
+            String typeName = nameExpr.getIdentifierToken().getData();
+            Map<String, Integer> enumMembers = _enumTypes.get(typeName);
+            if (enumMembers != null) {
+                String memberName = syntax.getMember().getData();
+                Integer value = enumMembers.get(memberName);
+                if (value != null) {
+                    return new BoundLiteralExpression(value);
+                }
+                _diagnostics.reportUndefinedName(syntax.getMember().getSpan(), typeName + "." + memberName);
+                return new BoundLiteralExpression(0);
+            }
+        }
+
         BoundExpression target = bindExpression(syntax.getTarget());
         String memberName = syntax.getMember().getData();
 
@@ -763,6 +782,25 @@ public class Binder {
         }
 
         return new BoundStructLiteralExpression(structType, fieldValues);
+    }
+
+    private void registerEnumDeclaration(EnumDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        if (_enumTypes.containsKey(name)) return;
+        Map<String, Integer> members = new HashMap<>();
+        int ordinal = 0;
+        for (SyntaxToken member : syntax.getMembers()) {
+            members.put(member.getData(), ordinal++);
+        }
+        _enumTypes.put(name, members);
+    }
+
+    private BoundStatement bindEnumDeclaration(EnumDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        if (!_enumTypes.containsKey(name)) {
+            registerEnumDeclaration(syntax);
+        }
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
     private BoundStatement bindStructDeclaration(StructDeclarationSyntax syntax) {

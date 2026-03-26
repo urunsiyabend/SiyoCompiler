@@ -139,6 +139,7 @@ public class Parser {
             case BreakKeyword -> parseBreakStatement();
             case ContinueKeyword -> parseContinueStatement();
             case StructKeyword -> parseStructDeclaration();
+            case EnumKeyword -> parseEnumDeclaration();
             default -> parseExpressionStatement();
         };
     }
@@ -369,6 +370,25 @@ public class Parser {
     private StatementSyntax parseContinueStatement() {
         SyntaxToken keyword = match(SyntaxType.ContinueKeyword);
         return new ContinueStatementSyntax(keyword);
+    }
+
+    private StatementSyntax parseEnumDeclaration() {
+        SyntaxToken enumKeyword = match(SyntaxType.EnumKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+
+        List<SyntaxToken> members = new ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken &&
+               current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken member = match(SyntaxType.IdentifierToken);
+            members.add(member);
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+        }
+
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, closeBrace);
     }
 
     private StatementSyntax parseStructDeclaration() {

@@ -35,4 +35,5 @@ public enum BoundNodeType {
     IndexAssignmentExpression,
     MemberAssignmentExpression,
     StructLiteralExpression,
+    EnumDeclaration,
 }

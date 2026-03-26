@@ -244,4 +244,10 @@ public enum SyntaxType {
 
     /* Represents a compound assignment (arr[0] = 5, p.x = 10). */
     CompoundAssignmentExpression,
+
+    /* Represents an 'enum' keyword. */
+    EnumKeyword,
+
+    /* Represents an enum declaration. */
+    EnumDeclaration,
     }
