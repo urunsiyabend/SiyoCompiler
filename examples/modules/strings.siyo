@@ -1,0 +1,9 @@
+// Module with function names that conflict with builtins
+fn len(x: int) -> int {
+    // Custom "len" - NOT the builtin
+    x * 2
+}
+
+fn contains(x: int, y: int) -> bool {
+    x > y
+}

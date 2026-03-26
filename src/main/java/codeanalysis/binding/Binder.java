@@ -189,8 +189,9 @@ public class Binder {
     private void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
 
-        // Don't re-register if already declared
-        if (_scope.tryLookupFunction(name)) {
+        // Only skip if already declared in current scope (not parent)
+        // This allows shadowing built-in functions
+        if (_scope.hasDeclaredFunction(name)) {
             return;
         }
 
@@ -959,14 +960,15 @@ public class Binder {
             }
         }
 
-        // Register imported functions in scope and store bodies with same symbol instance
+        // Register imported functions with qualified name: "moduleName.funcName"
+        // This prevents all name conflicts (with builtins, locals, other modules)
         String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
+            String qualifiedName = moduleName + "." + func.getName();
             FunctionSymbol importedFunc = new FunctionSymbol(
-                    func.getName(), func.getParameters(), func.getReturnType(), className);
+                    qualifiedName, func.getParameters(), func.getReturnType(), className);
             _scope.tryDeclareFunction(importedFunc);
-            // Store body with same importedFunc instance for evaluator lookup
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
                 _functionBodies.put(importedFunc, body);
@@ -1029,44 +1031,41 @@ public class Binder {
         // Check if target is a module name
         if (memberAccess.getTarget() instanceof NameExpressionSyntax nameExpr) {
             String targetName = nameExpr.getIdentifierToken().getData();
-
-            // Look up function with the module class name as module
-            String className = Character.toUpperCase(targetName.charAt(0)) + targetName.substring(1);
             String funcName = memberAccess.getMember().getData();
+            String qualifiedName = targetName + "." + funcName;
 
-            // Try to find the imported function
-            if (_scope.tryLookupFunction(funcName)) {
-                FunctionSymbol func = _scope.lookupFunction(funcName);
-                if (func.getModuleName() != null && func.getModuleName().equals(className)) {
-                    // Bind arguments
-                    List<BoundExpression> boundArgs = new ArrayList<>();
-                    for (ExpressionSyntax argSyntax : syntax.getArguments()) {
-                        boundArgs.add(bindExpression(argSyntax));
-                    }
+            // Lookup with qualified name
+            if (_scope.tryLookupFunction(qualifiedName)) {
+                FunctionSymbol func = _scope.lookupFunction(qualifiedName);
 
-                    // Type check arguments
-                    if (boundArgs.size() != func.getParameters().size()) {
-                        _diagnostics.reportWrongArgumentCount(syntax.getMemberAccess().getSpan(), funcName, func.getParameters().size(), boundArgs.size());
-                        return new BoundLiteralExpression(0);
-                    }
-
-                    for (int i = 0; i < boundArgs.size(); i++) {
-                        BoundExpression arg = boundArgs.get(i);
-                        ParameterSymbol param = func.getParameters().get(i);
-                        if (param.getType() != Object.class && arg.getClassType() != Object.class && arg.getClassType() != param.getType()) {
-                            _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), param.getName(), param.getType(), arg.getClassType());
-                        }
-                    }
-
-                    return new BoundCallExpression(func, boundArgs);
+                // Bind arguments
+                List<BoundExpression> boundArgs = new ArrayList<>();
+                for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                    boundArgs.add(bindExpression(argSyntax));
                 }
+
+                // Type check arguments
+                if (boundArgs.size() != func.getParameters().size()) {
+                    _diagnostics.reportWrongArgumentCount(memberAccess.getSpan(), qualifiedName, func.getParameters().size(), boundArgs.size());
+                    return new BoundLiteralExpression(0);
+                }
+
+                for (int i = 0; i < boundArgs.size(); i++) {
+                    BoundExpression arg = boundArgs.get(i);
+                    ParameterSymbol param = func.getParameters().get(i);
+                    if (param.getType() != Object.class && arg.getClassType() != Object.class && arg.getClassType() != param.getType()) {
+                        _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), param.getName(), param.getType(), arg.getClassType());
+                    }
+                }
+
+                return new BoundCallExpression(func, boundArgs);
             }
 
-            _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+            // Check if it's an enum access + call (shouldn't be, but give useful error)
+            _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), qualifiedName);
             return new BoundLiteralExpression(0);
         }
 
-        // Fall back to regular member access + call (future: method calls on objects)
         _diagnostics.reportUndefinedFunction(syntax.getMemberAccess().getSpan(), "member call");
         return new BoundLiteralExpression(0);
     }

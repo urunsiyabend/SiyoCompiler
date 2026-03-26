@@ -104,6 +104,10 @@ public class BoundScope {
      * @param functionSymbol The function to be declared.
      * @return True if the function was declared, false if it already exists.
      */
+    public boolean hasDeclaredFunction(String name) {
+        return _functions.containsKey(name);
+    }
+
     public boolean tryDeclareFunction(FunctionSymbol functionSymbol) {
         if (_functions.containsKey(functionSymbol.getName())) {
             return false;

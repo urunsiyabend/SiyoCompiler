@@ -118,6 +118,7 @@ public class Emitter {
 
     private void emitFunction(ClassWriter cw, FunctionSymbol function, BoundBlockStatement body, String className) {
         if (BuiltinFunctions.isBuiltin(function)) return;
+        if (function.getModuleName() != null) return; // imported functions compiled in their own class
 
         String descriptor = getFunctionDescriptor(function);
         _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName(), descriptor, null, null);
@@ -716,7 +717,12 @@ public class Emitter {
         }
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
-        _mv.visitMethodInsn(INVOKESTATIC, owner, function.getName(), descriptor, false);
+        // For imported functions, name is "module.func" - extract just the function name
+        String methodName = function.getName();
+        if (methodName.contains(".")) {
+            methodName = methodName.substring(methodName.lastIndexOf('.') + 1);
+        }
+        _mv.visitMethodInsn(INVOKESTATIC, owner, methodName, descriptor, false);
     }
 
     // ========== Helpers ==========

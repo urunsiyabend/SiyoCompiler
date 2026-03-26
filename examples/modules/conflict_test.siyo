@@ -1,0 +1,16 @@
+import "math"
+import "strings"
+
+// math.abs and strings.len should NOT conflict with builtins
+// Each is accessed via module prefix only
+
+// Built-in len works normally
+println("builtin len: " + toString(len("hello")))
+
+// Module functions accessed via prefix
+println("math.abs(-5): " + toString(math.abs(-5)))
+println("strings.len(21): " + toString(strings.len(21)))
+println("strings.contains(10, 5): " + toString(strings.contains(10, 5)))
+
+// math.max and math.min
+println("math.max(3, 7): " + toString(math.max(3, 7)))
