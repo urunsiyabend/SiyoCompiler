@@ -291,8 +291,8 @@ public class Evaluator {
             case RightShift -> (int) left >> (int) right;
             case LogicalAnd -> (boolean) left && (boolean) right;
             case LogicalOr -> (boolean) left || (boolean) right;
-            case Equals -> left.equals(right);
-            case NotEquals -> !left.equals(right);
+            case Equals -> java.util.Objects.equals(left, right);
+            case NotEquals -> !java.util.Objects.equals(left, right);
             case LessThan -> left instanceof Double l && right instanceof Double r ? l < r : (int) left < (int) right;
             case LessOrEqualsThan -> left instanceof Double l && right instanceof Double r ? l <= r : (int) left <= (int) right;
             case GreaterThan -> left instanceof Double l && right instanceof Double r ? l > r : (int) left > (int) right;

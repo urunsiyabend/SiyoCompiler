@@ -417,6 +417,18 @@ class EvaluatorTest {
                 {"{ enum Color { Red, Green, Blue } mut c = Color.Green c == Color.Green }", true},
                 {"{ enum Color { Red, Green, Blue } mut c = Color.Red c != Color.Blue }", true},
                 {"{ enum Direction { Up, Down, Left, Right } Direction.Right }", 3},
+
+                // Null literal
+                {"null", null},
+                {"null == null", true},
+                {"null != null", false},
+
+                // Multi-statement (no outer braces needed)
+                {"mut x = 10\n mut y = 20\n x + y", 30},
+
+                // Identifiers with digits and underscores
+                {"{ mut my_var = 42\n my_var }", 42},
+                {"{ mut x1 = 10\n mut x2 = 20\n x1 + x2 }", 30},
         };
     }
 

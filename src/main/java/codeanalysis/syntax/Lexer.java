@@ -240,7 +240,7 @@ public class Lexer {
             case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> readNumberToken();
             case ' ', '\t', '\n', '\r' -> readWhitespaceToken();
             default -> {
-                if (Character.isLetter(currentChar())) {
+                if (Character.isLetter(currentChar()) || currentChar() == '_') {
                     readKeywordOrIdentifier();
                 } else if (Character.isWhitespace(currentChar())) {
                     readWhitespaceToken();
@@ -358,7 +358,7 @@ public class Lexer {
      * Reads the keyword or identifier token from the text being analyzed and moves the cursor.
      */
     private void readKeywordOrIdentifier() {
-        while(Character.isLetter(currentChar())) {
+        while(Character.isLetterOrDigit(currentChar()) || currentChar() == '_') {
             next();
         }
 

@@ -328,6 +328,9 @@ public class Binder {
      */
     private BoundExpression bindLiteralExpression(LiteralExpressionSyntax syntax) {
         Object value = syntax.getValue();
+        if (value == null && syntax.getLiteralToken().getType() == SyntaxType.NullKeyword) {
+            return new BoundLiteralExpression(null);
+        }
         if (value == null) {
             value = 0;
         }

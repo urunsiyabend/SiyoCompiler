@@ -250,4 +250,7 @@ public enum SyntaxType {
 
     /* Represents an enum declaration. */
     EnumDeclaration,
+
+    /* Represents a 'null' keyword. */
+    NullKeyword,
     }

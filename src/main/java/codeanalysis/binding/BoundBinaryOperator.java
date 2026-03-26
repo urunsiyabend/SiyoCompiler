@@ -62,6 +62,9 @@ public class BoundBinaryOperator {
             new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, String.class),
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, String.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, String.class, Boolean.class),
+
+            new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Object.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Object.class, Boolean.class),
     };
 
     /**

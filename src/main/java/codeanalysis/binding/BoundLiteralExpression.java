@@ -38,7 +38,7 @@ public class BoundLiteralExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        return getValue().getClass();
+        return value == null ? Object.class : value.getClass();
     }
 
     /**

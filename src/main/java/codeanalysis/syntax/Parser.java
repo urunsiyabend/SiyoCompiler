@@ -116,9 +116,33 @@ public class Parser {
      * @return The syntax tree representing the parsed input.
      */
     public CompilationUnitSyntax parseCompilationUnit() {
-        StatementSyntax statement = parseStatement();
+        ArrayList<StatementSyntax> statements = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            StatementSyntax statement = parseStatement();
+            statements.add(statement);
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
+        }
+
         SyntaxToken eofToken = match(SyntaxType.EOFToken);
-        return new CompilationUnitSyntax(statement, eofToken);
+
+        StatementSyntax body;
+        if (statements.size() == 1) {
+            body = statements.get(0);
+        } else {
+            body = new BlockStatementSyntax(
+                new SyntaxToken(SyntaxType.OpenBraceToken, 0, "{", null),
+                statements,
+                new SyntaxToken(SyntaxType.CloseBraceToken, 0, "}", null)
+            );
+        }
+
+        return new CompilationUnitSyntax(body, eofToken);
     }
 
     /**
@@ -501,6 +525,7 @@ public class Parser {
         ExpressionSyntax expr = switch (current().getType()) {
             case OpenParenthesisToken -> parseParenthesizedExpression();
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
+            case NullKeyword -> parseNullLiteral();
             case NumberToken -> parseNumberLiteral();
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
@@ -625,6 +650,11 @@ public class Parser {
      *
      * @return The parsed expression syntax.
      */
+    private ExpressionSyntax parseNullLiteral() {
+        SyntaxToken token = match(SyntaxType.NullKeyword);
+        return new LiteralExpressionSyntax(token, null);
+    }
+
     private ExpressionSyntax parseFloatLiteral() {
         SyntaxToken floatToken = match(SyntaxType.FloatToken);
         return new LiteralExpressionSyntax(floatToken);
