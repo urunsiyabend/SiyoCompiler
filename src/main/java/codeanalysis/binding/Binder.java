@@ -33,10 +33,30 @@ public class Binder {
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
-    private final Map<VariableSymbol, Class<?>> _arrayElementTypes = new HashMap<>();
-    private final Map<VariableSymbol, StructSymbol> _variableStructTypes = new HashMap<>();
-    private final Map<VariableSymbol, StructSymbol> _arrayStructElementTypes = new HashMap<>();
+    private final Map<VariableSymbol, VariableTypeInfo> _typeInfo = new HashMap<>();
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
+
+    private void trackArrayType(VariableSymbol var, Class<?> elementType) {
+        _typeInfo.put(var, VariableTypeInfo.forArray(elementType));
+    }
+    private void trackArrayType(VariableSymbol var, Class<?> elementType, StructSymbol structType) {
+        _typeInfo.put(var, VariableTypeInfo.forArray(elementType, structType));
+    }
+    private void trackStructType(VariableSymbol var, StructSymbol structType) {
+        _typeInfo.put(var, VariableTypeInfo.forStruct(structType));
+    }
+    private Class<?> getArrayElementType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getArrayElementType() : null;
+    }
+    private StructSymbol getVarStructType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getStructType() : null;
+    }
+    private StructSymbol getArrayStructElementType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getArrayElementStructType() : null;
+    }
     private int _labelCounter = 0;
 
     private LabelSymbol generateLabel(String prefix) {
@@ -224,13 +244,13 @@ public class Binder {
 
         // Track element/struct types for type resolution
         if (initializer instanceof BoundArrayLiteralExpression arr) {
-            _arrayElementTypes.put(variableSymbol, arr.getElementType());
-            // Track struct type of array elements
             if (!arr.getElements().isEmpty() && arr.getElements().get(0) instanceof BoundStructLiteralExpression structLit) {
-                _arrayStructElementTypes.put(variableSymbol, structLit.getStructType());
+                trackArrayType(variableSymbol, arr.getElementType(), structLit.getStructType());
+            } else {
+                trackArrayType(variableSymbol, arr.getElementType());
             }
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
-            _variableStructTypes.put(variableSymbol, structLit.getStructType());
+            trackStructType(variableSymbol, structLit.getStructType());
         }
 
         return new BoundVariableDeclaration(variableSymbol, initializer);
@@ -522,13 +542,13 @@ public class Binder {
                 String typeName = syntax.getParameters().get(paramIdx).getTypeToken().getData();
                 Class<?> elemType = lookupElementType(typeName);
                 if (elemType != null) {
-                    _arrayElementTypes.put(parameter, elemType);
+                    trackArrayType(parameter, elemType);
                 }
                 // Track struct types from parameter type names
                 String baseTypeName = typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName;
                 StructSymbol structSym = _structTypes.get(baseTypeName);
                 if (structSym != null && parameter.getType() == SiyoStruct.class) {
-                    _variableStructTypes.put(parameter, structSym);
+                    trackStructType(parameter, structSym);
                 }
             }
             paramIdx++;
@@ -667,17 +687,18 @@ public class Binder {
         // Body: { mut item = _col[_i]; original body }
         // Resolve element type from the original collection expression
         Class<?> elementType = resolveArrayElementType(collection);
-        _arrayElementTypes.put(collectionVar, elementType);
         StructSymbol structType = resolveStructTypeFromCollection(collection);
         if (structType != null) {
-            _arrayStructElementTypes.put(collectionVar, structType);
+            trackArrayType(collectionVar, elementType, structType);
+        } else {
+            trackArrayType(collectionVar, elementType);
         }
         VariableSymbol itemVar = new VariableSymbol(itemName, false, elementType);
         _scope = new BoundScope(_scope);
         _scope.tryDeclare(itemVar);
         // Track struct type if element is a struct
         if (elementType == SiyoStruct.class && structType != null) {
-            _variableStructTypes.put(itemVar, structType);
+            trackStructType(itemVar, structType);
         }
 
         BoundIndexExpression indexAccess = new BoundIndexExpression(
@@ -778,7 +799,7 @@ public class Binder {
             return arr.getElementType();
         }
         if (target instanceof BoundVariableExpression varExpr) {
-            Class<?> elemType = _arrayElementTypes.get(varExpr.getVariable());
+            Class<?> elemType = getArrayElementType(varExpr.getVariable());
             if (elemType != null) return elemType;
         }
         if (target instanceof BoundCallExpression callExpr) {
@@ -836,7 +857,7 @@ public class Binder {
 
     private StructSymbol resolveStructType(BoundExpression target) {
         if (target instanceof BoundVariableExpression varExpr) {
-            StructSymbol type = _variableStructTypes.get(varExpr.getVariable());
+            StructSymbol type = getVarStructType(varExpr.getVariable());
             if (type != null) return type;
         }
         if (target instanceof BoundStructLiteralExpression structLit) {
@@ -947,7 +968,7 @@ public class Binder {
             }
         }
         if (collection instanceof BoundVariableExpression varExpr) {
-            StructSymbol structType = _arrayStructElementTypes.get(varExpr.getVariable());
+            StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
         }
         return null;

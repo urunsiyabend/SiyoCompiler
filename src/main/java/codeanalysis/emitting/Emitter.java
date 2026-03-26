@@ -589,15 +589,16 @@ public class Emitter {
     }
 
     private void emitMemberAssignmentExpression(BoundMemberAssignmentExpression node) {
-        // map.put("fieldName", value) -> returns old value
-        emitExpression(node.getTarget());
-        _mv.visitLdcInsn(node.getMemberName());
-        emitExpression(node.getValue());
+        // map.put("fieldName", value) -> we want new value on stack
+        emitExpression(node.getTarget());  // map
+        _mv.visitLdcInsn(node.getMemberName());  // key
+        emitExpression(node.getValue());  // value (once only)
         emitBoxIfNeeded(node.getValue().getClassType());
+        // Stack: [map, key, boxedValue] - dup value before put consumes it
+        _mv.visitInsn(DUP_X2);  // [boxedValue, map, key, boxedValue]
         _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
-        // put returns old value, but we want new value - drop old, push new
-        _mv.visitInsn(POP);
-        emitExpression(node.getValue());
+        _mv.visitInsn(POP);  // discard old value from put, boxedValue remains
+        emitUnboxIfNeeded(node.getValue().getClassType());  // unbox if needed
     }
 
     private void emitCallExpression(BoundCallExpression node) {
