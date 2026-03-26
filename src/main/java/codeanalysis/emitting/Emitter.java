@@ -174,6 +174,7 @@ public class Emitter {
             case GotoStatement -> emitGotoStatement((BoundGotoStatement) node);
             case ConditionalGotoStatement -> emitConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ReturnStatement -> emitReturnStatement((BoundReturnStatement) node);
+            case TryCatchStatement -> emitTryCatchStatement((BoundTryCatchStatement) node);
             default -> throw new UnsupportedOperationException("Cannot emit statement: " + node.getType());
         }
     }
@@ -233,6 +234,31 @@ public class Emitter {
         } else {
             _mv.visitJumpInsn(IFEQ, getLabel(node.getLabel()));
         }
+    }
+
+    private void emitTryCatchStatement(BoundTryCatchStatement node) {
+        Label tryStart = new Label();
+        Label tryEnd = new Label();
+        Label catchStart = new Label();
+        Label catchEnd = new Label();
+
+        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Exception");
+
+        // Try body
+        _mv.visitLabel(tryStart);
+        emitStatement(node.getTryBody());
+        _mv.visitLabel(tryEnd);
+        _mv.visitJumpInsn(GOTO, catchEnd);
+
+        // Catch body
+        _mv.visitLabel(catchStart);
+        // Exception is on stack, get message
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Exception", "getMessage", "()Ljava/lang/String;", false);
+        // Store in error variable
+        int errorSlot = declareLocal(node.getErrorVariable());
+        _mv.visitVarInsn(ASTORE, errorSlot);
+        emitStatement(node.getCatchBody());
+        _mv.visitLabel(catchEnd);
     }
 
     private void emitReturnStatement(BoundReturnStatement node) {
@@ -578,6 +604,14 @@ public class Emitter {
         FunctionSymbol function = node.getFunction();
 
         // Built-in functions
+        if (function == BuiltinFunctions.ERROR) {
+            _mv.visitTypeInsn(NEW, "java/lang/RuntimeException");
+            _mv.visitInsn(DUP);
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKESPECIAL, "java/lang/RuntimeException", "<init>", "(Ljava/lang/String;)V", false);
+            _mv.visitInsn(ATHROW);
+            return;
+        }
         if (function == BuiltinFunctions.INPUT) {
             // print prompt
             _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");

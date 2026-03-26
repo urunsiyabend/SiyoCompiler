@@ -633,26 +633,18 @@ public class Binder {
      * @return The Class representing the type, or null if not found.
      */
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
-        // Desugar: for item in arr { body }
-        // Into:  { mut _arr = arr; for mut _i = 0; _i < len(_arr); _i = _i + 1 { mut item = _arr[_i]; body } }
         BoundExpression collection = bindExpression(syntax.getCollection());
         String itemName = syntax.getItemName().getData();
+        int uid = _labelCounter++; // unique id to avoid variable name collisions
 
-        // Create index variable
-        VariableSymbol indexVar = new VariableSymbol("_idx_" + itemName, false, Integer.class);
+        // Create index and collection variables with unique names
+        VariableSymbol indexVar = new VariableSymbol("_idx" + uid, false, Integer.class);
         _scope = new BoundScope(_scope);
         _scope.tryDeclare(indexVar);
 
-        // Initializer: mut _i = 0
         BoundVariableDeclaration initializer = new BoundVariableDeclaration(indexVar, new BoundLiteralExpression(0));
 
-        // Condition: _i < len(collection)
-        BoundExpression lenCall = new BoundCallExpression(BuiltinFunctions.LEN, java.util.List.of(new BoundVariableExpression(new VariableSymbol("_col_" + itemName, true, collection.getClassType()))));
-        // Simpler: use the collection directly
-        BoundExpression indexExpr = new BoundVariableExpression(indexVar);
-
-        // We need to store collection in a variable to avoid re-evaluation
-        VariableSymbol collectionVar = new VariableSymbol("_col_" + itemName, true, collection.getClassType());
+        VariableSymbol collectionVar = new VariableSymbol("_col" + uid, true, collection.getClassType());
         _scope.tryDeclare(collectionVar);
         BoundVariableDeclaration collectionDecl = new BoundVariableDeclaration(collectionVar, collection);
 

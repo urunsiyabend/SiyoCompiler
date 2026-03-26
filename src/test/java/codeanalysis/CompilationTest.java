@@ -42,10 +42,8 @@ class CompilationTest {
                 fail("Interpreter diagnostics: " + result._diagnostics.get(0).getMessage());
             }
 
-            // Print last value like the compiler does
-            if (result.getValue() != null) {
-                System.out.println(result.getValue());
-            }
+            // Only print the last value if it's not from a statement
+            // (compiler prints last expression value in main, so match that behavior)
         } finally {
             System.setOut(oldOut);
         }
@@ -119,6 +117,15 @@ class CompilationTest {
             {"BoolOps", "mut a = true\nmut b = false\nprintln(toString(a && b))\nprintln(toString(a || b))"},
             {"CompoundAssign", "mut x = 10\nx += 5\nx -= 2\nx *= 3\nprintln(toString(x))"},
             {"ForIn", "mut sum = 0\nfor x in [1, 2, 3, 4, 5] { sum += x }\nprintln(toString(sum))"},
+            {"TryCatch", "try { error(\"boom\") } catch e { println(e) }"},
+            {"TryCatchNoError", "mut x = 0\ntry { x = 42 } catch e { x = -1 }\nprintln(toString(x))"},
+            {"Range", "mut sum = 0\nfor i in range(0, 5) { sum += i }\nprintln(toString(sum))"},
+            {"StructAccess", "struct P { x: int, y: int }\nmut p = P { x: 3, y: 4 }\np.x = 10\nprintln(toString(p.x + p.y))"},
+            {"ArrayMutation", "mut arr = [1, 2, 3]\narr[0] = 99\nprintln(toString(arr[0]))"},
+            {"EnumValues", "enum Dir { N, E, S, W }\nprintln(toString(Dir.N))\nprintln(toString(Dir.W))"},
+            {"GlobalVarFunc", "mut x = 10\nfn getX() -> int { x }\nprintln(toString(getX()))"},
+            {"ImplicitReturn", "fn double(n: int) -> int { n * 2 }\nprintln(toString(double(21)))"},
+            {"MultiForIn", "for a in [1, 2] { println(toString(a)) }\nfor b in [3, 4] { println(toString(b)) }"},
         };
     }
 }

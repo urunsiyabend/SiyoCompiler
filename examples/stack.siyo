@@ -1,78 +1,71 @@
-{
-    // Stack implementation using array
-    struct Stack {
-        data: int[],
-        top: int,
-        capacity: int
-    }
+// Stack implementation using array
 
-    fn createStack(capacity: int) -> Stack {
-        return Stack {
-            data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            top: -1,
-            capacity: capacity
-        }
-    }
-
-    fn push(s: Stack, value: int) -> int {
-        if s.top >= s.capacity - 1 {
-            return -1 // stack full
-        }
-        s.top = s.top + 1
-        s.data[s.top] = value
-        return 0
-    }
-
-    fn pop(s: Stack) -> int {
-        if s.top < 0 {
-            return -1 // stack empty
-        }
-        mut value = s.data[s.top]
-        s.top = s.top - 1
-        return value
-    }
-
-    fn peek(s: Stack) -> int {
-        if s.top < 0 {
-            return -1
-        }
-        return s.data[s.top]
-    }
-
-    fn isEmpty(s: Stack) -> bool {
-        return s.top < 0
-    }
-
-    fn size(s: Stack) -> int {
-        return s.top + 1
-    }
-
-    fn stackToString(s: Stack) -> string {
-        mut result = "Stack["
-        for mut i = 0 i <= s.top i = i + 1 {
-            if i > 0 {
-                result = result + ", "
-            }
-            result = result + toString(s.data[i])
-        }
-        result = result + "] (top=" + toString(s.top) + ")"
-        return result
-    }
-
-    // Test the stack
-    mut s = createStack(10)
-    push(s, 10)
-    push(s, 20)
-    push(s, 30)
-
-    mut msg = "After push 10, 20, 30: " + stackToString(s)
-    msg = msg + "\nPeek: " + toString(peek(s))
-    msg = msg + "\nPop: " + toString(pop(s))
-    msg = msg + "\nPop: " + toString(pop(s))
-    msg = msg + "\nAfter 2 pops: " + stackToString(s)
-    msg = msg + "\nSize: " + toString(size(s))
-    msg = msg + "\nIs empty: " + toString(isEmpty(s))
-    msg = msg + "\nPop last: " + toString(pop(s))
-    msg = msg + "\nIs empty: " + toString(isEmpty(s))
-    msg
+struct Stack {
+    data: int[],
+    top: int,
+    capacity: int
 }
+
+fn createStack(capacity: int) -> Stack {
+    return Stack {
+        data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        top: -1,
+        capacity: capacity
+    }
+}
+
+fn stackPush(s: Stack, value: int) -> int {
+    if s.top >= s.capacity - 1 {
+        return -1
+    }
+    s.top = s.top + 1
+    s.data[s.top] = value
+    return 0
+}
+
+fn stackPop(s: Stack) -> int {
+    if s.top < 0 {
+        return -1
+    }
+    mut value = s.data[s.top]
+    s.top = s.top - 1
+    return value
+}
+
+fn stackPeek(s: Stack) -> int {
+    if s.top < 0 return -1
+    s.data[s.top]
+}
+
+fn stackIsEmpty(s: Stack) -> bool {
+    s.top < 0
+}
+
+fn stackSize(s: Stack) -> int {
+    s.top + 1
+}
+
+fn stackToString(s: Stack) -> string {
+    mut result = "Stack["
+    for mut i = 0 i <= s.top i = i + 1 {
+        if i > 0 { result += ", " }
+        result += toString(s.data[i])
+    }
+    result + "] (top=" + toString(s.top) + ")"
+}
+
+// Test
+mut s = createStack(10)
+stackPush(s, 10)
+stackPush(s, 20)
+stackPush(s, 30)
+
+println("After push 10, 20, 30: " + stackToString(s))
+println("Peek: " + toString(stackPeek(s)))
+println("Pop: " + toString(stackPop(s)))
+println("Pop: " + toString(stackPop(s)))
+println("After 2 pops: " + stackToString(s))
+println("Size: " + toString(stackSize(s)))
+println("Is empty: " + toString(stackIsEmpty(s)))
+println("Pop last: " + toString(stackPop(s)))
+println("Is empty: " + toString(stackIsEmpty(s)))

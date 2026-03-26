@@ -8,7 +8,6 @@ fn safeDivide(a: int, b: int) -> string {
 }
 
 fn safeParseInt(text: string) -> int {
-    // parseInt returns 0 for invalid input, we can do better
     if len(text) == 0 {
         error("Empty string")
     }
@@ -23,25 +22,42 @@ fn safeParseInt(text: string) -> int {
 
 // Safe division
 println("=== Safe Division ===")
-mut pairs = [[10, 2], [15, 3], [10, 0], [100, 4]]
-for pair in pairs {
-    try {
-        mut result = safeDivide(pair[0], pair[1])
-        println(toString(pair[0]) + " / " + toString(pair[1]) + " = " + result)
-    } catch e {
-        println(toString(pair[0]) + " / " + toString(pair[1]) + " => Error: " + e)
-    }
+try {
+    println("10 / 2 = " + safeDivide(10, 2))
+    println("10 / 0 = " + safeDivide(10, 0))
+} catch e {
+    println("Error: " + e)
 }
 
 // Safe parsing
 println("")
 println("=== Safe Parsing ===")
-mut inputs = ["42", "hello", "123", "", "99x"]
-for text in inputs {
-    try {
-        mut num = safeParseInt(text)
-        println("'" + text + "' => " + toString(num))
-    } catch e {
-        println("'" + text + "' => Error: " + e)
-    }
+try {
+    println("Parsed: " + toString(safeParseInt("42")))
+} catch e {
+    println("Error: " + e)
 }
+
+try {
+    println("Parsed: " + toString(safeParseInt("hello")))
+} catch e {
+    println("Error: " + e)
+}
+
+try {
+    println("Parsed: " + toString(safeParseInt("")))
+} catch e {
+    println("Error: " + e)
+}
+
+// Array bounds
+println("")
+println("=== Array Bounds ===")
+mut arr = [1, 2, 3]
+try {
+    println("arr[1] = " + toString(arr[1]))
+    println("arr[99] = " + toString(arr[99]))
+} catch e {
+    println("Error: " + e)
+}
+println("Program continues after error!")
