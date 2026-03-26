@@ -1,0 +1,29 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Rect {
+    x: int,
+    y: int,
+    w: int,
+    h: int
+}
+
+fn newPoint(x: int, y: int) -> Point {
+    Point { x: x, y: y }
+}
+
+fn pointToString(p: Point) -> string {
+    "(" + toString(p.x) + ", " + toString(p.y) + ")"
+}
+
+fn distance2(a: Point, b: Point) -> int {
+    mut dx = a.x - b.x
+    mut dy = a.y - b.y
+    dx * dx + dy * dy
+}
+
+fn area(r: Rect) -> int {
+    r.w * r.h
+}

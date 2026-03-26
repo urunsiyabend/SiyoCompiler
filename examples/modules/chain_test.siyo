@@ -1,0 +1,9 @@
+import "utils"
+import "math"
+
+// chain_test → utils → math (multi-level)
+println("utils.clampedAbs(-150, 100) = " + toString(utils.clampedAbs(-150, 100)))
+println("utils.clampedAbs(-50, 100) = " + toString(utils.clampedAbs(-50, 100)))
+
+// Direct math access also works
+println("math.abs(-42) = " + toString(math.abs(-42)))

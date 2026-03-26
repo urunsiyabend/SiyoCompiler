@@ -975,6 +975,11 @@ public class Binder {
             }
         }
 
+        // Register imported structs
+        for (var entry : module.getStructs().entrySet()) {
+            _structTypes.put(entry.getKey(), entry.getValue());
+        }
+
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
@@ -996,24 +1001,26 @@ public class Binder {
             String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
             codeanalysis.syntax.SyntaxTree tree = codeanalysis.syntax.SyntaxTree.parse(source);
 
-            BoundGlobalScope scope = bindGlobalScope(null, tree.getRoot(), _registry, filePath);
+            // Create a dedicated binder for the module so we can access its struct types
+            var parentScope = createParentScopes(null);
+            Binder moduleBinder = new Binder(parentScope);
+            moduleBinder._registry = _registry;
+            moduleBinder._filePath = filePath;
+            BoundStatement statement = moduleBinder.bindStatement(tree.getRoot().getStatement());
 
-            if (scope.getDiagnostics().size() > 0) {
-                // Propagate errors
-                _diagnostics.addAll(scope.getDiagnostics());
+            if (moduleBinder._diagnostics.size() > 0) {
+                _diagnostics.addAll(moduleBinder._diagnostics);
                 if (_registry != null) _registry.markComplete(filePath);
                 return null;
             }
 
             String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
 
-            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>();
-            if (scope.getFunctionBodies() != null) bodies.putAll(scope.getFunctionBodies());
-
-            // Get function list from bodies (more reliable than scope symbols for multi-statement files)
+            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>(moduleBinder._functionBodies);
             List<FunctionSymbol> functions = new ArrayList<>(bodies.keySet());
+            Map<String, StructSymbol> structs = new HashMap<>(moduleBinder._structTypes);
 
-            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies);
+            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies, structs);
             if (_registry != null) {
                 _registry.register(filePath, module);
                 _registry.markComplete(filePath);

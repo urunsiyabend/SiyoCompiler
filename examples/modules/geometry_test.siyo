@@ -1,0 +1,12 @@
+import "geometry"
+
+// Use imported structs directly (no prefix needed for struct names)
+mut p1 = Point { x: 3, y: 4 }
+mut p2 = Point { x: 6, y: 8 }
+
+println("p1 = " + geometry.pointToString(p1))
+println("p2 = " + geometry.pointToString(p2))
+println("distance^2 = " + toString(geometry.distance2(p1, p2)))
+
+mut r = Rect { x: 0, y: 0, w: 10, h: 5 }
+println("area = " + toString(geometry.area(r)))
