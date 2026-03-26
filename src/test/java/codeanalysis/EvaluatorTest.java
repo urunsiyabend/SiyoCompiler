@@ -429,6 +429,17 @@ class EvaluatorTest {
                 // Identifiers with digits and underscores
                 {"{ mut my_var = 42\n my_var }", 42},
                 {"{ mut x1 = 10\n mut x2 = 20\n x1 + x2 }", 30},
+
+                // Compound assignment operators
+                {"{ mut x = 10\n x += 5\n x }", 15},
+                {"{ mut x = 10\n x -= 3\n x }", 7},
+                {"{ mut x = 10\n x *= 4\n x }", 40},
+                {"{ mut x = 20\n x /= 5\n x }", 4},
+                {"{ mut s = \"hello\"\n s += \" world\"\n s }", "hello world"},
+
+                // For-in loop
+                {"{ mut sum = 0\n for x in [1, 2, 3, 4, 5] { sum += x }\n sum }", 15},
+                {"{ mut result = \"\"\n for s in [\"a\", \"b\", \"c\"] { result += s }\n result }", "abc"},
         };
     }
 

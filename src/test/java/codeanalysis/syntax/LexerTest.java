@@ -173,6 +173,12 @@ class LexerTest {
         if (t1Type == SyntaxType.SlashToken && t2Type == SyntaxType.AsteriskToken)
             return true;
 
+        if (t1Type == SyntaxType.AsteriskToken && t2Type == SyntaxType.EqualsToken)
+            return true;
+
+        if (t1Type == SyntaxType.AsteriskToken && t2Type == SyntaxType.EqualsEqualsToken)
+            return true;
+
         if (t1Type == SyntaxType.LessToken && t2Type == SyntaxType.EqualsToken)
             return true;
 

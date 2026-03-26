@@ -261,15 +261,32 @@ public class Parser {
     private StatementSyntax parseForStatement() {
         SyntaxToken forKeyword = match(SyntaxType.ForKeyword);
 
+        // Check for "for item in collection { ... }" syntax
+        if (peek(0).getType() == SyntaxType.IdentifierToken && peek(1).getType() == SyntaxType.InKeyword) {
+            return parseForInStatement(forKeyword);
+        }
+
         StatementSyntax initializer = parseStatement();
-
         ExpressionSyntax condition = parseExpression();
-
         ExpressionSyntax iterator = parseExpression();
-
         StatementSyntax body = parseStatement();
 
         return new ForStatementSyntax(forKeyword, initializer, condition, iterator, body);
+    }
+
+    /**
+     * Parses a for-in statement and desugars it:
+     * "for item in arr { body }" becomes:
+     * "{ mut _arr = arr; for mut _i = 0 _i < len(_arr) _i = _i + 1 { mut item = _arr[_i]; body } }"
+     */
+    private StatementSyntax parseForInStatement(SyntaxToken forKeyword) {
+        SyntaxToken itemName = match(SyntaxType.IdentifierToken);
+        match(SyntaxType.InKeyword);
+        ExpressionSyntax collection = parseExpression();
+        StatementSyntax body = parseStatement();
+
+        // We return a special ForInStatementSyntax; binder will desugar
+        return new ForInStatementSyntax(forKeyword, itemName, collection, body);
     }
 
 
@@ -474,6 +491,21 @@ public class Parser {
             return new AssignmentExpressionSyntax(identifierToken, operatorToken, right);
         }
 
+        // Compound assignment: x += 5 desugars to x = x + 5
+        if (peek(0).getType() == SyntaxType.IdentifierToken && isCompoundAssignment(peek(1).getType())) {
+            SyntaxToken identifierToken = nextToken();
+            SyntaxToken compoundOp = nextToken();
+            ExpressionSyntax right = parseAssignmentExpression();
+
+            SyntaxType binaryOp = getCompoundBinaryOp(compoundOp.getType());
+            SyntaxToken binaryOpToken = new SyntaxToken(binaryOp, compoundOp.getPosition(), SyntaxRules.getTextData(binaryOp), null);
+            SyntaxToken equalsToken = new SyntaxToken(SyntaxType.EqualsToken, compoundOp.getPosition(), "=", null);
+
+            ExpressionSyntax nameExpr = new NameExpressionSyntax(identifierToken);
+            ExpressionSyntax binaryExpr = new BinaryExpressionSyntax(nameExpr, binaryOpToken, right);
+            return new AssignmentExpressionSyntax(identifierToken, equalsToken, binaryExpr);
+        }
+
         ExpressionSyntax left = parseBinaryExpression();
 
         // Compound assignment: arr[0] = 5 or p.x = 10
@@ -590,6 +622,21 @@ public class Parser {
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new StructLiteralExpressionSyntax(typeName, openBrace, fieldAssignments, closeBrace);
+    }
+
+    private boolean isCompoundAssignment(SyntaxType type) {
+        return type == SyntaxType.PlusEqualsToken || type == SyntaxType.MinusEqualsToken
+                || type == SyntaxType.AsteriskEqualsToken || type == SyntaxType.SlashEqualsToken;
+    }
+
+    private SyntaxType getCompoundBinaryOp(SyntaxType compoundType) {
+        return switch (compoundType) {
+            case PlusEqualsToken -> SyntaxType.PlusToken;
+            case MinusEqualsToken -> SyntaxType.MinusToken;
+            case AsteriskEqualsToken -> SyntaxType.AsteriskToken;
+            case SlashEqualsToken -> SyntaxType.SlashToken;
+            default -> throw new IllegalStateException();
+        };
     }
 
     private SeparatedSyntaxList<ExpressionSyntax> parseArrayElements() {

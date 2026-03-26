@@ -97,32 +97,29 @@ public class Lexer {
             }
             case '+' -> {
                 next();
-                _type = SyntaxType.PlusToken;
+                if (currentChar() == '=') { next(); _type = SyntaxType.PlusEqualsToken; }
+                else { _type = SyntaxType.PlusToken; }
             }
             case '-' -> {
                 next();
-                if (currentChar() == '>') {
-                    next();
-                    _type = SyntaxType.ArrowToken;
-                } else {
-                    _type = SyntaxType.MinusToken;
-                }
+                if (currentChar() == '>') { next(); _type = SyntaxType.ArrowToken; }
+                else if (currentChar() == '=') { next(); _type = SyntaxType.MinusEqualsToken; }
+                else { _type = SyntaxType.MinusToken; }
             }
             case '*' -> {
                 next();
-                _type = SyntaxType.AsteriskToken;
+                if (currentChar() == '=') { next(); _type = SyntaxType.AsteriskEqualsToken; }
+                else { _type = SyntaxType.AsteriskToken; }
             }
             case '/' -> {
                 next();
                 if (currentChar() == '/') {
-                    // Line comment: skip until end of line
                     while (currentChar() != '\n' && currentChar() != '\r' && currentChar() != '\0') {
                         next();
                     }
                     _type = SyntaxType.WhiteSpaceToken;
-                } else {
-                    _type = SyntaxType.SlashToken;
-                }
+                } else if (currentChar() == '=') { next(); _type = SyntaxType.SlashEqualsToken; }
+                else { _type = SyntaxType.SlashToken; }
             }
             case '%' -> {
                 next();

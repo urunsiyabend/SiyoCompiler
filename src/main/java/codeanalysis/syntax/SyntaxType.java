@@ -245,11 +245,29 @@ public enum SyntaxType {
     /* Represents a compound assignment (arr[0] = 5, p.x = 10). */
     CompoundAssignmentExpression,
 
+    /* Represents a plus-equals (+=) token. */
+    PlusEqualsToken,
+
+    /* Represents a minus-equals (-=) token. */
+    MinusEqualsToken,
+
+    /* Represents an asterisk-equals (*=) token. */
+    AsteriskEqualsToken,
+
+    /* Represents a slash-equals (/=) token. */
+    SlashEqualsToken,
+
     /* Represents an 'enum' keyword. */
     EnumKeyword,
 
     /* Represents an enum declaration. */
     EnumDeclaration,
+
+    /* Represents an 'in' keyword. */
+    InKeyword,
+
+    /* Represents a for-in statement. */
+    ForInStatement,
 
     /* Represents a 'null' keyword. */
     NullKeyword,

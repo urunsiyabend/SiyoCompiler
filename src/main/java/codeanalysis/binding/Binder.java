@@ -106,6 +106,7 @@ public class Binder {
             case ForStatement -> bindForStatement((ForStatementSyntax)syntax);
             case FunctionDeclaration -> bindFunctionDeclaration((FunctionDeclarationSyntax)syntax);
             case ReturnStatement -> bindReturnStatement((ReturnStatementSyntax)syntax);
+            case ForInStatement -> bindForInStatement((ForInStatementSyntax)syntax);
             case BreakStatement -> bindBreakStatement((BreakStatementSyntax)syntax);
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
             case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
@@ -625,6 +626,88 @@ public class Binder {
      * @param name The type name.
      * @return The Class representing the type, or null if not found.
      */
+    private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
+        // Desugar: for item in arr { body }
+        // Into:  { mut _arr = arr; for mut _i = 0; _i < len(_arr); _i = _i + 1 { mut item = _arr[_i]; body } }
+        BoundExpression collection = bindExpression(syntax.getCollection());
+        String itemName = syntax.getItemName().getData();
+
+        // Create index variable
+        VariableSymbol indexVar = new VariableSymbol("_idx_" + itemName, false, Integer.class);
+        _scope = new BoundScope(_scope);
+        _scope.tryDeclare(indexVar);
+
+        // Initializer: mut _i = 0
+        BoundVariableDeclaration initializer = new BoundVariableDeclaration(indexVar, new BoundLiteralExpression(0));
+
+        // Condition: _i < len(collection)
+        BoundExpression lenCall = new BoundCallExpression(BuiltinFunctions.LEN, java.util.List.of(new BoundVariableExpression(new VariableSymbol("_col_" + itemName, true, collection.getClassType()))));
+        // Simpler: use the collection directly
+        BoundExpression indexExpr = new BoundVariableExpression(indexVar);
+
+        // We need to store collection in a variable to avoid re-evaluation
+        VariableSymbol collectionVar = new VariableSymbol("_col_" + itemName, true, collection.getClassType());
+        _scope.tryDeclare(collectionVar);
+        BoundVariableDeclaration collectionDecl = new BoundVariableDeclaration(collectionVar, collection);
+
+        // Condition: _i < len(_col)
+        BoundExpression condition = new BoundBinaryExpression(
+                new BoundVariableExpression(indexVar),
+                BoundBinaryOperator.bind(codeanalysis.syntax.SyntaxType.LessToken, Integer.class, Integer.class),
+                new BoundCallExpression(BuiltinFunctions.LEN, java.util.List.of(new BoundVariableExpression(collectionVar)))
+        );
+
+        // Iterator: _i = _i + 1
+        BoundExpression increment = new BoundAssignmentExpression(indexVar,
+                new BoundBinaryExpression(
+                        new BoundVariableExpression(indexVar),
+                        BoundBinaryOperator.bind(codeanalysis.syntax.SyntaxType.PlusToken, Integer.class, Integer.class),
+                        new BoundLiteralExpression(1)
+                )
+        );
+
+        // Body: { mut item = _col[_i]; original body }
+        Class<?> elementType = resolveArrayElementType(new BoundVariableExpression(collectionVar));
+        VariableSymbol itemVar = new VariableSymbol(itemName, false, elementType);
+        _scope = new BoundScope(_scope);
+        _scope.tryDeclare(itemVar);
+        _arrayElementTypes.put(collectionVar, elementType);
+
+        BoundIndexExpression indexAccess = new BoundIndexExpression(
+                new BoundVariableExpression(collectionVar),
+                new BoundVariableExpression(indexVar),
+                elementType
+        );
+        BoundVariableDeclaration itemDecl = new BoundVariableDeclaration(itemVar, indexAccess);
+
+        LabelSymbol breakLabel = generateLabel("break");
+        LabelSymbol continueLabel = generateLabel("continue");
+        _loopStack.push(new LoopLabels(breakLabel, continueLabel));
+
+        BoundStatement boundBody = bindStatement(syntax.getBody());
+
+        _loopStack.pop();
+        _scope = _scope.getParent();
+
+        ArrayList<BoundStatement> bodyStatements = new ArrayList<>();
+        bodyStatements.add(itemDecl);
+        if (boundBody instanceof BoundBlockStatement block) {
+            bodyStatements.addAll(block.getStatements());
+        } else {
+            bodyStatements.add(boundBody);
+        }
+        BoundBlockStatement fullBody = new BoundBlockStatement(bodyStatements);
+
+        BoundForStatement forStmt = new BoundForStatement(initializer, condition, increment, fullBody, breakLabel, continueLabel);
+
+        ArrayList<BoundStatement> outerStatements = new ArrayList<>();
+        outerStatements.add(collectionDecl);
+        outerStatements.add(forStmt);
+
+        _scope = _scope.getParent();
+        return new BoundBlockStatement(outerStatements);
+    }
+
     private BoundStatement bindBreakStatement(BreakStatementSyntax syntax) {
         if (_loopStack.isEmpty()) {
             _diagnostics.reportBreakOutsideLoop(syntax.getKeyword().getSpan());

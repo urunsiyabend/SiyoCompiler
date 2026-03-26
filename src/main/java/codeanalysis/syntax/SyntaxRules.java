@@ -34,6 +34,7 @@ public class SyntaxRules {
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
             case "enum" -> SyntaxType.EnumKeyword;
+            case "in" -> SyntaxType.InKeyword;
             case "null" -> SyntaxType.NullKeyword;
             default -> SyntaxType.IdentifierToken;
         };
@@ -90,10 +91,15 @@ public class SyntaxRules {
             case ContinueKeyword -> "continue";
             case StructKeyword -> "struct";
             case EnumKeyword -> "enum";
+            case InKeyword -> "in";
             case NullKeyword -> "null";
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";
+            case PlusEqualsToken -> "+=";
+            case MinusEqualsToken -> "-=";
+            case AsteriskEqualsToken -> "*=";
+            case SlashEqualsToken -> "/=";
             default -> null;
         };
     }
