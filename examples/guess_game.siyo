@@ -1,0 +1,34 @@
+// Number guessing game!
+
+// Simple pseudo-random using linear congruential
+mut seed = 12345
+fn nextRandom(max: int) -> int {
+    seed = (seed * 1103515245 + 12345) % 2147483647
+    mut result = seed % max
+    if result < 0 { result = result * -1 }
+    result
+}
+
+mut secret = nextRandom(100) + 1
+mut attempts = 0
+mut guessed = false
+
+println("=== Number Guessing Game ===")
+println("I'm thinking of a number between 1 and 100.")
+
+while !guessed {
+    mut guess_str = input("Your guess: ")
+    mut guess = parseInt(guess_str)
+    attempts += 1
+
+    if guess == secret {
+        guessed = true
+        println("Correct! You got it in " + toString(attempts) + " attempts!")
+    } else {
+        if guess < secret {
+            println("Too low! Try higher.")
+        } else {
+            println("Too high! Try lower.")
+        }
+    }
+}

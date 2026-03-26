@@ -474,6 +474,10 @@ public class Evaluator {
         if (function == BuiltinFunctions.CONTAINS) {
             return ((String) arguments[0]).contains((String) arguments[1]);
         }
+        if (function == BuiltinFunctions.INPUT) {
+            System.out.print(arguments[0]);
+            return new java.util.Scanner(System.in).nextLine();
+        }
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
             return null;

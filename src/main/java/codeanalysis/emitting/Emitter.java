@@ -17,12 +17,15 @@ public class Emitter {
     private final Map<FunctionSymbol, BoundBlockStatement> _functions;
     private final DiagnosticBox _diagnostics = new DiagnosticBox();
     private String _className;
+    private boolean _needsRangeHelper = false;
 
     // Current method state
     private MethodVisitor _mv;
     private final Map<VariableSymbol, Integer> _locals = new HashMap<>();
     private final Map<LabelSymbol, Label> _labels = new HashMap<>();
+    private final java.util.Set<VariableSymbol> _globalFields = new java.util.HashSet<>();
     private int _nextLocal = 0;
+    private boolean _inMainMethod = false;
 
     public Emitter(BoundBlockStatement statement, Map<FunctionSymbol, BoundBlockStatement> functions) {
         _statement = statement;
@@ -44,6 +47,15 @@ public class Emitter {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         cw.visit(V17, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
 
+        // First pass: collect global variables from main body
+        collectGlobalVariables(_statement);
+
+        // Generate static fields for global variables
+        for (VariableSymbol global : _globalFields) {
+            String desc = getTypeDescriptor(global.getType());
+            cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
+        }
+
         // Generate default constructor
         emitConstructor(cw);
 
@@ -54,6 +66,11 @@ public class Emitter {
 
         // Generate main method with the top-level statements
         emitMainMethod(cw, className);
+
+        // Emit helper methods if needed
+        if (_needsRangeHelper) {
+            emitRangeHelper(cw);
+        }
 
         cw.visitEnd();
         return cw.toByteArray();
@@ -185,14 +202,17 @@ public class Emitter {
 
     private void emitVariableDeclaration(BoundVariableDeclaration node) {
         emitExpression(node.getInitializer());
-        // Unbox if expression is Object but variable expects primitive
         Class<?> exprType = node.getInitializer().getClassType();
         Class<?> varType = node.getVariable().getType();
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
-        int slot = declareLocal(node.getVariable());
-        emitStore(varType, slot);
+        if (_globalFields.contains(node.getVariable())) {
+            _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
+        } else {
+            int slot = declareLocal(node.getVariable());
+            emitStore(varType, slot);
+        }
     }
 
     private void emitLabelStatement(BoundLabelStatement node) {
@@ -263,6 +283,10 @@ public class Emitter {
     }
 
     private void emitVariableExpression(BoundVariableExpression node) {
+        if (_globalFields.contains(node.getVariable())) {
+            _mv.visitFieldInsn(GETSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(node.getVariable().getType()));
+            return;
+        }
         int slot = getLocal(node.getVariable());
         emitLoad(node.getVariable().getType(), slot);
     }
@@ -274,14 +298,18 @@ public class Emitter {
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
-        int slot = getLocal(node.getVariable());
         // Duplicate value on stack (assignment is an expression that returns the value)
         if (varType == Double.class || varType == Long.class) {
             _mv.visitInsn(DUP2);
         } else {
             _mv.visitInsn(DUP);
         }
-        emitStore(varType, slot);
+        if (_globalFields.contains(node.getVariable())) {
+            _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
+        } else {
+            int slot = getLocal(node.getVariable());
+            emitStore(varType, slot);
+        }
     }
 
     private void emitUnaryExpression(BoundUnaryExpression node) {
@@ -550,6 +578,19 @@ public class Emitter {
         FunctionSymbol function = node.getFunction();
 
         // Built-in functions
+        if (function == BuiltinFunctions.INPUT) {
+            // print prompt
+            _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "print", "(Ljava/lang/String;)V", false);
+            // read line
+            _mv.visitTypeInsn(NEW, "java/util/Scanner");
+            _mv.visitInsn(DUP);
+            _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "in", "Ljava/io/InputStream;");
+            _mv.visitMethodInsn(INVOKESPECIAL, "java/util/Scanner", "<init>", "(Ljava/io/InputStream;)V", false);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/util/Scanner", "nextLine", "()Ljava/lang/String;", false);
+            return;
+        }
         if (function == BuiltinFunctions.PRINTLN) {
             _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
             emitExpression(node.getArguments().get(0));
@@ -600,6 +641,37 @@ public class Emitter {
         if (function == BuiltinFunctions.TO_FLOAT) {
             emitExpression(node.getArguments().get(0));
             _mv.visitInsn(I2D);
+            return;
+        }
+
+        if (function == BuiltinFunctions.RANGE) {
+            // Create ArrayList with range values - emit as helper static method call
+            // For now, inline: new ArrayList(); for(int i=start;i<end;i++) list.add(i)
+            emitExpression(node.getArguments().get(0)); // start
+            emitExpression(node.getArguments().get(1)); // end
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "$range", "(II)Ljava/util/List;", false);
+            _needsRangeHelper = true;
+            return;
+        }
+        if (function == BuiltinFunctions.PUSH) {
+            emitExpression(node.getArguments().get(0)); // list
+            emitExpression(node.getArguments().get(1)); // value
+            emitBoxIfNeeded(node.getArguments().get(1).getClassType());
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
+            _mv.visitInsn(POP); // discard boolean
+            return;
+        }
+        if (function == BuiltinFunctions.SUBSTRING) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            emitExpression(node.getArguments().get(2));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "substring", "(II)Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.CONTAINS) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "contains", "(Ljava/lang/CharSequence;)Z", false);
             return;
         }
 
@@ -689,6 +761,43 @@ public class Emitter {
         sb.append(")");
         sb.append(function.getReturnType() == null ? "V" : getTypeDescriptor(function.getReturnType()));
         return sb.toString();
+    }
+
+    private void collectGlobalVariables(BoundBlockStatement block) {
+        for (BoundStatement stmt : block.getStatements()) {
+            if (stmt instanceof BoundVariableDeclaration varDecl) {
+                _globalFields.add(varDecl.getVariable());
+            }
+        }
+    }
+
+    private void emitRangeHelper(ClassWriter cw) {
+        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "$range", "(II)Ljava/util/List;", null, null);
+        mv.visitCode();
+        mv.visitTypeInsn(NEW, "java/util/ArrayList");
+        mv.visitInsn(DUP);
+        mv.visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
+        mv.visitVarInsn(ASTORE, 2); // list in slot 2
+        mv.visitVarInsn(ILOAD, 0);  // i = start
+        mv.visitVarInsn(ISTORE, 3); // i in slot 3
+        Label loopStart = new Label();
+        Label loopEnd = new Label();
+        mv.visitLabel(loopStart);
+        mv.visitVarInsn(ILOAD, 3);
+        mv.visitVarInsn(ILOAD, 1); // end
+        mv.visitJumpInsn(IF_ICMPGE, loopEnd);
+        mv.visitVarInsn(ALOAD, 2);
+        mv.visitVarInsn(ILOAD, 3);
+        mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", false);
+        mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
+        mv.visitInsn(POP);
+        mv.visitIincInsn(3, 1); // i++
+        mv.visitJumpInsn(GOTO, loopStart);
+        mv.visitLabel(loopEnd);
+        mv.visitVarInsn(ALOAD, 2);
+        mv.visitInsn(ARETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
     }
 
     private void emitUnboxIfNeeded(Class<?> type) {
