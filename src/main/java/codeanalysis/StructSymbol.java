@@ -10,10 +10,20 @@ import java.util.LinkedHashMap;
 public class StructSymbol {
     private final String _name;
     private final LinkedHashMap<String, Class<?>> _fields;
+    private final LinkedHashMap<String, String> _fieldTypeNames;
 
     public StructSymbol(String name, LinkedHashMap<String, Class<?>> fields) {
+        this(name, fields, new LinkedHashMap<>());
+    }
+
+    public StructSymbol(String name, LinkedHashMap<String, Class<?>> fields, LinkedHashMap<String, String> fieldTypeNames) {
         _name = name;
         _fields = fields;
+        _fieldTypeNames = fieldTypeNames;
+    }
+
+    public String getFieldTypeName(String fieldName) {
+        return _fieldTypeNames.get(fieldName);
     }
 
     public String getName() {

@@ -182,14 +182,16 @@ public class Binder {
         if (_structTypes.containsKey(name)) return;
 
         java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
         for (ParameterSyntax field : syntax.getFields()) {
             String fieldName = field.getIdentifier().getData();
             String typeName = field.getTypeToken().getData();
             Class<?> fieldType = lookupType(typeName);
             if (fieldType == null) fieldType = Integer.class;
             fields.put(fieldName, fieldType);
+            fieldTypeNames.put(fieldName, typeName);
         }
-        _structTypes.put(name, new StructSymbol(name, fields));
+        _structTypes.put(name, new StructSymbol(name, fields, fieldTypeNames));
     }
 
     private BoundStatement bindExpressionStatement(ExpressionStatementSyntax syntax) {
@@ -507,6 +509,12 @@ public class Binder {
                 if (elemType != null) {
                     _arrayElementTypes.put(parameter, elemType);
                 }
+                // Track struct types from parameter type names
+                String baseTypeName = typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName;
+                StructSymbol structSym = _structTypes.get(baseTypeName);
+                if (structSym != null && parameter.getType() == SiyoStruct.class) {
+                    _variableStructTypes.put(parameter, structSym);
+                }
             }
             paramIdx++;
         }
@@ -672,9 +680,18 @@ public class Binder {
             return arr.getElementType();
         }
         if (target instanceof BoundVariableExpression varExpr) {
-            // Look up the variable's element type from its declaration
             Class<?> elemType = _arrayElementTypes.get(varExpr.getVariable());
             if (elemType != null) return elemType;
+        }
+        if (target instanceof BoundMemberAccessExpression memberExpr) {
+            StructSymbol structType = resolveStructType(memberExpr.getTarget());
+            if (structType != null) {
+                String fieldTypeName = structType.getFieldTypeName(memberExpr.getMemberName());
+                if (fieldTypeName != null) {
+                    Class<?> elemType = lookupElementType(fieldTypeName);
+                    if (elemType != null) return elemType;
+                }
+            }
         }
         return Object.class;
     }
@@ -749,23 +766,11 @@ public class Binder {
     }
 
     private BoundStatement bindStructDeclaration(StructDeclarationSyntax syntax) {
+        // Struct already registered in first pass, just validate
         String name = syntax.getIdentifier().getData();
-        java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
-
-        for (ParameterSyntax field : syntax.getFields()) {
-            String fieldName = field.getIdentifier().getData();
-            String typeName = field.getTypeToken().getData();
-            Class<?> fieldType = lookupType(typeName);
-            if (fieldType == null) {
-                _diagnostics.reportUndefinedType(field.getTypeToken().getSpan(), typeName);
-                fieldType = Integer.class;
-            }
-            fields.put(fieldName, fieldType);
+        if (!_structTypes.containsKey(name)) {
+            registerStructDeclaration(syntax);
         }
-
-        StructSymbol structSymbol = new StructSymbol(name, fields);
-        _structTypes.put(name, structSymbol);
-
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
