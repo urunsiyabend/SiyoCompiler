@@ -151,7 +151,8 @@ public class Lexer {
             }
             case '.' -> {
                 next();
-                _type = SyntaxType.DotToken;
+                if (currentChar() == '.') { next(); _type = SyntaxType.DoubleDotToken; }
+                else { _type = SyntaxType.DotToken; }
             }
             case '~' -> {
                 next();

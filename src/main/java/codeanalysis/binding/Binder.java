@@ -788,6 +788,12 @@ public class Binder {
             Class<?> elemType = _arrayElementTypes.get(varExpr.getVariable());
             if (elemType != null) return elemType;
         }
+        if (target instanceof BoundCallExpression callExpr) {
+            // range() returns int array
+            if (callExpr.getFunction() == BuiltinFunctions.RANGE) {
+                return Integer.class;
+            }
+        }
         if (target instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol structType = resolveStructType(memberExpr.getTarget());
             if (structType != null) {

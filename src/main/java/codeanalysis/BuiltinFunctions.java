@@ -54,13 +54,39 @@ public class BuiltinFunctions {
             null // void
     );
 
+    public static final FunctionSymbol RANGE = new FunctionSymbol(
+            "range",
+            List.of(new ParameterSymbol("start", Integer.class), new ParameterSymbol("end", Integer.class)),
+            SiyoArray.class
+    );
+
+    public static final FunctionSymbol PUSH = new FunctionSymbol(
+            "push",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("value", Object.class)),
+            null
+    );
+
+    public static final FunctionSymbol SUBSTRING = new FunctionSymbol(
+            "substring",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("start", Integer.class), new ParameterSymbol("end", Integer.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol CONTAINS = new FunctionSymbol(
+            "contains",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("sub", String.class)),
+            Boolean.class
+    );
+
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN);
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
         return function == LEN || function == TO_STRING || function == PARSE_INT
                 || function == PARSE_FLOAT || function == TO_INT || function == TO_FLOAT
-                || function == PRINT || function == PRINTLN;
+                || function == PRINT || function == PRINTLN || function == RANGE
+                || function == PUSH || function == SUBSTRING || function == CONTAINS
+                || function == RANGE;
     }
 }

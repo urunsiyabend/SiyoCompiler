@@ -456,6 +456,24 @@ public class Evaluator {
             System.out.print(arguments[0]);
             return null;
         }
+        if (function == BuiltinFunctions.RANGE) {
+            int start = (int) arguments[0];
+            int end = (int) arguments[1];
+            java.util.List<Object> elements = new java.util.ArrayList<>();
+            for (int i = start; i < end; i++) elements.add(i);
+            return new SiyoArray(elements, Integer.class);
+        }
+        if (function == BuiltinFunctions.PUSH) {
+            SiyoArray arr = (SiyoArray) arguments[0];
+            arr.getElements().add(arguments[1]);
+            return null;
+        }
+        if (function == BuiltinFunctions.SUBSTRING) {
+            return ((String) arguments[0]).substring((int) arguments[1], (int) arguments[2]);
+        }
+        if (function == BuiltinFunctions.CONTAINS) {
+            return ((String) arguments[0]).contains((String) arguments[1]);
+        }
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
             return null;

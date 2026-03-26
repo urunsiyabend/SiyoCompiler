@@ -96,6 +96,7 @@ public class SyntaxRules {
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";
+            case DoubleDotToken -> "..";
             case PlusEqualsToken -> "+=";
             case MinusEqualsToken -> "-=";
             case AsteriskEqualsToken -> "*=";

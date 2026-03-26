@@ -1,0 +1,83 @@
+// Word frequency counter - demonstrates string processing
+
+fn split(text: string, delimiter: string) -> string[] {
+    mut words = [""]  // start with empty placeholder
+    mut wordCount = 0
+    mut current = ""
+
+    for i in range(0, len(text)) {
+        mut ch = text[i]
+        if ch == delimiter {
+            if len(current) > 0 {
+                if wordCount == 0 {
+                    words[0] = current
+                } else {
+                    push(words, current)
+                }
+                wordCount += 1
+                current = ""
+            }
+        } else {
+            current += ch
+        }
+    }
+
+    // Don't forget the last word
+    if len(current) > 0 {
+        if wordCount == 0 {
+            words[0] = current
+        } else {
+            push(words, current)
+        }
+        wordCount += 1
+    }
+
+    return words
+}
+
+fn countWord(words: string[], target: string) -> int {
+    mut count = 0
+    for word in words {
+        if word == target {
+            count += 1
+        }
+    }
+    count
+}
+
+// Main program
+mut text = "the quick brown fox jumps over the lazy dog the fox the dog"
+mut words = split(text, " ")
+
+println("Text: " + text)
+println("Word count: " + toString(len(words)))
+
+// Count specific words
+mut targets = ["the", "fox", "dog", "quick"]
+for target in targets {
+    mut count = countWord(words, target)
+    println("  '" + target + "' appears " + toString(count) + " time(s)")
+}
+
+// Find unique words
+mut unique = [""]
+mut uniqueCount = 0
+for word in words {
+    mut found = false
+    for i in range(0, uniqueCount) {
+        if unique[i] == word {
+            found = true
+            break
+        }
+    }
+    if !found {
+        if uniqueCount == 0 {
+            unique[0] = word
+        } else {
+            push(unique, word)
+        }
+        uniqueCount += 1
+    }
+}
+
+println("Unique words: " + toString(uniqueCount))

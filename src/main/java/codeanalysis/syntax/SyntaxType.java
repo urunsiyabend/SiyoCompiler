@@ -263,6 +263,12 @@ public enum SyntaxType {
     /* Represents an enum declaration. */
     EnumDeclaration,
 
+    /* Represents a double dot (..) token for ranges. */
+    DoubleDotToken,
+
+    /* Represents a range expression (0..10). */
+    RangeExpression,
+
     /* Represents an 'in' keyword. */
     InKeyword,
 

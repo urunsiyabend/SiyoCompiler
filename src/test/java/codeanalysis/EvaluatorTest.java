@@ -440,6 +440,18 @@ class EvaluatorTest {
                 // For-in loop
                 {"{ mut sum = 0\n for x in [1, 2, 3, 4, 5] { sum += x }\n sum }", 15},
                 {"{ mut result = \"\"\n for s in [\"a\", \"b\", \"c\"] { result += s }\n result }", "abc"},
+
+                // Range
+                {"{ mut sum = 0\n for i in range(0, 5) { sum += i }\n sum }", 10},
+                {"{ len(range(0, 100)) }", 100},
+
+                // Push
+                {"{ mut arr = [1, 2]\n push(arr, 3)\n len(arr) }", 3},
+
+                // String utilities
+                {"contains(\"hello world\", \"world\")", true},
+                {"contains(\"hello\", \"xyz\")", false},
+                {"substring(\"hello world\", 0, 5)", "hello"},
         };
     }
 
