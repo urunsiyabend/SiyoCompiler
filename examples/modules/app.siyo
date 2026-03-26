@@ -1,0 +1,36 @@
+import "math"
+import "collections"
+import "geometry"
+
+// Multi-module application demo
+
+println("=== Collections ===")
+mut numbers = [3, -1, 4, -1, 5, -9, 2, 6]
+println("Original: " + collections.arrayToString(numbers))
+println("Sum: " + toString(collections.sum(numbers)))
+
+mut positives = collections.filter_positive(numbers)
+println("Positives: " + collections.arrayToString(positives))
+println("Positive sum: " + toString(collections.sum(positives)))
+
+mut doubled = collections.map_int(positives, true)
+println("Doubled: " + collections.arrayToString(doubled))
+
+println("")
+println("=== Geometry ===")
+mut p1 = Point { x: 0, y: 0 }
+mut p2 = Point { x: 3, y: 4 }
+println("p1 = " + geometry.pointToString(p1))
+println("p2 = " + geometry.pointToString(p2))
+println("distance^2 = " + toString(geometry.distance2(p1, p2)))
+
+println("")
+println("=== Math ===")
+mut values = [-15, 200, -3, 50]
+for v in values {
+    mut clamped = math.clamp(math.abs(v), 0, 100)
+    println("clamp(abs(" + toString(v) + "), 0, 100) = " + toString(clamped))
+}
+
+println("")
+println("Done! 4 modules working together.")

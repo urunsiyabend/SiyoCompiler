@@ -1,0 +1,49 @@
+// Generic-ish collection utilities
+
+fn map_int(arr: int[], fn_double: bool) -> int[] {
+    mut result = [0]
+    mut first = true
+    for x in arr {
+        mut val = x
+        if fn_double { val = x * 2 }
+        if first {
+            result[0] = val
+            first = false
+        } else {
+            push(result, val)
+        }
+    }
+    result
+}
+
+fn filter_positive(arr: int[]) -> int[] {
+    mut result = [0]
+    mut count = 0
+    for x in arr {
+        if x > 0 {
+            if count == 0 {
+                result[0] = x
+            } else {
+                push(result, x)
+            }
+            count += 1
+        }
+    }
+    if count == 0 return []
+    result
+}
+
+fn sum(arr: int[]) -> int {
+    mut total = 0
+    for x in arr { total += x }
+    total
+}
+
+fn arrayToString(arr: int[]) -> string {
+    mut s = "["
+    for i in range(0, len(arr)) {
+        if i > 0 { s += ", " }
+        s += toString(arr[i])
+    }
+    s + "]"
+}
