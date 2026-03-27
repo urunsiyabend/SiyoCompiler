@@ -1,12 +1,6 @@
 package codeanalysis.binding;
 
-import codeanalysis.BuiltinFunctions;
-import codeanalysis.JavaClassInfo;
-import codeanalysis.JavaClassMetadata;
-import codeanalysis.SiyoArray;
-import codeanalysis.SiyoStruct;
-import codeanalysis.StructSymbol;
-import codeanalysis.VariableSymbol;
+import codeanalysis.*;;
 
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +35,15 @@ public class TypeResolver {
 
     public void trackJavaClassType(VariableSymbol var, JavaClassInfo classInfo) {
         _typeInfo.put(var, VariableTypeInfo.forJavaClass(classInfo));
+    }
+
+    public void trackJavaResolvedType(VariableSymbol var, JavaResolvedType resolvedType) {
+        _typeInfo.put(var, VariableTypeInfo.forJavaResolvedType(resolvedType));
+    }
+
+    public JavaResolvedType getVarJavaResolvedType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getJavaResolvedType() : null;
     }
 
     public Class<?> getArrayElementType(VariableSymbol var) {
@@ -117,22 +120,66 @@ public class TypeResolver {
     }
 
     public JavaClassInfo resolveJavaClassInfo(BoundExpression expr) {
+        // Try resolved type first (has generic info)
+        JavaResolvedType resolved = resolveJavaResolvedType(expr);
+        if (resolved != null) return resolved.getClassInfo();
+        // Fallback
+        return resolveJavaClassForSiyoType(expr.getClassType());
+    }
+
+    /**
+     * Resolve full parameterized type with generic bindings from an expression.
+     */
+    public JavaResolvedType resolveJavaResolvedType(BoundExpression expr) {
         if (expr instanceof BoundVariableExpression varExpr) {
+            JavaResolvedType rt = getVarJavaResolvedType(varExpr.getVariable());
+            if (rt != null) return rt;
             JavaClassInfo info = getVarJavaClassType(varExpr.getVariable());
-            if (info != null) return info;
-            // Auto-resolve Java class for native Siyo types
-            return resolveJavaClassForSiyoType(varExpr.getVariable().getType());
+            if (info != null) return new JavaResolvedType(info);
+            // Auto-resolve for Siyo types
+            JavaClassInfo siyoInfo = resolveJavaClassForSiyoType(varExpr.getVariable().getType());
+            if (siyoInfo != null) return new JavaResolvedType(siyoInfo);
         }
         if (expr instanceof BoundJavaMethodCallExpression javaCall) {
+            if (javaCall.getResolvedReturnType() != null) return javaCall.getResolvedReturnType();
             if (javaCall.isConstructor() && javaCall.getClassInfo() != null) {
-                return javaCall.getClassInfo();
+                return new JavaResolvedType(javaCall.getClassInfo());
             }
             if (javaCall.getResolvedSignature() != null) {
-                return resolveJavaClassFromDescriptor(javaCall.getResolvedSignature().getReturnDescriptor());
+                JavaClassInfo info = resolveJavaClassFromDescriptor(javaCall.getResolvedSignature().getReturnDescriptor());
+                if (info != null) return new JavaResolvedType(info);
             }
         }
-        // For literal expressions and other typed expressions
-        return resolveJavaClassForSiyoType(expr.getClassType());
+        return null;
+    }
+
+    /**
+     * Resolve the return type of a method call, applying generic type substitution.
+     */
+    public JavaResolvedType resolveMethodReturnType(JavaMethodSignature sig, JavaResolvedType ownerType) {
+        if (sig == null) return null;
+
+        // Try generic signature first
+        if (sig.getGenericSignature() != null && ownerType != null) {
+            java.util.Map<String, JavaResolvedType> bindings = ownerType.getTypeArgs();
+            JavaGenericSignature.ResolvedReturnType resolved =
+                    JavaGenericSignature.resolveReturnType(sig.getGenericSignature(), bindings);
+            if (resolved != null) {
+                JavaClassMetadata meta = JavaClassMetadata.load(resolved.className);
+                if (meta != null) {
+                    String simpleName = resolved.className.contains(".")
+                            ? resolved.className.substring(resolved.className.lastIndexOf('.') + 1)
+                            : resolved.className;
+                    JavaClassInfo info = new JavaClassInfo(simpleName, resolved.className, meta);
+                    return new JavaResolvedType(info, resolved.typeArgBindings);
+                }
+            }
+        }
+
+        // Fallback to erased return type
+        JavaClassInfo info = resolveJavaClassFromDescriptor(sig.getReturnDescriptor());
+        if (info != null) return new JavaResolvedType(info);
+        return null;
     }
 
     public JavaClassInfo resolveJavaClassForSiyoType(Class<?> type) {

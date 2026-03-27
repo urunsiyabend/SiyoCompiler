@@ -1,9 +1,9 @@
 // Non-blocking NIO HTTP Server
-// Single-threaded event loop, handles multiple connections concurrently
+// Single-threaded event loop using java.nio Selector
+// No workarounds - proper generic type resolution
 import java "java.nio.channels.ServerSocketChannel"
 import java "java.nio.channels.SelectionKey"
 import java "java.nio.channels.Selector"
-import java "java.nio.channels.SocketChannel"
 import java "java.nio.ByteBuffer"
 import java "java.net.InetSocketAddress"
 
@@ -22,23 +22,23 @@ mut requestCount = 0
 while true {
     selector.select()
     mut keys = selector.selectedKeys()
-    mut keyArray = keys.toArray()
-    keys.clear()
+    mut iter = keys.iterator()
 
-    for i in range(0, len(keyArray)) {
-        mut key = keyArray[i]
+    while iter.hasNext() {
+        mut key = iter.next()
+        iter.remove()
 
-        // Check key type via readyOps bitmask
         mut readyOps = key.readyOps()
 
         if readyOps == SelectionKey.OP_ACCEPT {
+            // Accept new connection
             mut client = serverChannel.accept()
             if client != null {
                 client.configureBlocking(false)
                 client.register(selector, SelectionKey.OP_READ)
             }
         } else {
-            // READ event
+            // Read request and send response
             mut channel = key.channel()
             mut buffer = ByteBuffer.allocate(4096)
 
@@ -52,6 +52,7 @@ while true {
                     body += "<h1>Siyo NIO Server</h1>"
                     body += "<p>Non-blocking I/O, single-threaded event loop</p>"
                     body += "<p>Request #" + requestCount + "</p>"
+                    body += "<p>Built with proper Java generics support</p>"
                     body += "</body></html>"
 
                     mut response = "HTTP/1.1 200 OK\r\n"

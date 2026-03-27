@@ -18,12 +18,13 @@ public class JavaClassMetadata {
     private final String _superClassName;
     private final List<JavaMethodSignature> _methods;
     private final List<JavaMethodSignature> _constructors;
-    private final java.util.Map<String, String> _staticFields; // name → descriptor
+    private final java.util.Map<String, String> _staticFields;
+    private final List<String> _typeParams; // class-level type parameter names: ["E"], ["K","V"]
 
     private JavaClassMetadata(String simpleName, String fullName, String internalName,
                                boolean isInterface, String superClassName,
                                List<JavaMethodSignature> methods, List<JavaMethodSignature> constructors,
-                               java.util.Map<String, String> staticFields) {
+                               java.util.Map<String, String> staticFields, List<String> typeParams) {
         _simpleName = simpleName;
         _fullName = fullName;
         _internalName = internalName;
@@ -32,6 +33,7 @@ public class JavaClassMetadata {
         _methods = methods;
         _constructors = constructors;
         _staticFields = staticFields;
+        _typeParams = typeParams;
     }
 
     /**
@@ -69,6 +71,7 @@ public class JavaClassMetadata {
 
         boolean[] isInterface = {false};
         String[] superClass = {null};
+        String[] classSignature = {null};
         List<JavaMethodSignature> methods = new ArrayList<>();
         List<JavaMethodSignature> constructors = new ArrayList<>();
         java.util.Map<String, String> staticFields = new java.util.HashMap<>();
@@ -77,6 +80,7 @@ public class JavaClassMetadata {
             @Override
             public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
                 isInterface[0] = (access & Opcodes.ACC_INTERFACE) != 0;
+                classSignature[0] = signature; // preserve generic class signature
                 if (superName != null && !superName.equals("java/lang/Object")) {
                     superClass[0] = superName.replace('/', '.');
                 }
@@ -100,7 +104,7 @@ public class JavaClassMetadata {
                 boolean isCtor = name.equals("<init>");
 
                 JavaMethodSignature sig = new JavaMethodSignature(
-                        isCtor ? "new" : name, descriptor, returnDesc, paramDescs,
+                        isCtor ? "new" : name, descriptor, signature, returnDesc, paramDescs,
                         internalName, isStatic, isCtor, isInterface[0]);
 
                 if (isCtor) constructors.add(sig);
@@ -109,7 +113,8 @@ public class JavaClassMetadata {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], superClass[0], methods, constructors, staticFields);
+        List<String> typeParams = JavaGenericSignature.parseClassTypeParams(classSignature[0]);
+        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], superClass[0], methods, constructors, staticFields, typeParams);
     }
 
     public String getSimpleName() { return _simpleName; }
@@ -165,15 +170,14 @@ public class JavaClassMetadata {
 
     private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
         if (siyoType == null) return true;
+        // Any reference type is compatible with Object parameter
+        if (jvmDesc.equals("Ljava/lang/Object;")) return siyoType != Integer.class && siyoType != Boolean.class && siyoType != Double.class;
         if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
         if (siyoType == Boolean.class) return jvmDesc.equals("Z");
         if (siyoType == Double.class) return jvmDesc.equals("D") || jvmDesc.equals("F");
         if (siyoType == String.class) return jvmDesc.equals("Ljava/lang/String;") || jvmDesc.startsWith("Ljava/lang/CharSequence;");
-        if (siyoType == Object.class) {
-            // Object is compatible with reference types only, NOT primitives
-            return jvmDesc.startsWith("L") || jvmDesc.startsWith("[");
-        }
-        return jvmDesc.startsWith("L") || jvmDesc.startsWith("["); // reference types
+        if (siyoType == Object.class) return jvmDesc.startsWith("L") || jvmDesc.startsWith("[");
+        return jvmDesc.startsWith("L") || jvmDesc.startsWith("[");
     }
 
     public JavaMethodSignature resolveConstructor(int argCount) {
@@ -192,4 +196,6 @@ public class JavaClassMetadata {
     public String getStaticFieldDescriptor(String name) {
         return _staticFields.get(name);
     }
+
+    public List<String> getTypeParams() { return _typeParams; }
 }

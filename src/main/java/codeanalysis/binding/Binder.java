@@ -208,8 +208,9 @@ public class Binder {
             // Track Java class for constructor results: mut file = File.new("x") -> file is File
             if (javaCall.isConstructor()) {
                 _typeResolver.trackJavaClassType(variableSymbol, javaCall.getClassInfo());
+            } else if (javaCall.getResolvedReturnType() != null) {
+                _typeResolver.trackJavaResolvedType(variableSymbol, javaCall.getResolvedReturnType());
             } else if (javaCall.getResolvedSignature() != null) {
-                // Track return type's Java class: mut path = file.getAbsolutePath() -> path is String (or Java class)
                 String returnDesc = javaCall.getResolvedSignature().getReturnDescriptor();
                 codeanalysis.JavaClassInfo returnClassInfo = _typeResolver.resolveJavaClassFromDescriptor(returnDesc);
                 if (returnClassInfo != null) {
@@ -908,7 +909,9 @@ public class Binder {
                     return new BoundLiteralExpression(0);
                 }
 
-                return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, resolved);
+                codeanalysis.JavaResolvedType returnType = _typeResolver.resolveMethodReturnType(
+                        resolved, new codeanalysis.JavaResolvedType(javaClass));
+                return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, resolved, returnType);
             }
 
             // Not a module or Java class - fall through to instance method call
@@ -922,9 +925,13 @@ public class Binder {
             boundArgs.add(bindExpression(argSyntax));
         }
 
-        // Resolve Java class info from the target expression
-        codeanalysis.JavaClassInfo targetClassInfo = _typeResolver.resolveJavaClassInfo(target);
+        // Resolve Java class info from the target expression (with generic type bindings)
+        codeanalysis.JavaResolvedType targetResolvedType = _typeResolver.resolveJavaResolvedType(target);
+        codeanalysis.JavaClassInfo targetClassInfo = targetResolvedType != null
+                ? targetResolvedType.getClassInfo()
+                : _typeResolver.resolveJavaClassInfo(target);
         codeanalysis.JavaMethodSignature resolved = null;
+        codeanalysis.JavaResolvedType resolvedReturnType = null;
         if (targetClassInfo != null) {
             resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(), getArgTypes(boundArgs));
             if (resolved == null) {
@@ -932,9 +939,11 @@ public class Binder {
                         targetClassInfo.getSimpleName() + "." + methodName);
                 return new BoundLiteralExpression(0);
             }
+            // Resolve generic return type using owner's type bindings
+            resolvedReturnType = _typeResolver.resolveMethodReturnType(resolved, targetResolvedType);
         }
 
-        return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved);
+        return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {
