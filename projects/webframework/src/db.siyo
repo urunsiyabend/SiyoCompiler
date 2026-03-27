@@ -1,0 +1,114 @@
+// Database module - SQLite wrapper
+import java "org.sqlite.JDBC"
+import java "java.sql.DriverManager"
+import "json"
+
+struct DB {
+    connStr: string
+}
+
+impl DB {
+    fn new(path: string) -> DB {
+        DB { connStr: "jdbc:sqlite:" + path }
+    }
+
+    fn exec(self, sql: string) {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        stmt.execute(sql)
+        stmt.close()
+        conn.close()
+    }
+
+    fn queryInt(self, sql: string) -> int {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery(sql)
+        rs.next()
+        mut val = rs.getInt(1)
+        stmt.close()
+        conn.close()
+        val
+    }
+
+    fn insertUser(self, name: string, email: string, role: string) -> int {
+        self.exec("INSERT INTO users (name, email, role, created_at) VALUES ('" + name + "','" + email + "','" + role + "', datetime('now'))")
+        self.queryInt("SELECT last_insert_rowid()")
+    }
+
+    fn allUsers(self) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
+        mut items = [""]
+        mut count = 0
+        while rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            if count == 0 { items[0] = jb.build() }
+            else { push(items, jb.build()) }
+            count += 1
+        }
+        stmt.close()
+        conn.close()
+        json.jsonArray(items, count)
+    }
+
+    fn findUser(self, id: int) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + id)
+        mut result = ""
+        if rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            result = jb.build()
+        }
+        stmt.close()
+        conn.close()
+        result
+    }
+
+    fn searchUsers(self, field: string, value: string) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users WHERE " + field + " LIKE '%" + value + "%'")
+        mut items = [""]
+        mut count = 0
+        while rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            if count == 0 { items[0] = jb.build() }
+            else { push(items, jb.build()) }
+            count += 1
+        }
+        stmt.close()
+        conn.close()
+        json.jsonArray(items, count)
+    }
+
+    fn deleteUser(self, id: int) -> bool {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut n = stmt.executeUpdate("DELETE FROM users WHERE id = " + id)
+        stmt.close()
+        conn.close()
+        n > 0
+    }
+
+    fn userCount(self) -> int {
+        self.queryInt("SELECT COUNT(*) FROM users")
+    }
+}

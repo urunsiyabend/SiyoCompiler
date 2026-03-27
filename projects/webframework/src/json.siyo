@@ -1,0 +1,67 @@
+// JSON Builder module
+
+struct JsonBuilder {
+    buffer: string,
+    fieldCount: int
+}
+
+impl JsonBuilder {
+    fn new() -> JsonBuilder {
+        JsonBuilder { buffer: "{", fieldCount: 0 }
+    }
+
+    fn str(self, key: string, value: string) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":\"" + replace(value, "\"", "\\\"") + "\""
+        self.fieldCount += 1
+    }
+
+    fn num(self, key: string, value: int) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":" + value
+        self.fieldCount += 1
+    }
+
+    fn bool(self, key: string, value: bool) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":" + value
+        self.fieldCount += 1
+    }
+
+    fn build(self) -> string {
+        self.buffer + "}"
+    }
+}
+
+fn jsonArray(items: string[], count: int) -> string {
+    mut result = "["
+    for i in range(0, count) {
+        if i > 0 { result += "," }
+        result += items[i]
+    }
+    result + "]"
+}
+
+fn parseField(json: string, field: string) -> string {
+    mut key = "\"" + field + "\":"
+    mut idx = indexOf(json, key)
+    if idx < 0 return ""
+    mut start = idx + len(key)
+    while start < len(json) {
+        if json[start] != " " { break }
+        start += 1
+    }
+    if json[start] == "\"" {
+        start += 1
+        mut end = indexOf(substring(json, start, len(json)), "\"")
+        return substring(json, start, start + end)
+    }
+    mut end = start
+    while end < len(json) {
+        mut ch = json[end]
+        if ch == "," { break }
+        if ch == "}" { break }
+        end += 1
+    }
+    trim(substring(json, start, end))
+}

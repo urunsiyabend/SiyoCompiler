@@ -1,0 +1,141 @@
+// Siyo Web Framework - Multi-file project
+// Run: siyoc -cp lib/sqlite-jdbc.jar run projects/webframework/src/main.siyo
+import "json"
+import "http"
+import "db"
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.lang.Character"
+import java "java.lang.System"
+
+// ========== Router ==========
+
+fn route(req: Request, database: DB) -> Response {
+    if req.method == "GET" {
+        if req.path == "/" {
+            mut jb = JsonBuilder.new()
+            jb.str("name", "Siyo Web Framework")
+            jb.str("version", "0.1.0")
+            jb.num("users", database.userCount())
+            return Response.ok(jb.build())
+        }
+        if req.path == "/users" {
+            mut name = req.queryParam("name")
+            mut role = req.queryParam("role")
+            if len(name) > 0 { return Response.ok(database.searchUsers("name", name)) }
+            if len(role) > 0 { return Response.ok(database.searchUsers("role", role)) }
+            return Response.ok(database.allUsers())
+        }
+        mut userId = req.pathSegment("/users/")
+        if len(userId) > 0 {
+            mut user = database.findUser(parseInt(userId))
+            if len(user) > 0 { return Response.ok(user) }
+            return Response.notFound("user " + userId + " not found")
+        }
+        if req.path == "/stats" {
+            mut jb = JsonBuilder.new()
+            jb.num("total_users", database.userCount())
+            jb.str("database", "SQLite")
+            jb.str("server", "Siyo 0.1.0")
+            return Response.ok(jb.build())
+        }
+    }
+
+    if req.method == "POST" {
+        if req.path == "/users" {
+            mut name = json.parseField(req.body, "name")
+            mut email = json.parseField(req.body, "email")
+            mut role = json.parseField(req.body, "role")
+            if len(name) == 0 { return Response.badRequest("name is required") }
+            if len(email) == 0 { email = name + "@example.com" }
+            if len(role) == 0 { role = "user" }
+            mut id = database.insertUser(name, email, role)
+            mut jb = JsonBuilder.new()
+            jb.num("id", id)
+            jb.str("name", name)
+            jb.str("email", email)
+            jb.str("role", role)
+            return Response.created(jb.build())
+        }
+    }
+
+    if req.method == "DELETE" {
+        mut userId = req.pathSegment("/users/")
+        if len(userId) > 0 {
+            if database.deleteUser(parseInt(userId)) {
+                mut jb = JsonBuilder.new()
+                jb.num("deleted", parseInt(userId))
+                jb.bool("success", true)
+                return Response.ok(jb.build())
+            }
+            return Response.notFound("user not found")
+        }
+    }
+
+    Response.notFound(req.method + " " + req.path)
+}
+
+// ========== Main ==========
+
+println("=== Siyo Web Framework ===")
+
+mut database = DB.new("app.db")
+database.exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, role TEXT DEFAULT 'user', created_at TEXT)")
+
+if database.userCount() == 0 {
+    database.insertUser("Alice", "alice@siyo.dev", "admin")
+    database.insertUser("Bob", "bob@siyo.dev", "developer")
+    database.insertUser("Charlie", "charlie@siyo.dev", "developer")
+    database.insertUser("Diana", "diana@siyo.dev", "designer")
+    println("Seeded 4 users.")
+}
+
+mut server = ServerSocket.new(5555)
+mut requestCount = 0
+mut startTime = System.currentTimeMillis()
+
+println("http://localhost:5555")
+println("")
+
+while true {
+    mut socket = server.accept()
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+    mut requestLine = reader.readLine()
+    if requestLine == null { socket.close() }
+    else {
+        // Read headers
+        mut contentLength = 0
+        mut h = reader.readLine()
+        while h != null {
+            if len(h) == 0 { break }
+            if contains(h, "Content-Length") {
+                mut idx = indexOf(h, ":") + 1
+                contentLength = parseInt(trim(substring(h, idx, len(h))))
+            }
+            h = reader.readLine()
+        }
+
+        // Read body
+        mut body = ""
+        for i in range(0, contentLength) {
+            body += chr(reader.read())
+        }
+
+        // Build raw request for parsing
+        mut raw = requestLine + "\n\n" + body
+        mut req = Request.parse(raw)
+        mut resp = route(req, database)
+
+        // Send response
+        mut out = socket.getOutputStream()
+        out.write(resp.serialize().getBytes())
+        out.flush()
+        socket.close()
+
+        requestCount += 1
+        mut elapsed = System.currentTimeMillis() - startTime
+        println("[" + elapsed + "ms] #" + requestCount + " " + req.method + " " + req.path + " -> " + resp.status)
+    }
+}

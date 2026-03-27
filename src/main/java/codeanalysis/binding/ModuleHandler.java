@@ -119,6 +119,7 @@ public class ModuleHandler {
             String qualifiedName = moduleName + "." + func.getName();
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
+            importedFunc.setReturnStructName(func.getReturnStructName());
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
@@ -129,6 +130,18 @@ public class ModuleHandler {
         // Register imported structs
         for (var entry : module.getStructs().entrySet()) {
             _structTypes.put(entry.getKey(), entry.getValue());
+        }
+
+        // Register imported impl methods (Struct.method)
+        for (FunctionSymbol func : module.getFunctions()) {
+            if (func.getName().contains(".") && !func.getName().startsWith(moduleName + ".")) {
+                // This is a struct impl method like "Vec2.new"
+                _scope.tryDeclareFunction(func);
+                BoundBlockStatement body = module.getFunctionBodies().get(func);
+                if (body != null) {
+                    _functionBodies.put(func, body);
+                }
+            }
         }
 
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
