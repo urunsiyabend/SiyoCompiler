@@ -531,12 +531,27 @@ public class Parser {
 
         ExpressionSyntax left = parseBinaryExpression();
 
-        // Compound assignment: arr[0] = 5 or p.x = 10
+        // Index/member assignment: arr[0] = 5 or p.x = 10
         if (current().getType() == SyntaxType.EqualsToken &&
             (left instanceof IndexExpressionSyntax || left instanceof MemberAccessExpressionSyntax)) {
             SyntaxToken equalsToken = nextToken();
             ExpressionSyntax right = parseAssignmentExpression();
             return new CompoundAssignmentExpressionSyntax(left, equalsToken, right);
+        }
+
+        // Index/member compound assignment: arr[0] += 5 or p.x += 10
+        if (isCompoundAssignment(current().getType()) &&
+            (left instanceof IndexExpressionSyntax || left instanceof MemberAccessExpressionSyntax)) {
+            SyntaxToken compoundOp = nextToken();
+            ExpressionSyntax right = parseAssignmentExpression();
+
+            SyntaxType binaryOp = getCompoundBinaryOp(compoundOp.getType());
+            SyntaxToken binaryOpToken = new SyntaxToken(binaryOp, compoundOp.getPosition(), SyntaxRules.getTextData(binaryOp), null);
+
+            // Desugar: arr[0] += 5 → arr[0] = arr[0] + 5
+            BinaryExpressionSyntax binaryExpr = new BinaryExpressionSyntax(left, binaryOpToken, right);
+            SyntaxToken equalsToken = new SyntaxToken(SyntaxType.EqualsToken, compoundOp.getPosition(), "=", null);
+            return new CompoundAssignmentExpressionSyntax(left, equalsToken, binaryExpr);
         }
 
         return left;
