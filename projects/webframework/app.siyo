@@ -1,0 +1,473 @@
+// Siyo Web Framework - A real micro web framework
+// Features: NIO non-blocking server, URL router, JSON serialization,
+//           SQLite persistence, request/response objects, middleware logging
+// Run: siyoc -cp lib/sqlite-jdbc.jar run projects/webframework/app.siyo
+
+import java "org.sqlite.JDBC"
+import java "java.sql.DriverManager"
+import java "java.nio.channels.ServerSocketChannel"
+import java "java.nio.channels.SocketChannel"
+import java "java.nio.channels.SelectionKey"
+import java "java.nio.channels.Selector"
+import java "java.nio.ByteBuffer"
+import java "java.net.InetSocketAddress"
+import java "java.nio.charset.StandardCharsets"
+import java "java.lang.System"
+
+// ========== Request ==========
+
+struct Request {
+    method: string,
+    path: string,
+    query: string,
+    body: string,
+    headers: string
+}
+
+impl Request {
+    fn parse(raw: string) -> Request {
+        mut lines = split(raw, "\n")
+        if len(lines) == 0 {
+            return Request { method: "", path: "/", query: "", body: "", headers: "" }
+        }
+
+        mut requestLine = lines[0]
+        mut parts = split(requestLine, " ")
+        mut method = trim(parts[0])
+        mut fullPath = "/"
+        if len(parts) > 1 { fullPath = trim(parts[1]) }
+
+        mut path = fullPath
+        mut query = ""
+        mut qIdx = indexOf(fullPath, "?")
+        if qIdx >= 0 {
+            path = substring(fullPath, 0, qIdx)
+            query = substring(fullPath, qIdx + 1, len(fullPath))
+        }
+
+        // Collect headers
+        mut headerStr = ""
+        for i in range(1, len(lines)) {
+            mut line = trim(lines[i])
+            if len(line) == 0 { break }
+            headerStr += line + "\n"
+        }
+
+        // Find body (after empty line)
+        mut body = ""
+        mut foundEmpty = false
+        for i in range(1, len(lines)) {
+            if foundEmpty {
+                if len(body) > 0 { body += "\n" }
+                body += lines[i]
+            } else if len(trim(lines[i])) == 0 {
+                foundEmpty = true
+            }
+        }
+
+        Request { method: method, path: path, query: query, body: trim(body), headers: headerStr }
+    }
+
+    fn queryParam(self, name: string) -> string {
+        if len(self.query) == 0 return ""
+        mut pairs = split(self.query, "&")
+        mut prefix = name + "="
+        for pair in pairs {
+            if startsWith(pair, prefix) {
+                return substring(pair, len(prefix), len(pair))
+            }
+        }
+        ""
+    }
+
+    fn pathParam(self, prefix: string) -> string {
+        // /users/123 with prefix "/users/" → "123"
+        if startsWith(self.path, prefix) {
+            return substring(self.path, len(prefix), len(self.path))
+        }
+        ""
+    }
+}
+
+// ========== Response ==========
+
+struct Response {
+    status: int,
+    statusText: string,
+    contentType: string,
+    body: string
+}
+
+impl Response {
+    fn json(status: int, body: string) -> Response {
+        mut text = "OK"
+        if status == 201 { text = "Created" }
+        else if status == 400 { text = "Bad Request" }
+        else if status == 404 { text = "Not Found" }
+        else if status == 500 { text = "Internal Server Error" }
+        Response { status: status, statusText: text, contentType: "application/json", body: body }
+    }
+
+    fn ok(body: string) -> Response { Response.json(200, body) }
+    fn created(body: string) -> Response { Response.json(201, body) }
+    fn notFound(msg: string) -> Response { Response.json(404, "{\"error\":\"" + msg + "\"}") }
+    fn badRequest(msg: string) -> Response { Response.json(400, "{\"error\":\"" + msg + "\"}") }
+
+    fn serialize(self) -> string {
+        mut r = "HTTP/1.1 " + self.status + " " + self.statusText + "\r\n"
+        r += "Content-Type: " + self.contentType + "\r\n"
+        r += "Content-Length: " + len(self.body) + "\r\n"
+        r += "Access-Control-Allow-Origin: *\r\n"
+        r += "Connection: close\r\n\r\n"
+        r += self.body
+        r
+    }
+}
+
+// ========== JSON Builder ==========
+
+struct JsonBuilder {
+    buffer: string,
+    fieldCount: int
+}
+
+impl JsonBuilder {
+    fn new() -> JsonBuilder {
+        JsonBuilder { buffer: "{", fieldCount: 0 }
+    }
+
+    fn str(self, key: string, value: string) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":\"" + replace(value, "\"", "\\\"") + "\""
+        self.fieldCount += 1
+    }
+
+    fn num(self, key: string, value: int) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":" + value
+        self.fieldCount += 1
+    }
+
+    fn bool(self, key: string, value: bool) {
+        if self.fieldCount > 0 { self.buffer += "," }
+        self.buffer += "\"" + key + "\":" + value
+        self.fieldCount += 1
+    }
+
+    fn build(self) -> string {
+        self.buffer + "}"
+    }
+}
+
+fn jsonArray(items: string[], count: int) -> string {
+    mut result = "["
+    for i in range(0, count) {
+        if i > 0 { result += "," }
+        result += items[i]
+    }
+    result + "]"
+}
+
+fn parseJsonStr(json: string, field: string) -> string {
+    mut key = "\"" + field + "\":"
+    mut idx = indexOf(json, key)
+    if idx < 0 return ""
+    mut start = idx + len(key)
+    while start < len(json) {
+        if json[start] != " " { break }
+        start += 1
+    }
+    if json[start] == "\"" {
+        start += 1
+        mut end = indexOf(substring(json, start, len(json)), "\"")
+        return substring(json, start, start + end)
+    }
+    // Number
+    mut end = start
+    while end < len(json) {
+        mut ch = json[end]
+        if ch == "," { break }
+        if ch == "}" { break }
+        end += 1
+    }
+    trim(substring(json, start, end))
+}
+
+// ========== Database Layer ==========
+
+struct DB {
+    connStr: string
+}
+
+impl DB {
+    fn new(path: string) -> DB {
+        DB { connStr: "jdbc:sqlite:" + path }
+    }
+
+    fn exec(self, sql: string) {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        stmt.execute(sql)
+        stmt.close()
+        conn.close()
+    }
+
+    fn queryInt(self, sql: string) -> int {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery(sql)
+        rs.next()
+        mut val = rs.getInt(1)
+        stmt.close()
+        conn.close()
+        val
+    }
+
+    fn insertUser(self, name: string, email: string, role: string) -> int {
+        self.exec("INSERT INTO users (name, email, role, created_at) VALUES ('" + name + "','" + email + "','" + role + "', datetime('now'))")
+        self.queryInt("SELECT last_insert_rowid()")
+    }
+
+    fn allUsers(self) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
+        mut items = [""]
+        mut count = 0
+        while rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            if count == 0 { items[0] = jb.build() }
+            else { push(items, jb.build()) }
+            count += 1
+        }
+        stmt.close()
+        conn.close()
+        jsonArray(items, count)
+    }
+
+    fn findUser(self, id: int) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users WHERE id = " + id)
+        mut result = ""
+        if rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            result = jb.build()
+        }
+        stmt.close()
+        conn.close()
+        result
+    }
+
+    fn searchUsers(self, field: string, value: string) -> string {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut rs = stmt.executeQuery("SELECT * FROM users WHERE " + field + " LIKE '%" + value + "%'")
+        mut items = [""]
+        mut count = 0
+        while rs.next() {
+            mut jb = JsonBuilder.new()
+            jb.num("id", rs.getInt("id"))
+            jb.str("name", rs.getString("name"))
+            jb.str("email", rs.getString("email"))
+            jb.str("role", rs.getString("role"))
+            jb.str("created_at", rs.getString("created_at"))
+            if count == 0 { items[0] = jb.build() }
+            else { push(items, jb.build()) }
+            count += 1
+        }
+        stmt.close()
+        conn.close()
+        jsonArray(items, count)
+    }
+
+    fn deleteUser(self, id: int) -> bool {
+        mut conn = DriverManager.getConnection(self.connStr)
+        mut stmt = conn.createStatement()
+        mut n = stmt.executeUpdate("DELETE FROM users WHERE id = " + id)
+        stmt.close()
+        conn.close()
+        n > 0
+    }
+
+    fn userCount(self) -> int {
+        self.queryInt("SELECT COUNT(*) FROM users")
+    }
+}
+
+// ========== Router ==========
+
+fn route(req: Request, db: DB) -> Response {
+    // GET /
+    if req.method == "GET" {
+        if req.path == "/" {
+            mut jb = JsonBuilder.new()
+            jb.str("name", "Siyo Web Framework")
+            jb.str("version", "0.1.0")
+            jb.num("users", db.userCount())
+            jb.str("uptime", "running")
+            return Response.ok(jb.build())
+        }
+
+        // GET /users
+        if req.path == "/users" {
+            mut name = req.queryParam("name")
+            mut role = req.queryParam("role")
+            if len(name) > 0 { return Response.ok(db.searchUsers("name", name)) }
+            if len(role) > 0 { return Response.ok(db.searchUsers("role", role)) }
+            return Response.ok(db.allUsers())
+        }
+
+        // GET /users/:id
+        mut userId = req.pathParam("/users/")
+        if len(userId) > 0 {
+            mut user = db.findUser(parseInt(userId))
+            if len(user) > 0 { return Response.ok(user) }
+            return Response.notFound("user " + userId + " not found")
+        }
+
+        // GET /stats
+        if req.path == "/stats" {
+            mut jb = JsonBuilder.new()
+            jb.num("total_users", db.userCount())
+            jb.str("database", "SQLite")
+            jb.str("server", "NIO non-blocking")
+            return Response.ok(jb.build())
+        }
+    }
+
+    // POST /users
+    if req.method == "POST" {
+        if req.path == "/users" {
+            mut name = parseJsonStr(req.body, "name")
+            mut email = parseJsonStr(req.body, "email")
+            mut role = parseJsonStr(req.body, "role")
+            if len(name) == 0 { return Response.badRequest("name is required") }
+            if len(email) == 0 { email = name + "@example.com" }
+            if len(role) == 0 { role = "user" }
+            mut id = db.insertUser(name, email, role)
+            mut jb = JsonBuilder.new()
+            jb.num("id", id)
+            jb.str("name", name)
+            jb.str("email", email)
+            jb.str("role", role)
+            return Response.created(jb.build())
+        }
+    }
+
+    // DELETE /users/:id
+    if req.method == "DELETE" {
+        mut userId = req.pathParam("/users/")
+        if len(userId) > 0 {
+            mut id = parseInt(userId)
+            if db.deleteUser(id) {
+                mut jb = JsonBuilder.new()
+                jb.num("deleted", id)
+                jb.bool("success", true)
+                return Response.ok(jb.build())
+            }
+            return Response.notFound("user " + userId + " not found")
+        }
+    }
+
+    Response.notFound("route not found: " + req.method + " " + req.path)
+}
+
+// ========== Server ==========
+
+println("=== Siyo Web Framework ===")
+
+// Init database
+mut db = DB.new("webframework.db")
+db.exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, role TEXT DEFAULT 'user', created_at TEXT)")
+
+// Seed data
+if db.userCount() == 0 {
+    db.insertUser("Alice", "alice@siyo.dev", "admin")
+    db.insertUser("Bob", "bob@siyo.dev", "developer")
+    db.insertUser("Charlie", "charlie@siyo.dev", "developer")
+    db.insertUser("Diana", "diana@siyo.dev", "designer")
+    println("Seeded 4 users.")
+}
+
+// Start NIO server
+mut selector = Selector.open()
+mut serverChannel = ServerSocketChannel.open()
+serverChannel.configureBlocking(false)
+serverChannel.bind(InetSocketAddress.new(5555))
+serverChannel.register(selector, SelectionKey.OP_ACCEPT)
+
+mut requestCount = 0
+mut startTime = System.currentTimeMillis()
+
+println("Listening on http://localhost:5555")
+println("")
+println("Endpoints:")
+println("  GET    /            - Server info")
+println("  GET    /users       - List all users")
+println("  GET    /users?name= - Search by name")
+println("  GET    /users?role= - Filter by role")
+println("  GET    /users/:id   - Get user by ID")
+println("  POST   /users       - Create user (JSON body)")
+println("  DELETE /users/:id   - Delete user")
+println("  GET    /stats       - Server stats")
+println("")
+
+while true {
+    selector.select()
+    mut keys = selector.selectedKeys()
+    mut iter = keys.iterator()
+
+    while iter.hasNext() {
+        mut key = iter.next() as SelectionKey
+        iter.remove()
+
+        if key.isAcceptable() {
+            mut client = serverChannel.accept()
+            if client != null {
+                client.configureBlocking(false)
+                client.register(selector, SelectionKey.OP_READ)
+            }
+        } else if key.isReadable() {
+            mut channel = key.channel() as SocketChannel
+            mut buffer = ByteBuffer.allocate(8192)
+
+            try {
+                mut bytesRead = channel.read(buffer)
+                if bytesRead > 0 {
+                    buffer.flip()
+                    mut rawRequest = StandardCharsets.UTF_8.decode(buffer).toString()
+
+                    // Parse request
+                    mut req = Request.parse(rawRequest)
+
+                    // Route and handle
+                    mut resp = route(req, db)
+
+                    // Send response
+                    mut out = ByteBuffer.wrap(resp.serialize().getBytes())
+                    channel.write(out)
+
+                    // Log
+                    requestCount += 1
+                    mut elapsed = System.currentTimeMillis() - startTime
+                    println("[" + elapsed + "ms] " + req.method + " " + req.path + " -> " + resp.status + " (" + len(resp.body) + "b)")
+                }
+                channel.close()
+            } catch e {
+                println("ERROR: " + e)
+                try { channel.close() } catch e2 {}
+            }
+        }
+    }
+}

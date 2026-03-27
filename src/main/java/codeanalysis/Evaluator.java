@@ -427,7 +427,17 @@ public class Evaluator {
                 if (method.getName().equals(methodName) && method.getParameterCount() == args.length) {
                     try {
                         method.setAccessible(true);
-                        Object result = method.invoke(target, args);
+                        // Convert SiyoArray back to Java arrays if method expects array parameter
+                        Object[] convertedArgs = new Object[args.length];
+                        Class<?>[] paramTypes = method.getParameterTypes();
+                        for (int ai = 0; ai < args.length; ai++) {
+                            if (args[ai] instanceof SiyoArray sa && paramTypes[ai].isArray()) {
+                                convertedArgs[ai] = siyoArrayToJavaArray(sa, paramTypes[ai].getComponentType());
+                            } else {
+                                convertedArgs[ai] = args[ai];
+                            }
+                        }
+                        Object result = method.invoke(target, convertedArgs);
                         if (result instanceof Long l) return l.intValue();
                         if (result instanceof Short s) return (int) s;
                         if (result instanceof Byte b) return (int) b;
@@ -435,6 +445,20 @@ public class Evaluator {
                         if (result instanceof Character c2) return String.valueOf(c2);
                         if (result instanceof Object[] arr) {
                             return new SiyoArray(java.util.Arrays.asList(arr), Object.class);
+                        }
+                        // Handle primitive arrays (byte[], int[], etc.)
+                        if (result != null && result.getClass().isArray()) {
+                            int len = java.lang.reflect.Array.getLength(result);
+                            java.util.List<Object> elements = new java.util.ArrayList<>();
+                            for (int idx = 0; idx < len; idx++) {
+                                Object elem = java.lang.reflect.Array.get(result, idx);
+                                if (elem instanceof Byte bv) elements.add((int) bv);
+                                else if (elem instanceof Short sv) elements.add((int) sv);
+                                else if (elem instanceof Float fv) elements.add((double) fv);
+                                else if (elem instanceof Character cv) elements.add(String.valueOf(cv));
+                                else elements.add(elem);
+                            }
+                            return new SiyoArray(elements, Integer.class);
                         }
                         return result;
                     } catch (IllegalArgumentException | java.lang.reflect.InaccessibleObjectException e) {
@@ -444,6 +468,18 @@ public class Evaluator {
             }
         }
         throw new Exception("No matching method: " + cls.getName() + "." + methodName + " with " + args.length + " args");
+    }
+
+    private Object siyoArrayToJavaArray(SiyoArray arr, Class<?> componentType) {
+        Object javaArr = java.lang.reflect.Array.newInstance(componentType, arr.length());
+        for (int i = 0; i < arr.length(); i++) {
+            Object elem = arr.get(i);
+            if (componentType == byte.class) java.lang.reflect.Array.setByte(javaArr, i, ((Number) elem).byteValue());
+            else if (componentType == int.class) java.lang.reflect.Array.setInt(javaArr, i, ((Number) elem).intValue());
+            else if (componentType == double.class) java.lang.reflect.Array.setDouble(javaArr, i, ((Number) elem).doubleValue());
+            else java.lang.reflect.Array.set(javaArr, i, elem);
+        }
+        return javaArr;
     }
 
     private Object evaluateJavaStaticField(BoundJavaStaticFieldExpression node) throws Exception {
@@ -582,7 +618,8 @@ public class Evaluator {
             return null;
         }
         if (function == BuiltinFunctions.CHR) {
-            return Character.toString((int) arguments[0]);
+            int code = (arguments[0] instanceof Byte b) ? (int) b : (int) arguments[0];
+            return Character.toString(code);
         }
         if (function == BuiltinFunctions.ORD) {
             String s = (String) arguments[0];

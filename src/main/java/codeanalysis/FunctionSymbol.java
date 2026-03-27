@@ -15,6 +15,7 @@ public class FunctionSymbol {
     private final List<ParameterSymbol> _parameters;
     private final Class<?> _returnType;
     private final String _moduleName;
+    private String _returnStructName; // if return type is SiyoStruct, which struct
 
     public FunctionSymbol(String name, List<ParameterSymbol> parameters, Class<?> returnType) {
         this(name, parameters, returnType, null);
@@ -28,6 +29,8 @@ public class FunctionSymbol {
     }
 
     public String getModuleName() { return _moduleName; }
+    public String getReturnStructName() { return _returnStructName; }
+    public void setReturnStructName(String name) { _returnStructName = name; }
 
     /**
      * Gets the name of the function.

@@ -210,13 +210,9 @@ public class Binder {
             StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(indexExpr.getTarget());
             if (elemStruct != null) _typeResolver.trackStructType(variableSymbol, elemStruct);
         } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
-            // Track struct type from impl static method: mut u = User.create()
-            String funcName = callExpr.getFunction().getName();
-            if (funcName.contains(".")) {
-                String structName = funcName.substring(0, funcName.indexOf('.'));
-                StructSymbol st = _structTypes.get(structName);
-                if (st != null) _typeResolver.trackStructType(variableSymbol, st);
-            }
+            // Track struct type from function return
+            StructSymbol st = _typeResolver.resolveStructType(initializer);
+            if (st != null) _typeResolver.trackStructType(variableSymbol, st);
         } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
             // Track element type for built-in functions that return arrays
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);

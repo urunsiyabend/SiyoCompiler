@@ -105,8 +105,15 @@ public class TypeResolver {
         if (target instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
             return resolveStructTypeFromCollection(indexExpr.getTarget());
         }
-        // Call expression returning struct: User.create()
+        // Call expression returning struct
         if (target instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
+            // Check return struct name on FunctionSymbol first
+            String returnStructName = callExpr.getFunction().getReturnStructName();
+            if (returnStructName != null) {
+                StructSymbol st = _structTypes.get(returnStructName);
+                if (st != null) return st;
+            }
+            // Fallback: qualified name
             String funcName = callExpr.getFunction().getName();
             if (funcName.contains(".")) {
                 String structName = funcName.substring(0, funcName.indexOf('.'));
@@ -165,6 +172,12 @@ public class TypeResolver {
         }
         if (expr instanceof BoundCastExpression castExpr) {
             return new JavaResolvedType(castExpr.getTargetClassInfo());
+        }
+        if (expr instanceof BoundJavaStaticFieldExpression fieldExpr) {
+            // Static field: resolve the field's type as Java class
+            String desc = fieldExpr.getFieldDescriptor();
+            JavaClassInfo info = resolveJavaClassFromDescriptor(desc);
+            if (info != null) return new JavaResolvedType(info);
         }
         if (expr instanceof BoundJavaMethodCallExpression javaCall) {
             if (javaCall.getResolvedReturnType() != null) return javaCall.getResolvedReturnType();

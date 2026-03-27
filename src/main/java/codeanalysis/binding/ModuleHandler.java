@@ -228,6 +228,9 @@ public class ModuleHandler {
         }
 
         FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
+        if (returnType == SiyoStruct.class && syntax.getTypeClause() != null) {
+            function.setReturnStructName(syntax.getTypeClause().getIdentifier().getData());
+        }
         _scope.tryDeclareFunction(function);
     }
 
@@ -277,6 +280,9 @@ public class ModuleHandler {
             }
 
             FunctionSymbol func = new FunctionSymbol(qualifiedName, parameters, returnType);
+            if (returnType == SiyoStruct.class && method.getTypeClause() != null) {
+                func.setReturnStructName(method.getTypeClause().getIdentifier().getData());
+            }
             _scope.tryDeclareFunction(func);
         }
     }
