@@ -278,6 +278,7 @@ public class Lexer {
                     next();
                     switch (currentChar()) {
                         case 'n' -> { sb.append('\n'); next(); }
+                        case 'r' -> { sb.append('\r'); next(); }
                         case 't' -> { sb.append('\t'); next(); }
                         case '\\' -> { sb.append('\\'); next(); }
                         case '"' -> { sb.append('"'); next(); }

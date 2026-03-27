@@ -408,19 +408,32 @@ public class Evaluator {
     }
 
     private Object invokeMethod(Class<?> cls, Object target, String methodName, Object[] args) throws Exception {
-        for (var method : cls.getMethods()) {
-            if (method.getName().equals(methodName) && method.getParameterCount() == args.length) {
-                try {
-                    Object result = method.invoke(target, args);
-                    // Convert Java types to Siyo types
-                    if (result instanceof Long l) return l.intValue();
-                    if (result instanceof Short s) return (int) s;
-                    if (result instanceof Byte b) return (int) b;
-                    if (result instanceof Float f) return f.doubleValue();
-                    if (result instanceof Character c) return String.valueOf(c);
-                    return result;
-                } catch (IllegalArgumentException e) {
-                    continue;
+        // Search through class hierarchy and interfaces for accessible methods
+        java.util.List<Class<?>> toSearch = new java.util.ArrayList<>();
+        toSearch.add(cls);
+        // Add all superclasses and interfaces
+        Class<?> c = cls;
+        while (c != null) {
+            toSearch.add(c);
+            for (Class<?> iface : c.getInterfaces()) toSearch.add(iface);
+            c = c.getSuperclass();
+        }
+
+        for (Class<?> searchCls : toSearch) {
+            for (var method : searchCls.getMethods()) {
+                if (method.getName().equals(methodName) && method.getParameterCount() == args.length) {
+                    try {
+                        method.setAccessible(true);
+                        Object result = method.invoke(target, args);
+                        if (result instanceof Long l) return l.intValue();
+                        if (result instanceof Short s) return (int) s;
+                        if (result instanceof Byte b) return (int) b;
+                        if (result instanceof Float f) return f.doubleValue();
+                        if (result instanceof Character c2) return String.valueOf(c2);
+                        return result;
+                    } catch (IllegalArgumentException | java.lang.reflect.InaccessibleObjectException e) {
+                        continue;
+                    }
                 }
             }
         }
