@@ -18,10 +18,12 @@ public class JavaClassMetadata {
     private final String _superClassName;
     private final List<JavaMethodSignature> _methods;
     private final List<JavaMethodSignature> _constructors;
+    private final java.util.Map<String, String> _staticFields; // name → descriptor
 
     private JavaClassMetadata(String simpleName, String fullName, String internalName,
                                boolean isInterface, String superClassName,
-                               List<JavaMethodSignature> methods, List<JavaMethodSignature> constructors) {
+                               List<JavaMethodSignature> methods, List<JavaMethodSignature> constructors,
+                               java.util.Map<String, String> staticFields) {
         _simpleName = simpleName;
         _fullName = fullName;
         _internalName = internalName;
@@ -29,6 +31,7 @@ public class JavaClassMetadata {
         _superClassName = superClassName;
         _methods = methods;
         _constructors = constructors;
+        _staticFields = staticFields;
     }
 
     /**
@@ -68,6 +71,7 @@ public class JavaClassMetadata {
         String[] superClass = {null};
         List<JavaMethodSignature> methods = new ArrayList<>();
         List<JavaMethodSignature> constructors = new ArrayList<>();
+        java.util.Map<String, String> staticFields = new java.util.HashMap<>();
 
         reader.accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
@@ -76,6 +80,14 @@ public class JavaClassMetadata {
                 if (superName != null && !superName.equals("java/lang/Object")) {
                     superClass[0] = superName.replace('/', '.');
                 }
+            }
+
+            @Override
+            public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
+                if ((access & Opcodes.ACC_PUBLIC) != 0 && (access & Opcodes.ACC_STATIC) != 0) {
+                    staticFields.put(name, descriptor);
+                }
+                return null;
             }
 
             @Override
@@ -97,7 +109,7 @@ public class JavaClassMetadata {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], superClass[0], methods, constructors);
+        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], superClass[0], methods, constructors, staticFields);
     }
 
     public String getSimpleName() { return _simpleName; }
@@ -175,4 +187,9 @@ public class JavaClassMetadata {
 
     public List<JavaMethodSignature> getMethods() { return _methods; }
     public List<JavaMethodSignature> getConstructors() { return _constructors; }
+
+    /** Returns field descriptor or null. */
+    public String getStaticFieldDescriptor(String name) {
+        return _staticFields.get(name);
+    }
 }

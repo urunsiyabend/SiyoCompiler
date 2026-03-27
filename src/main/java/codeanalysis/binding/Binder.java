@@ -774,6 +774,16 @@ public class Binder {
                 _diagnostics.reportUndefinedName(syntax.getMember().getSpan(), typeName + "." + memberName);
                 return new BoundLiteralExpression(0);
             }
+
+            // Check for Java static field access: ClassName.FIELD
+            codeanalysis.JavaClassInfo javaClass = _typeResolver.getJavaClasses().get(typeName);
+            if (javaClass != null) {
+                String fieldName = syntax.getMember().getData();
+                String fieldDesc = javaClass.getMetadata().getStaticFieldDescriptor(fieldName);
+                if (fieldDesc != null) {
+                    return new BoundJavaStaticFieldExpression(javaClass, fieldName, fieldDesc);
+                }
+            }
         }
 
         BoundExpression target = bindExpression(syntax.getTarget());

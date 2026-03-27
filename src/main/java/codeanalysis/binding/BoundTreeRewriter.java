@@ -229,6 +229,7 @@ public abstract class BoundTreeRewriter {
             case StructLiteralExpression -> node;
             case IndexAssignmentExpression -> node;
             case JavaMethodCallExpression -> node;
+            case JavaStaticFieldExpression -> node;
             case MemberAssignmentExpression -> node;
             default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };

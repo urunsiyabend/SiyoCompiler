@@ -10,6 +10,7 @@ public class JavaTypeMapper {
      */
     public static Class<?> descriptorToSiyoType(String descriptor) {
         if (descriptor == null || descriptor.equals("V")) return null; // void
+        if (descriptor.startsWith("[")) return SiyoArray.class; // Java arrays → SiyoArray
         return switch (descriptor) {
             case "I" -> Integer.class;
             case "Z" -> Boolean.class;

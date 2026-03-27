@@ -195,6 +195,7 @@ public class Evaluator {
             case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
+            case JavaStaticFieldExpression -> evaluateJavaStaticField((BoundJavaStaticFieldExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -430,6 +431,9 @@ public class Evaluator {
                         if (result instanceof Byte b) return (int) b;
                         if (result instanceof Float f) return f.doubleValue();
                         if (result instanceof Character c2) return String.valueOf(c2);
+                        if (result instanceof Object[] arr) {
+                            return new SiyoArray(java.util.Arrays.asList(arr), Object.class);
+                        }
                         return result;
                     } catch (IllegalArgumentException | java.lang.reflect.InaccessibleObjectException e) {
                         continue;
@@ -438,6 +442,12 @@ public class Evaluator {
             }
         }
         throw new Exception("No matching method: " + cls.getName() + "." + methodName + " with " + args.length + " args");
+    }
+
+    private Object evaluateJavaStaticField(BoundJavaStaticFieldExpression node) throws Exception {
+        Class<?> cls = Class.forName(node.getClassInfo().getFullName(), true, JavaClasspath.getClassLoader());
+        java.lang.reflect.Field field = cls.getField(node.getFieldName());
+        return field.get(null);
     }
 
     private Object evaluateIndexAssignment(BoundIndexAssignmentExpression node) throws Exception {

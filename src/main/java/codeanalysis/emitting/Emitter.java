@@ -290,6 +290,7 @@ public class Emitter {
             case MemberAccessExpression -> emitMemberAccessExpression((BoundMemberAccessExpression) node);
             case MemberAssignmentExpression -> emitMemberAssignmentExpression((BoundMemberAssignmentExpression) node);
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
+            case JavaStaticFieldExpression -> emitJavaStaticField((BoundJavaStaticFieldExpression) node);
             default -> throw new UnsupportedOperationException("Cannot emit expression: " + node.getType());
         }
     }
@@ -533,6 +534,11 @@ public class Emitter {
     }
 
     // ========== Java Interop Emission ==========
+
+    private void emitJavaStaticField(BoundJavaStaticFieldExpression node) {
+        _mv.visitFieldInsn(GETSTATIC, node.getClassInfo().getInternalName(),
+                node.getFieldName(), node.getFieldDescriptor());
+    }
 
     private void emitJavaMethodCall(BoundJavaMethodCallExpression node) {
         JavaMethodSignature sig = node.getResolvedSignature();
