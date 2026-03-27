@@ -1,0 +1,194 @@
+// Todo App - A real CLI application using structs, impl, file I/O
+// Tests: struct methods, self mutation, arrays of structs, file persistence, user input
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+
+struct Todo {
+    id: int,
+    title: string,
+    done: bool
+}
+
+impl Todo {
+    fn create(id: int, title: string) -> Todo {
+        Todo { id: id, title: title, done: false }
+    }
+
+    fn toggle(self) {
+        self.done = !self.done
+    }
+
+    fn display(self) -> string {
+        mut status = "[ ]"
+        if self.done { status = "[x]" }
+        status + " " + self.id + ": " + self.title
+    }
+
+    fn serialize(self) -> string {
+        self.id + "|" + self.title + "|" + self.done
+    }
+}
+
+struct TodoList {
+    todos: Todo[],
+    count: int,
+    nextId: int,
+    filename: string
+}
+
+impl TodoList {
+    fn create(filename: string) -> TodoList {
+        TodoList { todos: [Todo.create(0, "")], count: 0, nextId: 1, filename: filename }
+    }
+
+    fn add(self, title: string) {
+        mut todo = Todo.create(self.nextId, title)
+        if self.count == 0 {
+            self.todos[0] = todo
+        } else {
+            push(self.todos, todo)
+        }
+        self.count += 1
+        self.nextId += 1
+        println("Added: " + todo.display())
+    }
+
+    fn list(self) {
+        if self.count == 0 {
+            println("No todos yet.")
+            return
+        }
+        println("--- Todos (" + self.count + ") ---")
+        for i in range(0, self.count) {
+            mut todo = self.todos[i]
+            println(todo.display())
+        }
+    }
+
+    fn toggle(self, id: int) {
+        for i in range(0, self.count) {
+            mut todo = self.todos[i]
+            if todo.id == id {
+                todo.toggle()
+                println("Toggled: " + todo.display())
+                return
+            }
+        }
+        println("Todo #" + id + " not found")
+    }
+
+    fn remove(self, id: int) {
+        mut idx = -1
+        for i in range(0, self.count) {
+            mut todo = self.todos[i]
+            if todo.id == id {
+                println("Removed: " + todo.title)
+                idx = i
+            }
+        }
+        if idx >= 0 {
+            for j in range(idx, self.count - 1) {
+                self.todos[j] = self.todos[j + 1]
+            }
+            self.count -= 1
+        } else {
+            println("Todo #" + id + " not found")
+        }
+    }
+
+    fn doneCount(self) -> int {
+        mut n = 0
+        for i in range(0, self.count) {
+            mut todo = self.todos[i]
+            if todo.done { n += 1 }
+        }
+        n
+    }
+
+    fn stats(self) {
+        mut done = self.doneCount()
+        println("Total: " + self.count + " | Done: " + done + " | Pending: " + (self.count - done))
+    }
+
+    fn save(self) {
+        mut writer = FileWriter.new(self.filename)
+        writer.write(self.nextId + "\n")
+        for i in range(0, self.count) {
+            mut todo = self.todos[i]
+            writer.write(todo.serialize() + "\n")
+        }
+        writer.close()
+        println("Saved to " + self.filename)
+    }
+
+    fn load(self) {
+        mut f = File.new(self.filename)
+        if !f.exists() { return }
+
+        mut reader = BufferedReader.new(FileReader.new(self.filename))
+        mut firstLine = reader.readLine()
+        self.nextId = parseInt(firstLine)
+        self.count = 0
+
+        mut line = reader.readLine()
+        while line != null {
+            mut parts = split(line, "|")
+            if len(parts) >= 3 {
+                mut id = parseInt(parts[0])
+                mut title = parts[1]
+                mut done = parts[2] == "true"
+                mut todo = Todo { id: id, title: title, done: done }
+                if self.count == 0 { self.todos[0] = todo }
+                else { push(self.todos, todo) }
+                self.count += 1
+            }
+            line = reader.readLine()
+        }
+        reader.close()
+        println("Loaded " + self.count + " todos from " + self.filename)
+    }
+}
+
+// ========== Main ==========
+mut app = TodoList.create("todos.dat")
+app.load()
+
+println("=== Todo App ===")
+println("Commands: add <title>, list, done <id>, remove <id>, stats, save, quit")
+println("")
+
+mut running = true
+while running {
+    mut cmd = input("> ")
+    mut trimmed = trim(cmd)
+
+    if trimmed == "quit" {
+        app.save()
+        running = false
+    } else if trimmed == "list" {
+        app.list()
+    } else if trimmed == "stats" {
+        app.stats()
+    } else if trimmed == "save" {
+        app.save()
+    } else if startsWith(trimmed, "add ") {
+        mut title = substring(trimmed, 4, len(trimmed))
+        app.add(title)
+    } else if startsWith(trimmed, "done ") {
+        mut idStr = substring(trimmed, 5, len(trimmed))
+        app.toggle(parseInt(idStr))
+    } else if startsWith(trimmed, "remove ") {
+        mut idStr = substring(trimmed, 7, len(trimmed))
+        app.remove(parseInt(idStr))
+    } else {
+        if len(trimmed) > 0 {
+            println("Unknown command: " + trimmed)
+        }
+    }
+}
+
+// Cleanup
+File.new("todos.dat").delete()
+println("Bye!")

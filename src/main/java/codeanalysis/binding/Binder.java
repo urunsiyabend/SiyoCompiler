@@ -205,6 +205,10 @@ public class Binder {
             } else {
                 _typeResolver.trackArrayType(variableSymbol, arr.getElementType());
             }
+        } else if (initializer instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
+            // Track struct type from array index: mut todo = todos[i]
+            StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(indexExpr.getTarget());
+            if (elemStruct != null) _typeResolver.trackStructType(variableSymbol, elemStruct);
         } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
             // Track struct type from impl static method: mut u = User.create()
             String funcName = callExpr.getFunction().getName();

@@ -114,6 +114,18 @@ public class TypeResolver {
             StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
         }
+        // Struct field array: self.todos where todos: Todo[]
+        if (collection instanceof BoundMemberAccessExpression memberExpr) {
+            StructSymbol ownerStruct = resolveStructType(memberExpr.getTarget());
+            if (ownerStruct != null) {
+                String fieldTypeName = ownerStruct.getFieldTypeName(memberExpr.getMemberName());
+                if (fieldTypeName != null && fieldTypeName.endsWith("[]")) {
+                    String elemName = fieldTypeName.substring(0, fieldTypeName.length() - 2);
+                    StructSymbol elemStruct = _structTypes.get(elemName);
+                    if (elemStruct != null) return elemStruct;
+                }
+            }
+        }
         return null;
     }
 

@@ -23,6 +23,7 @@ public class Evaluator {
     private final Map<VariableSymbol, Object> _globals;
     private final Map<FunctionSymbol, BoundBlockStatement> _functions;
     private final Stack<StackFrame> _callStack = new Stack<>();
+    private static final java.util.Scanner _stdinScanner = new java.util.Scanner(System.in);
     private Object _lastValue;
     private boolean _returnTriggered = false;
     private Object _returnValue = null;
@@ -574,7 +575,7 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.INPUT) {
             System.out.print(arguments[0]);
-            return new java.util.Scanner(System.in).nextLine();
+            return _stdinScanner.nextLine();
         }
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
