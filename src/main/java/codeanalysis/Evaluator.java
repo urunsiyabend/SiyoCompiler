@@ -279,8 +279,8 @@ public class Evaluator {
 
         return switch (b.getOperator().getType()) {
             case Addition -> {
-                if (left instanceof String l && right instanceof String r)
-                    yield l + r;
+                if (left instanceof String || right instanceof String)
+                    yield String.valueOf(left) + String.valueOf(right);
                 if (left instanceof Double l && right instanceof Double r)
                     yield l + r;
                 yield (int) left + (int) right;

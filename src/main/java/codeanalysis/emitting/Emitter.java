@@ -368,8 +368,8 @@ public class Emitter {
     private void emitBinaryExpression(BoundBinaryExpression node) {
         Class<?> type = node.getLeft().getClassType();
 
-        // String concatenation
-        if (node.getOperator().getType() == BoundBinaryOperatorType.Addition && type == String.class) {
+        // String concatenation (String + any or any + String)
+        if (node.getOperator().getType() == BoundBinaryOperatorType.Addition && node.getOperator().getResultType() == String.class) {
             emitStringConcat(node);
             return;
         }
@@ -505,15 +505,31 @@ public class Emitter {
     }
 
     private void emitStringConcat(BoundBinaryExpression node) {
-        // Use StringBuilder for string concatenation
         _mv.visitTypeInsn(NEW, "java/lang/StringBuilder");
         _mv.visitInsn(DUP);
         _mv.visitMethodInsn(INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false);
         emitExpression(node.getLeft());
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false);
+        emitStringAppend(node.getLeft().getClassType());
         emitExpression(node.getRight());
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false);
+        emitStringAppend(node.getRight().getClassType());
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false);
+    }
+
+    private void emitStringAppend(Class<?> type) {
+        String appendDesc;
+        if (type == Integer.class || type == Boolean.class) {
+            appendDesc = "(I)Ljava/lang/StringBuilder;";
+            if (type == Boolean.class) appendDesc = "(Z)Ljava/lang/StringBuilder;";
+        } else if (type == Double.class) {
+            appendDesc = "(D)Ljava/lang/StringBuilder;";
+        } else if (type == String.class) {
+            appendDesc = "(Ljava/lang/String;)Ljava/lang/StringBuilder;";
+        } else {
+            // Object - box if needed first
+            emitBoxIfNeeded(type);
+            appendDesc = "(Ljava/lang/Object;)Ljava/lang/StringBuilder;";
+        }
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", appendDesc, false);
     }
 
     // ========== Java Interop Emission ==========

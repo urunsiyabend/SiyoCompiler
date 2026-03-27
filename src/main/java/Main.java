@@ -32,11 +32,75 @@ public class Main {
             compileFile(args[1]);
             return;
         }
+        if (args.length >= 2 && (args[0].equals("-c") || args[0].equals("exec"))) {
+            compileAndRun(args[1]);
+            return;
+        }
         if (args.length >= 1 && !args[0].equals("repl")) {
             runFile(args[0]);
             return;
         }
         repl();
+    }
+
+    private static void compileAndRun(String path) {
+        try {
+            String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
+            SyntaxTree tree = SyntaxTree.parse(source);
+            codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
+            Compilation compilation = new Compilation(tree, registry, absPath);
+
+            String fileName = java.nio.file.Paths.get(path).getFileName().toString();
+            String classNameRaw = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+            final String className = Character.toUpperCase(classNameRaw.charAt(0)) + classNameRaw.substring(1);
+
+            byte[] bytecode = compilation.compile(className);
+            if (bytecode == null) {
+                DiagnosticBox diagnostics = tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                while (diagnostics.hasNext()) {
+                    System.err.println(diagnostics.next());
+                }
+                System.exit(1);
+            }
+
+            // Load and run in-memory (no .class file written)
+            final byte[] mainBytes = bytecode;
+            ClassLoader loader = new ClassLoader() {
+                @Override
+                protected Class<?> findClass(String name) throws ClassNotFoundException {
+                    if (name.equals(className)) {
+                        return defineClass(name, mainBytes, 0, mainBytes.length);
+                    }
+                    // Load dependency modules
+                    for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
+                        if (name.equals(module.getClassName())) {
+                            java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
+                            for (var entry : module.getFunctionBodies().entrySet()) {
+                                loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
+                            }
+                            codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(
+                                    new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>()),
+                                    loweredBodies);
+                            byte[] depBytes = depEmitter.emit(module.getClassName());
+                            return defineClass(name, depBytes, 0, depBytes.length);
+                        }
+                    }
+                    return super.findClass(name);
+                }
+            };
+
+            Class<?> cls = loader.loadClass(className);
+            cls.getMethod("main", String[].class).invoke(null, (Object) new String[]{});
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            if (e.getCause() != null) {
+                System.err.println("Error: " + e.getCause().getMessage());
+            }
+            System.exit(1);
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(1);
+        }
     }
 
     private static void compileFile(String path) {
