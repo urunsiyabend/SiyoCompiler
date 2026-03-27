@@ -1,0 +1,163 @@
+// Mini Database - SQL-like interface with file persistence
+// No external dependencies, pure JDK
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+
+fn split(text: string, delimiter: string) -> string[] {
+    mut words = [""]
+    mut wordCount = 0
+    mut current = ""
+    for i in range(0, len(text)) {
+        mut ch = text[i]
+        if ch == delimiter {
+            if wordCount == 0 { words[0] = current }
+            else { push(words, current) }
+            wordCount = wordCount + 1
+            current = ""
+        } else {
+            current += ch
+        }
+    }
+    if wordCount == 0 { words[0] = current }
+    else { push(words, current) }
+    words
+}
+
+// Database state
+mut dbFile = "mini.db"
+mut columns = [""]
+mut colCount = 0
+mut rows = [""]
+mut rowCount = 0
+
+fn dbCreate(cols: string[]) {
+    columns = cols
+    colCount = len(cols)
+    rowCount = 0
+    println("Table created with " + colCount + " columns.")
+}
+
+fn dbInsert(values: string) {
+    if rowCount == 0 { rows[0] = values }
+    else { push(rows, values) }
+    rowCount = rowCount + 1
+}
+
+fn dbSelect(whereCol: string, whereVal: string) {
+    // Find column index
+    mut colIdx = -1
+    for i in range(0, colCount) {
+        if columns[i] == whereCol { colIdx = i }
+    }
+
+    // Print header
+    mut header = ""
+    for c in columns {
+        if len(header) > 0 { header += " | " }
+        header += c
+    }
+    println(header)
+    mut sep = ""
+    for i in range(0, len(header)) { sep += "-" }
+    println(sep)
+
+    // Print matching rows
+    mut found = 0
+    for i in range(0, rowCount) {
+        mut cols = split(rows[i], ",")
+        mut match = true
+        if colIdx >= 0 {
+            if cols[colIdx] != whereVal { match = false }
+        }
+        if match {
+            mut line = ""
+            for col in cols {
+                if len(line) > 0 { line += " | " }
+                line += col
+            }
+            println(line)
+            found = found + 1
+        }
+    }
+    println("(" + found + " rows)")
+}
+
+fn dbSelectAll() {
+    dbSelect("", "")
+}
+
+fn dbSave() {
+    mut writer = FileWriter.new(dbFile)
+    // Write header
+    mut header = ""
+    for i in range(0, colCount) {
+        if i > 0 { header += "," }
+        header += columns[i]
+    }
+    writer.write(header + "\n")
+    // Write rows
+    for i in range(0, rowCount) {
+        writer.write(rows[i] + "\n")
+    }
+    writer.close()
+    println("Saved " + rowCount + " rows to " + dbFile)
+}
+
+fn dbLoad() {
+    mut reader = BufferedReader.new(FileReader.new(dbFile))
+    mut header = reader.readLine()
+    columns = split(header, ",")
+    colCount = len(columns)
+    rowCount = 0
+    mut line = reader.readLine()
+    while line != null {
+        if rowCount == 0 { rows[0] = line }
+        else { push(rows, line) }
+        rowCount = rowCount + 1
+        line = reader.readLine()
+    }
+    reader.close()
+    println("Loaded " + rowCount + " rows from " + dbFile)
+}
+
+// Test
+println("=== Mini Database ===")
+println("")
+
+dbCreate(["name", "age", "city", "role"])
+dbInsert("Alice,28,Istanbul,Engineer")
+dbInsert("Bob,32,Ankara,Manager")
+dbInsert("Charlie,25,Izmir,Designer")
+dbInsert("Diana,30,Bursa,Engineer")
+dbInsert("Eve,27,Antalya,Designer")
+println("")
+
+println("SELECT * (all rows):")
+dbSelectAll()
+
+println("")
+println("SELECT WHERE city = Istanbul:")
+dbSelect("city", "Istanbul")
+
+println("")
+println("SELECT WHERE role = Engineer:")
+dbSelect("role", "Engineer")
+
+println("")
+println("SELECT WHERE role = Designer:")
+dbSelect("role", "Designer")
+
+// Save and reload
+println("")
+dbSave()
+dbCreate([""])
+dbLoad()
+println("")
+println("After reload:")
+dbSelectAll()
+
+// Cleanup
+File.new(dbFile).delete()
+println("\nDatabase cleaned up.")
