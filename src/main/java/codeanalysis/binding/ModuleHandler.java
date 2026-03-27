@@ -112,11 +112,16 @@ public class ModuleHandler {
         }
 
         // Register imported functions with qualified name: "moduleName.funcName"
-        // This prevents all name conflicts (with builtins, locals, other modules)
-        String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
+        // For nested paths like "util/str", use the last segment as qualifier
+        String shortName = moduleName.contains("/")
+                ? moduleName.substring(moduleName.lastIndexOf('/') + 1)
+                : moduleName.contains(".")
+                ? moduleName.substring(moduleName.lastIndexOf('.') + 1)
+                : moduleName;
+        String className = Character.toUpperCase(shortName.charAt(0)) + shortName.substring(1);
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
-            String qualifiedName = moduleName + "." + func.getName();
+            String qualifiedName = shortName + "." + func.getName();
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
             importedFunc.setReturnStructName(func.getReturnStructName());
@@ -170,10 +175,39 @@ public class ModuleHandler {
         String basePath = _filePath != null
                 ? java.nio.file.Paths.get(_filePath).getParent().toString()
                 : System.getProperty("user.dir");
-        java.nio.file.Path candidate = java.nio.file.Paths.get(basePath, moduleName + ".siyo");
+
+        // Support dot notation: "util.str" → "util/str"
+        String pathName = moduleName.replace('.', '/');
+
+        // 1. Same directory: math.siyo
+        java.nio.file.Path candidate = java.nio.file.Paths.get(basePath, pathName + ".siyo");
         if (java.nio.file.Files.exists(candidate)) {
             return candidate.toAbsolutePath().toString();
         }
+
+        // 2. Subdirectory with index: util/ → util/util.siyo (or util/index.siyo)
+        java.nio.file.Path dirCandidate = java.nio.file.Paths.get(basePath, pathName);
+        if (java.nio.file.Files.isDirectory(dirCandidate)) {
+            // Try dir/index.siyo
+            java.nio.file.Path indexFile = dirCandidate.resolve("index.siyo");
+            if (java.nio.file.Files.exists(indexFile)) {
+                return indexFile.toAbsolutePath().toString();
+            }
+            // Try dir/dirname.siyo
+            String dirName = dirCandidate.getFileName().toString();
+            java.nio.file.Path namedFile = dirCandidate.resolve(dirName + ".siyo");
+            if (java.nio.file.Files.exists(namedFile)) {
+                return namedFile.toAbsolutePath().toString();
+            }
+        }
+
+        // 3. Project root
+        String projectRoot = System.getProperty("user.dir");
+        candidate = java.nio.file.Paths.get(projectRoot, pathName + ".siyo");
+        if (java.nio.file.Files.exists(candidate)) {
+            return candidate.toAbsolutePath().toString();
+        }
+
         return null;
     }
 
