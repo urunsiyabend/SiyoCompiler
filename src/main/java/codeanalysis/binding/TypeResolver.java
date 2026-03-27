@@ -140,6 +140,9 @@ public class TypeResolver {
             JavaClassInfo siyoInfo = resolveJavaClassForSiyoType(varExpr.getVariable().getType());
             if (siyoInfo != null) return new JavaResolvedType(siyoInfo);
         }
+        if (expr instanceof BoundCastExpression castExpr) {
+            return new JavaResolvedType(castExpr.getTargetClassInfo());
+        }
         if (expr instanceof BoundJavaMethodCallExpression javaCall) {
             if (javaCall.getResolvedReturnType() != null) return javaCall.getResolvedReturnType();
             if (javaCall.isConstructor() && javaCall.getClassInfo() != null) {
@@ -187,6 +190,17 @@ public class TypeResolver {
             return getOrLoadJavaClass("String", "java.lang.String");
         }
         return null;
+    }
+
+    public JavaClassInfo resolveJavaClassForSiyoTypeName(String name) {
+        return switch (name) {
+            case "String" -> getOrLoadJavaClass("String", "java.lang.String");
+            case "Integer" -> getOrLoadJavaClass("Integer", "java.lang.Integer");
+            case "Boolean" -> getOrLoadJavaClass("Boolean", "java.lang.Boolean");
+            case "Double" -> getOrLoadJavaClass("Double", "java.lang.Double");
+            case "Object" -> getOrLoadJavaClass("Object", "java.lang.Object");
+            default -> null;
+        };
     }
 
     public JavaClassInfo resolveJavaClassFromDescriptor(String descriptor) {

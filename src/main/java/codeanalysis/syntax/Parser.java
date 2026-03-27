@@ -539,6 +539,13 @@ public class Parser {
 
         ExpressionSyntax left = parseBinaryExpression();
 
+        // Cast expression: expr as Type
+        if (current().getType() == SyntaxType.AsKeyword) {
+            SyntaxToken asKeyword = nextToken();
+            SyntaxToken typeName = match(SyntaxType.IdentifierToken);
+            return new CastExpressionSyntax(left, asKeyword, typeName);
+        }
+
         // Index/member assignment: arr[0] = 5 or p.x = 10
         if (current().getType() == SyntaxType.EqualsToken &&
             (left instanceof IndexExpressionSyntax || left instanceof MemberAccessExpressionSyntax)) {

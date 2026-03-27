@@ -185,6 +185,9 @@ public enum SyntaxType {
     /* Represents a 'return' keyword. */
     ReturnKeyword,
 
+    /* Represents an 'as' keyword for type casting. */
+    AsKeyword,
+
     /* Represents a parameter in function declaration. */
     Parameter,
 
@@ -283,6 +286,7 @@ public enum SyntaxType {
 
     /* Represents a member call expression (module.func(args)). */
     MemberCallExpression,
+    CastExpression,
 
     /* Represents a Java import statement (import java "class.name"). */
     JavaImportStatement,

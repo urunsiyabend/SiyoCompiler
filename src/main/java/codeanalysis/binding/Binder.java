@@ -299,6 +299,7 @@ public class Binder {
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
             case CompoundAssignmentExpression -> bindCompoundAssignment((CompoundAssignmentExpressionSyntax) syntax);
             case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
+            case CastExpression -> bindCastExpression((CastExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -852,6 +853,23 @@ public class Binder {
 
     private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
         return _moduleHandler.bindJavaImportStatement(syntax);
+    }
+
+    private BoundExpression bindCastExpression(CastExpressionSyntax syntax) {
+        BoundExpression expr = bindExpression(syntax.getExpression());
+        String targetTypeName = syntax.getTypeName().getData();
+
+        // Look up imported Java class
+        codeanalysis.JavaClassInfo targetClass = _typeResolver.getJavaClasses().get(targetTypeName);
+        if (targetClass == null) {
+            // Auto-resolve well-known types (String, Integer, etc.)
+            targetClass = _typeResolver.resolveJavaClassForSiyoTypeName(targetTypeName);
+        }
+        if (targetClass == null) {
+            _diagnostics.reportUndefinedName(syntax.getTypeName().getSpan(), targetTypeName);
+            return expr;
+        }
+        return new BoundCastExpression(expr, targetClass);
     }
 
     private BoundExpression bindMemberCallExpression(MemberCallExpressionSyntax syntax) {

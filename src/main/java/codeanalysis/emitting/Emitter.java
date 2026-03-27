@@ -291,6 +291,7 @@ public class Emitter {
             case MemberAssignmentExpression -> emitMemberAssignmentExpression((BoundMemberAssignmentExpression) node);
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> emitJavaStaticField((BoundJavaStaticFieldExpression) node);
+            case CastExpression -> emitCastExpression((BoundCastExpression) node);
             default -> throw new UnsupportedOperationException("Cannot emit expression: " + node.getType());
         }
     }
@@ -534,6 +535,11 @@ public class Emitter {
     }
 
     // ========== Java Interop Emission ==========
+
+    private void emitCastExpression(BoundCastExpression node) {
+        emitExpression(node.getExpression());
+        _mv.visitTypeInsn(CHECKCAST, node.getTargetClassInfo().getInternalName());
+    }
 
     private void emitJavaStaticField(BoundJavaStaticFieldExpression node) {
         _mv.visitFieldInsn(GETSTATIC, node.getClassInfo().getInternalName(),

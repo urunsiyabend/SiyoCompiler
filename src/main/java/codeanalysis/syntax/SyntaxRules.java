@@ -30,6 +30,7 @@ public class SyntaxRules {
             case "for" -> SyntaxType.ForKeyword;
             case "fn" -> SyntaxType.FnKeyword;
             case "return" -> SyntaxType.ReturnKeyword;
+            case "as" -> SyntaxType.AsKeyword;
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
@@ -89,6 +90,7 @@ public class SyntaxRules {
             case ForKeyword -> "for";
             case FnKeyword -> "fn";
             case ReturnKeyword -> "return";
+            case AsKeyword -> "as";
             case ColonToken -> ":";
             case CommaToken -> ",";
             case ArrowToken -> "->";

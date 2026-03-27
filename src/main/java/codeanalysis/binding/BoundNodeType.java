@@ -39,4 +39,5 @@ public enum BoundNodeType {
     TryCatchStatement,
     JavaMethodCallExpression,
     JavaStaticFieldExpression,
+    CastExpression,
 }

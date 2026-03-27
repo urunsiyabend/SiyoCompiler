@@ -196,6 +196,7 @@ public class Evaluator {
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> evaluateJavaStaticField((BoundJavaStaticFieldExpression) node);
+            case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression()); // runtime type is already correct
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
