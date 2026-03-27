@@ -26,6 +26,10 @@ public class JavaClassInfo {
         return _metadata.resolveMethod(name, argCount);
     }
 
+    public JavaMethodSignature resolveMethod(String name, int argCount, Class<?>[] argTypes) {
+        return _metadata.resolveMethod(name, argCount, argTypes);
+    }
+
     public JavaMethodSignature resolveConstructor(int argCount) {
         return _metadata.resolveConstructor(argCount);
     }

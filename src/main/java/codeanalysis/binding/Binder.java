@@ -1124,7 +1124,7 @@ public class Binder {
                 // Compile-time method resolution
                 codeanalysis.JavaMethodSignature resolved = isConstructor
                         ? javaClass.resolveConstructor(boundArgs.size())
-                        : javaClass.resolveMethod(funcName, boundArgs.size());
+                        : javaClass.resolveMethod(funcName, boundArgs.size(), getArgTypes(boundArgs));
 
                 if (resolved == null) {
                     _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
@@ -1149,7 +1149,7 @@ public class Binder {
         codeanalysis.JavaClassInfo targetClassInfo = resolveJavaClassInfo(target);
         codeanalysis.JavaMethodSignature resolved = null;
         if (targetClassInfo != null) {
-            resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size());
+            resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(), getArgTypes(boundArgs));
             if (resolved == null) {
                 _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
                         targetClassInfo.getSimpleName() + "." + methodName);
@@ -1238,6 +1238,12 @@ public class Binder {
      * Resolve Java class info from an expression.
      * Traces through variables, constructor results, and method return types.
      */
+    private Class<?>[] getArgTypes(List<BoundExpression> args) {
+        Class<?>[] types = new Class<?>[args.size()];
+        for (int i = 0; i < args.size(); i++) types[i] = args.get(i).getClassType();
+        return types;
+    }
+
     private codeanalysis.JavaClassInfo resolveJavaClassInfo(BoundExpression expr) {
         if (expr instanceof BoundVariableExpression varExpr) {
             return getVarJavaClassType(varExpr.getVariable());

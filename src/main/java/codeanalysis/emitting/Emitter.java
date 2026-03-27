@@ -555,6 +555,8 @@ public class Emitter {
         // Instance method call
         emitExpression(node.getTarget());
         if (sig != null) {
+            // Cast Object on stack to the actual Java class
+            _mv.visitTypeInsn(CHECKCAST, sig.getOwnerInternalName());
             emitJavaArgs(node.getArguments(), sig);
             _mv.visitMethodInsn(sig.getInvokeOpcode(), sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
         } else {

@@ -15,16 +15,18 @@ public class JavaClassMetadata {
     private final String _fullName;
     private final String _internalName;
     private final boolean _isInterface;
+    private final String _superClassName;
     private final List<JavaMethodSignature> _methods;
     private final List<JavaMethodSignature> _constructors;
 
     private JavaClassMetadata(String simpleName, String fullName, String internalName,
-                               boolean isInterface, List<JavaMethodSignature> methods,
-                               List<JavaMethodSignature> constructors) {
+                               boolean isInterface, String superClassName,
+                               List<JavaMethodSignature> methods, List<JavaMethodSignature> constructors) {
         _simpleName = simpleName;
         _fullName = fullName;
         _internalName = internalName;
         _isInterface = isInterface;
+        _superClassName = superClassName;
         _methods = methods;
         _constructors = constructors;
     }
@@ -58,6 +60,7 @@ public class JavaClassMetadata {
                 : fullClassName;
 
         boolean[] isInterface = {false};
+        String[] superClass = {null};
         List<JavaMethodSignature> methods = new ArrayList<>();
         List<JavaMethodSignature> constructors = new ArrayList<>();
 
@@ -65,6 +68,9 @@ public class JavaClassMetadata {
             @Override
             public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
                 isInterface[0] = (access & Opcodes.ACC_INTERFACE) != 0;
+                if (superName != null && !superName.equals("java/lang/Object")) {
+                    superClass[0] = superName.replace('/', '.');
+                }
             }
 
             @Override
@@ -86,7 +92,7 @@ public class JavaClassMetadata {
             }
         }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
-        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], methods, constructors);
+        return new JavaClassMetadata(simpleName, fullClassName, internalName, isInterface[0], superClass[0], methods, constructors);
     }
 
     public String getSimpleName() { return _simpleName; }
@@ -95,12 +101,58 @@ public class JavaClassMetadata {
     public boolean isInterface() { return _isInterface; }
 
     public JavaMethodSignature resolveMethod(String name, int argCount) {
-        for (JavaMethodSignature sig : _methods) {
-            if (sig.getName().equals(name) && sig.getParamCount() == argCount) {
-                return sig;
+        return resolveMethod(name, argCount, null);
+    }
+
+    /**
+     * Resolve method with optional argument type matching for overload resolution.
+     */
+    public JavaMethodSignature resolveMethod(String name, int argCount, Class<?>[] argTypes) {
+        JavaMethodSignature result = findMethodInClass(name, argCount, argTypes);
+        if (result != null) return result;
+
+        // Search superclass hierarchy
+        if (_superClassName != null) {
+            JavaClassMetadata superMeta = load(_superClassName);
+            if (superMeta != null) {
+                return superMeta.resolveMethod(name, argCount, argTypes);
             }
         }
         return null;
+    }
+
+    private JavaMethodSignature findMethodInClass(String name, int argCount, Class<?>[] argTypes) {
+        JavaMethodSignature fallback = null;
+        for (JavaMethodSignature sig : _methods) {
+            if (!sig.getName().equals(name) || sig.getParamCount() != argCount) continue;
+
+            if (argTypes == null) {
+                // No type info - return first match (backward compat)
+                return sig;
+            }
+
+            // Type-aware matching
+            boolean match = true;
+            String[] paramDescs = sig.getParamDescriptors();
+            for (int i = 0; i < argCount; i++) {
+                if (!isTypeCompatible(argTypes[i], paramDescs[i])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return sig;
+            if (argTypes == null && fallback == null) fallback = sig;
+        }
+        return fallback; // only used when no type info provided
+    }
+
+    private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
+        if (siyoType == null || siyoType == Object.class) return true; // any
+        if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
+        if (siyoType == Boolean.class) return jvmDesc.equals("Z");
+        if (siyoType == Double.class) return jvmDesc.equals("D") || jvmDesc.equals("F");
+        if (siyoType == String.class) return jvmDesc.equals("Ljava/lang/String;") || jvmDesc.startsWith("Ljava/lang/CharSequence;");
+        return true; // Object types are compatible with any reference param
     }
 
     public JavaMethodSignature resolveConstructor(int argCount) {

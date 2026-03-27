@@ -13,7 +13,7 @@ println("File written!")
 mut reader = BufferedReader.new(FileReader.new("hello.txt"))
 mut line = reader.readLine()
 while line != null {
-    println("Read: " + line.toString())
+    println("Read: " + line)
     line = reader.readLine()
 }
 reader.close()
