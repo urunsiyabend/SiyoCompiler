@@ -1,0 +1,117 @@
+// Mini test framework + math tests
+// Demonstrates: functions, error handling, string formatting
+
+mut testsPassed = 0
+mut testsFailed = 0
+mut totalTests = 0
+
+fn assert(condition: bool, message: string) {
+    totalTests = totalTests + 1
+    if condition {
+        testsPassed = testsPassed + 1
+        println("  ✓ " + message)
+    } else {
+        testsFailed = testsFailed + 1
+        println("  ✗ FAIL: " + message)
+    }
+}
+
+fn assertEqual(actual: int, expected: int, message: string) {
+    assert(actual == expected, message + " (expected " + expected + ", got " + actual + ")")
+}
+
+fn assertEqualStr(actual: string, expected: string, message: string) {
+    assert(actual == expected, message + " (expected '" + expected + "', got '" + actual + "')")
+}
+
+// Math functions to test
+fn abs(x: int) -> int {
+    if x < 0 return -x
+    x
+}
+
+fn fibonacci(n: int) -> int {
+    if n <= 1 return n
+    fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+fn isPrime(n: int) -> bool {
+    if n < 2 return false
+    for i in range(2, n) {
+        if n % i == 0 return false
+    }
+    true
+}
+
+fn gcd(a: int, b: int) -> int {
+    mut x = a
+    mut y = b
+    while y != 0 {
+        mut temp = y
+        y = x % y
+        x = temp
+    }
+    x
+}
+
+fn power(base: int, exp: int) -> int {
+    mut result = 1
+    for i in range(0, exp) {
+        result = result * base
+    }
+    result
+}
+
+// Run tests
+println("=== Math Test Suite ===")
+println("")
+
+println("Absolute Value:")
+assertEqual(abs(5), 5, "abs(5) = 5")
+assertEqual(abs(-5), 5, "abs(-5) = 5")
+assertEqual(abs(0), 0, "abs(0) = 0")
+
+println("")
+println("Fibonacci:")
+assertEqual(fibonacci(0), 0, "fib(0) = 0")
+assertEqual(fibonacci(1), 1, "fib(1) = 1")
+assertEqual(fibonacci(5), 5, "fib(5) = 5")
+assertEqual(fibonacci(10), 55, "fib(10) = 55")
+
+println("")
+println("Prime:")
+assert(!isPrime(0), "0 is not prime")
+assert(!isPrime(1), "1 is not prime")
+assert(isPrime(2), "2 is prime")
+assert(isPrime(7), "7 is prime")
+assert(!isPrime(9), "9 is not prime")
+assert(isPrime(97), "97 is prime")
+
+println("")
+println("GCD:")
+assertEqual(gcd(12, 8), 4, "gcd(12,8) = 4")
+assertEqual(gcd(100, 75), 25, "gcd(100,75) = 25")
+assertEqual(gcd(17, 13), 1, "gcd(17,13) = 1")
+
+println("")
+println("Power:")
+assertEqual(power(2, 10), 1024, "2^10 = 1024")
+assertEqual(power(3, 4), 81, "3^4 = 81")
+assertEqual(power(5, 0), 1, "5^0 = 1")
+
+println("")
+println("String:")
+assertEqualStr("hello" + " " + "world", "hello world", "concatenation")
+assertEqualStr(substring("hello world", 0, 5), "hello", "substring")
+assert(contains("hello world", "world"), "contains")
+assert(!contains("hello", "xyz"), "not contains")
+
+// Summary
+println("")
+println("=== Results ===")
+println(testsPassed + "/" + totalTests + " passed, " + testsFailed + " failed")
+if testsFailed == 0 {
+    println("All tests passed!")
+} else {
+    println("SOME TESTS FAILED!")
+}

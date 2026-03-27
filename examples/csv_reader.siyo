@@ -1,0 +1,92 @@
+// CSV Reader - reads and processes CSV data with Java I/O
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+
+fn split(text: string, delimiter: string) -> string[] {
+    mut words = [""]
+    mut wordCount = 0
+    mut current = ""
+    for i in range(0, len(text)) {
+        mut ch = text[i]
+        if ch == delimiter {
+            if wordCount == 0 { words[0] = current }
+            else { push(words, current) }
+            wordCount = wordCount + 1
+            current = ""
+        } else {
+            current += ch
+        }
+    }
+    if wordCount == 0 { words[0] = current }
+    else { push(words, current) }
+    words
+}
+
+// Create test CSV file
+mut writer = FileWriter.new("test_data.csv")
+writer.write("Name,Age,City,Score\n")
+writer.write("Alice,28,Istanbul,95\n")
+writer.write("Bob,32,Ankara,87\n")
+writer.write("Charlie,25,Izmir,92\n")
+writer.write("Diana,30,Bursa,88\n")
+writer.write("Eve,27,Antalya,91\n")
+writer.close()
+
+// Read and parse CSV
+println("=== CSV Reader ===")
+mut reader = BufferedReader.new(FileReader.new("test_data.csv"))
+
+mut headerLine = reader.readLine()
+mut headers = split(headerLine, ",")
+println("Columns: " + len(headers))
+
+// Store raw lines
+mut lines = [""]
+mut lineCount = 0
+mut line = reader.readLine()
+while line != null {
+    if lineCount == 0 { lines[0] = line }
+    else { push(lines, line) }
+    lineCount = lineCount + 1
+    line = reader.readLine()
+}
+reader.close()
+println("Rows: " + lineCount)
+println("")
+
+// Print table
+for h in headers { print(h + "\t") }
+println("")
+for i in range(0, 40) { print("-") }
+println("")
+
+mut totalScore = 0
+mut maxScore = 0
+mut maxName = ""
+
+for i in range(0, lineCount) {
+    mut cols = split(lines[i], ",")
+    for col in cols { print(col + "\t") }
+    println("")
+
+    // Accumulate stats
+    mut score = parseInt(cols[3])
+    totalScore = totalScore + score
+    if score > maxScore {
+        maxScore = score
+        maxName = cols[0]
+    }
+}
+
+// Stats
+println("")
+println("=== Stats ===")
+println("Total score: " + totalScore)
+println("Average: " + toFloat(totalScore) / toFloat(lineCount))
+println("Top scorer: " + maxName + " (" + maxScore + ")")
+
+// Cleanup
+File.new("test_data.csv").delete()
+println("CSV file cleaned up.")

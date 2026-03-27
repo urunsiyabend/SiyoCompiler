@@ -1,0 +1,117 @@
+// Simple persistent Key-Value Store using file storage
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+
+struct KVStore {
+    keys: string[],
+    values: string[],
+    count: int,
+    filename: string
+}
+
+fn kvNew(filename: string) -> KVStore {
+    KVStore { keys: [""], values: [""], count: 0, filename: filename }
+}
+
+fn kvSet(store: KVStore, key: string, value: string) {
+    // Check if key exists
+    for i in range(0, store.count) {
+        if store.keys[i] == key {
+            store.values[i] = value
+            return
+        }
+    }
+    // New key
+    if store.count == 0 {
+        store.keys[0] = key
+        store.values[0] = value
+    } else {
+        push(store.keys, key)
+        push(store.values, value)
+    }
+    store.count = store.count + 1
+}
+
+fn kvGet(store: KVStore, key: string) -> string {
+    for i in range(0, store.count) {
+        if store.keys[i] == key {
+            return store.values[i]
+        }
+    }
+    "NOT_FOUND"
+}
+
+fn kvDelete(store: KVStore, key: string) -> bool {
+    for i in range(0, store.count) {
+        if store.keys[i] == key {
+            // Shift elements
+            for j in range(i, store.count - 1) {
+                store.keys[j] = store.keys[j + 1]
+                store.values[j] = store.values[j + 1]
+            }
+            store.count = store.count - 1
+            return true
+        }
+    }
+    false
+}
+
+fn kvSave(store: KVStore) {
+    mut writer = FileWriter.new(store.filename)
+    for i in range(0, store.count) {
+        writer.write(store.keys[i] + "=" + store.values[i] + "\n")
+    }
+    writer.close()
+}
+
+fn kvPrint(store: KVStore) {
+    println("--- Store (" + store.count + " entries) ---")
+    for i in range(0, store.count) {
+        println("  " + store.keys[i] + " = " + store.values[i])
+    }
+}
+
+// Test
+println("=== Key-Value Store ===")
+
+mut db = kvNew("store.db")
+kvSet(db, "name", "Siyo")
+kvSet(db, "version", "0.1.0")
+kvSet(db, "language", "compiled")
+kvSet(db, "target", "JVM")
+kvPrint(db)
+
+println("")
+println("GET name: " + kvGet(db, "name"))
+println("GET missing: " + kvGet(db, "missing"))
+
+// Update
+kvSet(db, "version", "0.1.1")
+println("After update version:")
+println("GET version: " + kvGet(db, "version"))
+
+// Delete
+kvDelete(db, "language")
+println("")
+println("After delete 'language':")
+kvPrint(db)
+
+// Save and verify file
+kvSave(db)
+println("")
+println("Saved to " + db.filename)
+
+// Read back
+mut reader = BufferedReader.new(FileReader.new("store.db"))
+println("File contents:")
+mut line = reader.readLine()
+while line != null {
+    println("  " + line)
+    line = reader.readLine()
+}
+reader.close()
+
+File.new("store.db").delete()
+println("Cleaned up.")
