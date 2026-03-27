@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Siyo Compiler launcher
+# Usage: siyoc run file.siyo
+#        siyoc compile file.siyo
+#        siyoc repl
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SIYO_JAR="$SCRIPT_DIR/../target/siyo-compiler-0.1.0-SNAPSHOT.jar"
+
+if [ ! -f "$SIYO_JAR" ]; then
+    echo "Error: siyo-compiler JAR not found at $SIYO_JAR"
+    echo "Run 'mvn package -DskipTests' to build it."
+    exit 1
+fi
+
+java -jar "$SIYO_JAR" "$@"

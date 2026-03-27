@@ -382,7 +382,7 @@ public class Evaluator {
 
         if (node.isConstructor()) {
             // File.new("path") → new File("path")
-            Class<?> cls = node.getClassInfo().getJavaClass();
+            Class<?> cls = Class.forName(node.getClassInfo().getFullName());
             for (var ctor : cls.getConstructors()) {
                 if (ctor.getParameterCount() == args.length) {
                     try {
@@ -397,7 +397,7 @@ public class Evaluator {
 
         if (node.isStatic()) {
             // Files.readString(path) → static method
-            Class<?> cls = node.getClassInfo().getJavaClass();
+            Class<?> cls = Class.forName(node.getClassInfo().getFullName());
             return invokeMethod(cls, null, node.getMethodName(), args);
         }
 

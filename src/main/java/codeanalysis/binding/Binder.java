@@ -933,12 +933,13 @@ public class Binder {
                 ? fullClassName.substring(fullClassName.lastIndexOf('.') + 1)
                 : fullClassName;
 
-        try {
-            Class<?> javaClass = Class.forName(fullClassName);
-            _javaClasses.put(simpleName, new codeanalysis.JavaClassInfo(simpleName, fullClassName, javaClass));
-        } catch (ClassNotFoundException e) {
+        // Load class metadata via ASM ClassReader (no reflection!)
+        codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(fullClassName);
+        if (metadata == null) {
             _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), fullClassName);
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
         }
+        _javaClasses.put(simpleName, new codeanalysis.JavaClassInfo(simpleName, fullClassName, metadata));
 
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
@@ -1100,7 +1101,18 @@ public class Binder {
                     boundArgs.add(bindExpression(argSyntax));
                 }
                 boolean isConstructor = funcName.equals("new");
-                return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, isConstructor, !isConstructor);
+
+                // Compile-time method resolution
+                codeanalysis.JavaMethodSignature resolved = isConstructor
+                        ? javaClass.resolveConstructor(boundArgs.size())
+                        : javaClass.resolveMethod(funcName, boundArgs.size());
+
+                if (resolved == null) {
+                    _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+                    return new BoundLiteralExpression(0);
+                }
+
+                return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, resolved);
             }
 
             // Not a module or Java class - fall through to instance method call
@@ -1113,8 +1125,7 @@ public class Binder {
         for (ExpressionSyntax argSyntax : syntax.getArguments()) {
             boundArgs.add(bindExpression(argSyntax));
         }
-        // For Java objects (Object.class), emit as Java instance method call
-        return new BoundJavaMethodCallExpression(null, target, methodName, boundArgs, false, false);
+        return new BoundJavaMethodCallExpression(null, target, methodName, boundArgs, null);
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {
