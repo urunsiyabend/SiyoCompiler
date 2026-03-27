@@ -1,43 +1,210 @@
-<img src="src/main/java/SiyoLanguage.png" alt= “” width="200" height="200">
-<hr>
+# Siyo Compiler
 
-# Siyo Compiler Project
+<p align="center">
+  <img src="src/main/java/SiyoLanguage.png" alt="Siyo logo" width="180" />
+</p>
 
-Welcome to the Siyo Compiler Project! This project aims to develop a compiler for the Siyo language.
+Siyo Compiler is an experimental programming language and compiler project written in Java. The repository has grown well beyond a lexer/parser prototype: it now includes an interpreter, a JVM bytecode compiler, a REPL, file-based module loading, structs, enums, arrays, and a large automated test suite.
 
-## Overview
+## Current Status
 
-The Siyo Compiler Project is designed to provide a comprehensive compiler implementation for the Siyo programming language. It encompasses various components, including lexical analysis, parsing, syntax tree generation, semantic analysis, code generation, and more.
+- Interpreter pipeline: `parse -> bind -> lower -> evaluate`
+- JVM bytecode compiler: compiles `.siyo` files into `.class` files
+- REPL for interactive execution and diagnostics
+- Functions with typed parameters, return types, implicit return, recursion, and forward declarations
+- Types: `int`, `bool`, `float`, `string`, `null`
+- Composite types: arrays, structs, enums
+- Control flow: `if/else`, `while`, classic `for`, `for in`, `break`, `continue`
+- Error handling: `try { ... } catch e { ... }`
+- File-based modules with `import "module"`
+- Built-in functions: `len`, `toString`, `parseInt`, `parseFloat`, `toInt`, `toFloat`, `print`, `println`, `input`, `range`, `push`, `substring`, `contains`, `error`
 
-## Features
+## Example Siyo Program
 
-- Lexical analysis: The `Lexer` class performs lexical analysis on Siyo source code, generating tokens representing the language's lexical elements.
-- Parsing: The `Parser` class parses the Siyo source code and generates a syntax tree representation of the program's structure.
-- Syntax tree: The `SyntaxTree`, `SyntaxNode`, and related classes provide a hierarchical representation of the Siyo program's syntax.
-- Semantic analysis: The compiler performs semantic analysis on the syntax tree to enforce language-specific rules and detect potential errors.
-- Code generation: The compiler generates executable code or intermediate representation (e.g., bytecode) from the syntax tree.
-- Diagnostics: The compiler reports diagnostics such as parsing errors, lexical errors, and semantic errors.
+```siyo
+import "math"
+
+fn greet(name: string) -> string {
+    "Hello, " + name + "!"
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+mut p = Point { x: 3, y: 4 }
+mut nums = [1, 2, 3, 4, 5]
+mut sum = 0
+
+for n in nums {s
+    sum += n
+}
+
+try {
+    println(greet("World"))
+    println("sum = " + toString(sum))
+    println("abs(-42) = " + toString(math.abs(-42)))
+} catch e {
+    println("error: " + e)
+}
+```
 
 ## Project Structure
 
-The project will have following components:
+- `src/main/java/Main.java`: CLI entry point, REPL, file execution, and compile flow
+- `src/main/java/codeanalysis/syntax`: lexer, parser, and syntax tree nodes
+- `src/main/java/codeanalysis/binding`: semantic binding, scope management, and type checking
+- `src/main/java/codeanalysis/lowering`: lowers high-level constructs into simpler bound nodes
+- `src/main/java/codeanalysis/Evaluator.java`: interpreter runtime
+- `src/main/java/codeanalysis/emitting/Emitter.java`: ASM-based JVM bytecode generation
+- `src/test/java`: tests for lexer, parser, binder, evaluator, and compiler behavior
+- `examples`: sample Siyo programs covering the implemented feature set
+- `docs`: generated Javadoc output
 
-- `com.urunsiyabend.codeanalysis`: Contains classes for code analysis, including the lexer, parser, syntax tree, syntax nodes, and token types.
-    - `com.urunsiyabend.codeanalysis.binding`: Contains classes for binding expressions in the code analysis process.
-    - `com.urunsiyabend.codeanalysis.syntax`: Contains classes for syntax analysis in the code analysis process.
-- `com.urunsiyabend.codegeneration (soon!)`: Contains classes for code generation, including code emitter and bytecode generation (if applicable).
-- `com.urunsiyabend.semanticanalysis (soon!)`: Contains classes for semantic analysis, including type checking, symbol table management, and error reporting.
-- `com.urunsiyabend.util (soon!)`: Contains utility classes used throughout the project.
+## Requirements
 
-## Usage
+- Java 17
+- Maven
 
-To use the Siyo Compiler, follow these steps:
+The project targets Java 17 and uses ASM for bytecode generation.
 
-1. Create a new instance of `Lexer` and pass the Siyo source code as input.
-2. Use the `getNextToken()` method of `Lexer` to retrieve tokens from the input source code.
-3. Pass the tokens to an instance of `Parser` to generate the syntax tree.
-4. Perform semantic analysis on the syntax tree using the appropriate classes and algorithms.
-5. Generate executable code or intermediate representation using the code generation component.
-6. Execute or further process the generated code.
+## Build and Run
 
-Refer to the individual classes and their documentation for more detailed usage instructions.
+Build the project:
+
+```bash
+mvn package
+```
+
+Start the REPL:
+
+```bash
+java -cp target/classes Main repl
+```
+
+Run a `.siyo` file with the interpreter:
+
+```bash
+java -cp target/classes Main run examples/hello.siyo
+```
+
+The CLI also accepts a file path directly:
+
+```bash
+java -cp target/classes Main examples/hello.siyo
+```
+
+Compile a `.siyo` file to JVM bytecode:
+
+```bash
+java -cp target/classes Main compile examples/hello.siyo
+```
+
+If the program imports modules, the compiler also emits `.class` files for those dependencies.
+
+## Language Features
+
+### Primitive and Core Types
+
+- `int`
+- `bool`
+- `float`
+- `string`
+- `null`
+
+### Variables
+
+- `mut` and `imut`
+- assignment: `x = 10`
+- compound assignment: `+=`, `-=`, `*=`, `/=`
+
+### Control Flow
+
+- `if / else`
+- `while`
+- classic `for`
+- `for item in collection`
+- `break`
+- `continue`
+- `try / catch`
+
+### Functions
+
+- typed parameters
+- optional return type
+- implicit return from the last expression
+- recursion
+- forward function references
+
+### Data Structures
+
+- array literals: `[1, 2, 3]`
+- indexing: `arr[0]`
+- struct declarations: `struct Point { x: int, y: int }`
+- struct literals: `Point { x: 1, y: 2 }`
+- field access and mutation: `p.x`, `p.x = 10`
+- enum declarations and members: `enum Color { Red, Green, Blue }`
+
+### Modules
+
+The repository includes file-based module support:
+
+```siyo
+import "math"
+
+println(toString(math.max(10, 20)))
+```
+
+See [examples/modules/main.siyo](/C:/Users/uruns/IdeaProjects/SiyoCompiler/examples/modules/main.siyo) and [examples/modules/math.siyo](/C:/Users/uruns/IdeaProjects/SiyoCompiler/examples/modules/math.siyo).
+
+## Examples
+
+The `examples` directory reflects the current language surface well:
+
+- `hello.siyo`: functions, structs, arrays, loops, string concatenation
+- `sorting.siyo`: sorting algorithm example
+- `linked_list.siyo`: struct-based linked list traversal
+- `stack.siyo`: data structure implementation
+- `todo_list.siyo`: enums, structs, and arrays together
+- `grade_calculator.siyo`: `for in` loops and enums
+- `word_counter.siyo`: string processing
+- `error_handling.siyo`: `try/catch`, `error`, and bounds failures
+- `modules/*`: imports and module-qualified function calls
+
+## Architecture Overview
+
+The compiler pipeline is organized as follows:
+
+1. `Lexer` tokenizes the source text.
+2. `Parser` builds the syntax tree.
+3. `Binder` resolves names, scopes, and types.
+4. `Lowerer` rewrites control flow into simpler bound forms.
+5. `Evaluator` interprets the program or `Emitter` generates JVM bytecode.
+
+This split keeps interpreter and compiler behavior aligned on the same semantic foundation.
+
+## Test Status
+
+The repository includes a broad JUnit test suite. The latest reports under `target/surefire-reports` show:
+
+- `LexerTest`: 557 tests
+- `ParserTest`: 396 tests
+- `EvaluatorTest`: 218 tests
+- `SyntaxRulesTest`: 96 tests
+- `BinderTest`: 47 tests
+- `CompilationTest`: 29 tests
+- `ParserStatementTest`: 16 tests
+- `SourceTextTest`: 3 tests
+
+Total: 1362 tests, all passing in the latest available reports.
+
+## Notes
+
+- `GRAMMAR.md` appears to lag behind the current implementation.
+- `FUTURE.md` is still useful as a roadmap, but it does not fully match the repository's present state.
+- The most reliable source of truth is the combination of `src/main/java`, `src/test/java`, and `examples`.
+
+## Additional Material
+
+The repository also includes generated Javadoc under `docs/` and a few package-level README files inside the source tree. This top-level README is intended to describe the current project state accurately.
