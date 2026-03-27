@@ -1,0 +1,377 @@
+// REST API Server with SQLite backend
+// Full CRUD: POST/GET/DELETE /users
+// Run: siyoc -cp lib/sqlite-jdbc.jar run examples/rest_api.siyo
+import java "org.sqlite.JDBC"
+import java "java.sql.DriverManager"
+import java "java.sql.ResultSet"
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.lang.Character"
+
+// ========== JSON Helpers ==========
+
+fn jsonEscape(s: string) -> string {
+    mut result = ""
+    for i in range(0, len(s)) {
+        mut ch = s[i]
+        if ch == "\"" { result += "\\\"" }
+        else if ch == "\\" { result += "\\\\" }
+        else { result += ch }
+    }
+    result
+}
+
+fn jsonObject(keys: string[], values: string[], count: int) -> string {
+    mut json = "{"
+    for i in range(0, count) {
+        if i > 0 { json += "," }
+        json += "\"" + keys[i] + "\":" + values[i]
+    }
+    json += "}"
+    json
+}
+
+fn jsonString(s: string) -> string {
+    "\"" + jsonEscape(s) + "\""
+}
+
+fn jsonNumber(n: int) -> string {
+    "" + n
+}
+
+fn parseJsonField(json: string, fieldName: string) -> string {
+    mut search = "\"" + fieldName + "\":"
+    mut idx = -1
+    // Simple search
+    for i in range(0, len(json) - len(search)) {
+        mut match = true
+        for j in range(0, len(search)) {
+            if json[i + j] != search[j] { match = false }
+        }
+        if match { idx = i + len(search) }
+    }
+    if idx < 0 return ""
+
+    // Skip whitespace
+    while json[idx] == " " { idx += 1 }
+
+    if json[idx] == "\"" {
+        // String value
+        idx += 1
+        mut result = ""
+        while idx < len(json) {
+            if json[idx] == "\"" { return result }
+            result += json[idx]
+            idx += 1
+        }
+        return result
+    }
+
+    // Number value
+    mut result = ""
+    while idx < len(json) {
+        mut ch = json[idx]
+        if ch == "," { return result }
+        if ch == "}" { return result }
+        if ch == " " { return result }
+        result += ch
+        idx += 1
+    }
+    result
+}
+
+// ========== HTTP Helpers ==========
+
+fn parseMethod(requestLine: string) -> string {
+    mut method = ""
+    for i in range(0, len(requestLine)) {
+        if requestLine[i] == " " { return method }
+        method += requestLine[i]
+    }
+    method
+}
+
+fn parsePath(requestLine: string) -> string {
+    mut spaceCount = 0
+    mut path = ""
+    for i in range(0, len(requestLine)) {
+        if requestLine[i] == " " {
+            spaceCount += 1
+        } else if spaceCount == 1 {
+            path += requestLine[i]
+        }
+    }
+    path
+}
+
+fn parseQuery(path: string, param: string) -> string {
+    mut search = param + "="
+    mut qIdx = -1
+    for i in range(0, len(path)) {
+        if path[i] == "?" { qIdx = i + 1 }
+    }
+    if qIdx < 0 return ""
+
+    mut query = substring(path, qIdx, len(path))
+    for i in range(0, len(query) - len(search) + 1) {
+        mut match = true
+        for j in range(0, len(search)) {
+            if query[i + j] != search[j] { match = false }
+        }
+        if match {
+            mut val = ""
+            mut k = i + len(search)
+            while k < len(query) {
+                if query[k] == "&" { return val }
+                val += query[k]
+                k += 1
+            }
+            return val
+        }
+    }
+    ""
+}
+
+fn getPathBase(path: string) -> string {
+    mut base = ""
+    for i in range(0, len(path)) {
+        mut ch = path[i]
+        if ch == "?" { return base }
+        base += ch
+    }
+    base
+}
+
+fn httpResponse(status: int, statusText: string, body: string) -> string {
+    mut response = "HTTP/1.1 " + status + " " + statusText + "\r\n"
+    response += "Content-Type: application/json\r\n"
+    response += "Content-Length: " + len(body) + "\r\n"
+    response += "Access-Control-Allow-Origin: *\r\n"
+    response += "Connection: close\r\n\r\n"
+    response += body
+    response
+}
+
+// ========== Database ==========
+
+fn dbInit() {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    stmt.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, age INTEGER)")
+    stmt.close()
+    conn.close()
+    println("Database initialized.")
+}
+
+fn dbInsertUser(name: string, email: string, age: int) -> int {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    stmt.execute("INSERT INTO users (name, email, age) VALUES ('" + name + "', '" + email + "', " + age + ")")
+
+    mut rs = stmt.executeQuery("SELECT last_insert_rowid()")
+    rs.next()
+    mut id = rs.getInt(1)
+    stmt.close()
+    conn.close()
+    id
+}
+
+fn dbGetAllUsers() -> string {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
+
+    mut json = "["
+    mut first = true
+    while rs.next() {
+        if !first { json += "," }
+        first = false
+
+        mut keys = ["id", "name", "email", "age"]
+        mut vals = [jsonNumber(rs.getInt("id")), jsonString(rs.getString("name")),
+                    jsonString(rs.getString("email")), jsonNumber(rs.getInt("age"))]
+        json += jsonObject(keys, vals, 4)
+    }
+    json += "]"
+    stmt.close()
+    conn.close()
+    json
+}
+
+fn dbSearchUsers(name: string) -> string {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%" + name + "%' ORDER BY id")
+
+    mut json = "["
+    mut first = true
+    while rs.next() {
+        if !first { json += "," }
+        first = false
+
+        mut keys = ["id", "name", "email", "age"]
+        mut vals = [jsonNumber(rs.getInt("id")), jsonString(rs.getString("name")),
+                    jsonString(rs.getString("email")), jsonNumber(rs.getInt("age"))]
+        json += jsonObject(keys, vals, 4)
+    }
+    json += "]"
+    stmt.close()
+    conn.close()
+    json
+}
+
+fn dbDeleteUser(id: int) -> bool {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    mut affected = stmt.executeUpdate("DELETE FROM users WHERE id = " + id)
+    stmt.close()
+    conn.close()
+    affected > 0
+}
+
+fn dbGetUserCount() -> int {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT COUNT(*) FROM users")
+    rs.next()
+    mut count = rs.getInt(1)
+    stmt.close()
+    conn.close()
+    count
+}
+
+// ========== Request Handler ==========
+
+fn handleRequest(method: string, path: string, body: string) -> string {
+    mut basePath = getPathBase(path)
+
+    // POST /users - Create user
+    if method == "POST" {
+        if basePath == "/users" {
+            mut name = parseJsonField(body, "name")
+            mut email = parseJsonField(body, "email")
+            mut ageStr = parseJsonField(body, "age")
+            mut age = parseInt(ageStr)
+
+            if name == "" {
+                return httpResponse(400, "Bad Request", "{\"error\":\"name is required\"}")
+            }
+
+            mut id = dbInsertUser(name, email, age)
+            mut keys = ["id", "name", "email", "age"]
+            mut vals = [jsonNumber(id), jsonString(name), jsonString(email), jsonNumber(age)]
+            return httpResponse(201, "Created", jsonObject(keys, vals, 4))
+        }
+    }
+
+    // GET /users - List users (with optional ?name= filter)
+    if method == "GET" {
+        if basePath == "/users" {
+            mut nameFilter = parseQuery(path, "name")
+            if nameFilter != "" {
+                return httpResponse(200, "OK", dbSearchUsers(nameFilter))
+            }
+            return httpResponse(200, "OK", dbGetAllUsers())
+        }
+
+        // GET /stats
+        if basePath == "/stats" {
+            mut count = dbGetUserCount()
+            return httpResponse(200, "OK", "{\"user_count\":" + count + "}")
+        }
+    }
+
+    // DELETE /users/ID
+    if method == "DELETE" {
+        if len(basePath) > 7 {
+            mut idStr = substring(basePath, 7, len(basePath))
+            mut id = parseInt(idStr)
+            mut deleted = dbDeleteUser(id)
+            if deleted {
+                return httpResponse(200, "OK", "{\"deleted\":" + id + "}")
+            }
+            return httpResponse(404, "Not Found", "{\"error\":\"user not found\"}")
+        }
+    }
+
+    httpResponse(404, "Not Found", "{\"error\":\"not found\"}")
+}
+
+// ========== Main Server ==========
+
+println("=== Siyo REST API Server ===")
+dbInit()
+
+// Seed some data
+dbInsertUser("Alice", "alice@example.com", 28)
+dbInsertUser("Bob", "bob@example.com", 32)
+dbInsertUser("Charlie", "charlie@example.com", 25)
+println("Seeded 3 users.")
+
+mut server = ServerSocket.new(3000)
+println("Listening on http://localhost:3000")
+println("")
+println("Try:")
+println("  curl http://localhost:3000/users")
+println("  curl http://localhost:3000/users?name=Alice")
+println("  curl -X POST -d '{\"name\":\"Diana\",\"email\":\"diana@test.com\",\"age\":30}' http://localhost:3000/users")
+println("  curl -X DELETE http://localhost:3000/users/1")
+println("  curl http://localhost:3000/stats")
+println("")
+
+mut running = true
+while running {
+    mut socket = server.accept()
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+    // Read request line
+    mut requestLine = reader.readLine()
+    if requestLine == null {
+        socket.close()
+        continue
+    }
+
+    mut method = parseMethod(requestLine)
+    mut path = parsePath(requestLine)
+
+    // Read headers
+    mut contentLength = 0
+    mut header = reader.readLine()
+    while header != null {
+        if len(header) == 0 { break }
+        // Parse Content-Length
+        if contains(header, "Content-Length") {
+            mut clValue = ""
+            mut afterColon = false
+            for i in range(0, len(header)) {
+                if afterColon {
+                    if header[i] != " " { clValue += header[i] }
+                }
+                if header[i] == ":" { afterColon = true }
+            }
+            if clValue != "" { contentLength = parseInt(clValue) }
+        }
+        header = reader.readLine()
+    }
+
+    // Read body
+    mut body = ""
+    if contentLength > 0 {
+        for i in range(0, contentLength) {
+            mut charCode = reader.read()
+            body += Character.toString(charCode)
+        }
+    }
+
+    // Handle request
+    mut response = handleRequest(method, path, body)
+
+    // Send response
+    mut out = socket.getOutputStream()
+    out.write(response.getBytes())
+    out.flush()
+    socket.close()
+
+    println(method + " " + path + " → " + len(response) + " bytes")
+}
