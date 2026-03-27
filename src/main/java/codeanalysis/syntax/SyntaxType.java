@@ -190,6 +190,7 @@ public enum SyntaxType {
     ImplKeyword,
     SelfKeyword,
     ImplDeclaration,
+    LambdaExpression,
 
     /* Represents a parameter in function declaration. */
     Parameter,

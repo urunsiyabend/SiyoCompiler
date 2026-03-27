@@ -8,6 +8,7 @@ import codeanalysis.FunctionSymbol;
 import codeanalysis.LabelSymbol;
 import codeanalysis.ParameterSymbol;
 import codeanalysis.SiyoArray;
+import codeanalysis.SiyoClosure;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
 import codeanalysis.VariableSymbol;
@@ -315,6 +316,7 @@ public class Binder {
             case CompoundAssignmentExpression -> bindCompoundAssignment((CompoundAssignmentExpressionSyntax) syntax);
             case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
             case CastExpression -> bindCastExpression((CastExpressionSyntax) syntax);
+            case LambdaExpression -> bindLambdaExpression((LambdaExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -597,6 +599,18 @@ public class Binder {
     private BoundExpression bindCallExpression(CallExpressionSyntax syntax) {
         String name = syntax.getIdentifier().getData();
 
+        // Check if calling a closure variable: f(args)
+        if (!_scope.tryLookupFunction(name) && _scope.tryLookup(name)) {
+            VariableSymbol var = _scope.lookupVariable(name);
+            if (var.getType() == SiyoClosure.class) {
+                List<BoundExpression> args = new ArrayList<>();
+                for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                    args.add(bindExpression(argSyntax));
+                }
+                return new BoundClosureCallExpression(new BoundVariableExpression(var), args);
+            }
+        }
+
         if (!_scope.tryLookupFunction(name)) {
             _diagnostics.reportUndefinedFunction(syntax.getIdentifier().getSpan(), name);
             return new BoundLiteralExpression(0);
@@ -868,6 +882,75 @@ public class Binder {
 
     private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
         return _moduleHandler.bindJavaImportStatement(syntax);
+    }
+
+    private BoundExpression bindLambdaExpression(LambdaExpressionSyntax syntax) {
+        // Create new scope for lambda body
+        BoundScope outerScope = _scope;
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
+
+        // Bind parameters
+        List<ParameterSymbol> parameters = new ArrayList<>();
+        for (ParameterSyntax paramSyntax : syntax.getParameters()) {
+            String paramName = paramSyntax.getIdentifier().getData();
+            String typeName = paramSyntax.getTypeToken().getData();
+            Class<?> paramType = _typeResolver.lookupType(typeName);
+            if (paramType == null) paramType = Object.class;
+            ParameterSymbol param = new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType);
+            parameters.add(param);
+            _scope.tryDeclare(param);
+        }
+
+        // Return type
+        Class<?> returnType = null;
+        if (syntax.getTypeClause() != null) {
+            returnType = _typeResolver.lookupType(syntax.getTypeClause().getIdentifier().getData());
+        }
+
+        // Bind body
+        BoundStatement body = bindStatement(syntax.getBody());
+        BoundBlockStatement blockBody = body instanceof BoundBlockStatement block
+                ? block : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+
+        // Detect captured variables (variables referenced in body but declared in outer scope)
+        java.util.Set<VariableSymbol> captured = new java.util.LinkedHashSet<>();
+        collectCapturedVars(blockBody, parameters, captured);
+
+        // Restore scope
+        _scope = outerScope;
+        _moduleHandler.setScope(_scope);
+
+        // Lower the body
+        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(blockBody);
+
+        return new BoundLambdaExpression(parameters, loweredBody, returnType, captured);
+    }
+
+    private void collectCapturedVars(BoundNode node, List<ParameterSymbol> params,
+                                      java.util.Set<VariableSymbol> captured) {
+        if (node instanceof BoundVariableExpression varExpr) {
+            VariableSymbol var = varExpr.getVariable();
+            // Not a parameter and not a local → captured from outer scope
+            boolean isParam = false;
+            for (ParameterSymbol p : params) {
+                if (p.getName().equals(var.getName())) { isParam = true; break; }
+            }
+            if (!isParam && !(var instanceof ParameterSymbol)) {
+                captured.add(var);
+            }
+        }
+        if (node instanceof BoundAssignmentExpression assignExpr) {
+            VariableSymbol var = assignExpr.getVariable();
+            boolean isParam = false;
+            for (ParameterSymbol p : params) {
+                if (p.getName().equals(var.getName())) { isParam = true; break; }
+            }
+            if (!isParam) captured.add(var);
+        }
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectCapturedVars(it.next(), params, captured);
+        }
     }
 
     private BoundExpression bindCastExpression(CastExpressionSyntax syntax) {

@@ -40,4 +40,6 @@ public enum BoundNodeType {
     JavaMethodCallExpression,
     JavaStaticFieldExpression,
     CastExpression,
+    LambdaExpression,
+    ClosureCallExpression,
 }

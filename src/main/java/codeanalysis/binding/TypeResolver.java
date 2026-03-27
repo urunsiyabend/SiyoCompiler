@@ -280,6 +280,7 @@ public class TypeResolver {
             case "bool" -> Boolean.class;
             case "float" -> Double.class;
             case "string" -> String.class;
+            case "fn", "func", "function" -> SiyoClosure.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
     }

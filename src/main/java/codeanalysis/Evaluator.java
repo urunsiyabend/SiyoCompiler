@@ -197,7 +197,9 @@ public class Evaluator {
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> evaluateJavaStaticField((BoundJavaStaticFieldExpression) node);
-            case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression()); // runtime type is already correct
+            case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression());
+            case LambdaExpression -> evaluateLambdaExpression((BoundLambdaExpression) node);
+            case ClosureCallExpression -> evaluateClosureCall((BoundClosureCallExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -468,6 +470,54 @@ public class Evaluator {
             }
         }
         throw new Exception("No matching method: " + cls.getName() + "." + methodName + " with " + args.length + " args");
+    }
+
+    private Object evaluateClosureCall(BoundClosureCallExpression node) throws Exception {
+        // Evaluate the closure expression (should be a SiyoClosure)
+        Object closureObj = evaluateExpression(node.getClosure());
+        if (!(closureObj instanceof SiyoClosure closure)) {
+            throw new Exception("Cannot call non-function value");
+        }
+
+        // Evaluate arguments
+        Object[] args = new Object[node.getArguments().size()];
+        for (int i = 0; i < args.length; i++) {
+            args[i] = evaluateExpression(node.getArguments().get(i));
+        }
+
+        // Create stack frame with captured variables + parameters
+        StackFrame frame = new StackFrame(null);
+
+        // Load captured variables
+        for (var entry : closure.getCapturedVars().entrySet()) {
+            frame.getLocals().put(entry.getKey(), entry.getValue());
+        }
+
+        // Bind parameters
+        for (int i = 0; i < closure.getParameters().size(); i++) {
+            frame.getLocals().put(closure.getParameters().get(i), args[i]);
+        }
+
+        // Execute
+        _callStack.push(frame);
+        evaluateBlock(closure.getBody());
+        _callStack.pop();
+
+        Object result = _returnTriggered ? _returnValue : _lastValue;
+        _returnTriggered = false;
+        _returnValue = null;
+        return result;
+    }
+
+    private Object evaluateLambdaExpression(BoundLambdaExpression node) {
+        // Capture current variable values from the active scope
+        java.util.Map<VariableSymbol, Object> capturedVars = new java.util.HashMap<>();
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            // Look up value in call stack or globals
+            Object value = lookupVariable(var);
+            capturedVars.put(var, value);
+        }
+        return new SiyoClosure(node.getParameters(), node.getBody(), capturedVars, node.getReturnType());
     }
 
     private Object siyoArrayToJavaArray(SiyoArray arr, Class<?> componentType) {

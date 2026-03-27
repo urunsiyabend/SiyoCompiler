@@ -376,7 +376,14 @@ public class Parser {
         }
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         SyntaxToken colon = match(SyntaxType.ColonToken);
-        SyntaxToken type = match(SyntaxType.IdentifierToken);
+        // Allow 'fn' keyword as type name for closure parameters
+        SyntaxToken type;
+        if (current().getType() == SyntaxType.FnKeyword) {
+            SyntaxToken fnToken = nextToken();
+            type = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+        } else {
+            type = match(SyntaxType.IdentifierToken);
+        }
         // Handle array type syntax: int[]
         if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
             nextToken(); // consume [
@@ -478,6 +485,16 @@ public class Parser {
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, closeBrace);
+    }
+
+    private ExpressionSyntax parseLambdaExpression() {
+        SyntaxToken fnKeyword = match(SyntaxType.FnKeyword);
+        SyntaxToken openParen = match(SyntaxType.OpenParenthesisToken);
+        SeparatedSyntaxList<ParameterSyntax> parameters = parseParameterList();
+        SyntaxToken closeParen = match(SyntaxType.CloseParenthesisToken);
+        TypeClauseSyntax typeClause = parseOptionalTypeClause();
+        StatementSyntax body = parseBlockStatement();
+        return new LambdaExpressionSyntax(fnKeyword, openParen, parameters, closeParen, typeClause, body);
     }
 
     private StatementSyntax parseImplDeclaration() {
@@ -644,6 +661,10 @@ public class Parser {
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
             case OpenBracketToken -> parseArrayLiteral();
+            case FnKeyword -> {
+                // Lambda expression: fn(x: int) -> int { body }
+                yield parseLambdaExpression();
+            }
             case SelfKeyword -> {
                 // self keyword used as expression → treat as identifier
                 SyntaxToken selfToken = nextToken();
