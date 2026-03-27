@@ -77,10 +77,8 @@ public class TypeResolver {
             if (elemType != null) return elemType;
         }
         if (target instanceof BoundCallExpression callExpr) {
-            // range() returns int array
-            if (callExpr.getFunction() == BuiltinFunctions.RANGE) {
-                return Integer.class;
-            }
+            if (callExpr.getFunction() == BuiltinFunctions.RANGE) return Integer.class;
+            if (callExpr.getFunction() == BuiltinFunctions.SPLIT) return String.class;
         }
         if (target instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol structType = resolveStructType(memberExpr.getTarget());

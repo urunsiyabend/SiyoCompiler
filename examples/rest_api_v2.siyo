@@ -1,0 +1,271 @@
+// REST API v2 - Rewritten with built-in string functions
+// Run: siyoc -cp lib/sqlite-jdbc.jar run examples/rest_api_v2.siyo
+import java "org.sqlite.JDBC"
+import java "java.sql.DriverManager"
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+
+// ========== JSON ==========
+
+fn jsonStr(key: string, value: string) -> string {
+    "\"" + replace(key, "\"", "\\\"") + "\":\"" + replace(value, "\"", "\\\"") + "\""
+}
+
+fn jsonInt(key: string, value: int) -> string {
+    "\"" + key + "\":" + value
+}
+
+fn jsonObj(fields: string[]) -> string {
+    mut result = "{"
+    for i in range(0, len(fields)) {
+        if i > 0 { result += "," }
+        result += fields[i]
+    }
+    result + "}"
+}
+
+fn jsonFieldValue(json: string, field: string) -> string {
+    mut key = "\"" + field + "\":"
+    mut idx = indexOf(json, key)
+    if idx < 0 return ""
+    mut start = idx + len(key)
+
+    // Skip whitespace
+    while start < len(json) {
+        if json[start] != " " { break }
+        start += 1
+    }
+
+    // String value
+    if json[start] == "\"" {
+        start += 1
+        mut end = indexOf(substring(json, start, len(json)), "\"")
+        return substring(json, start, start + end)
+    }
+
+    // Number value
+    mut end = start
+    while end < len(json) {
+        mut ch = json[end]
+        if ch == "," { break }
+        if ch == "}" { break }
+        end += 1
+    }
+    trim(substring(json, start, end))
+}
+
+// ========== HTTP ==========
+
+fn parseMethod(line: string) -> string {
+    mut parts = split(line, " ")
+    parts[0]
+}
+
+fn parsePath(line: string) -> string {
+    mut parts = split(line, " ")
+    if len(parts) > 1 return parts[1]
+    "/"
+}
+
+fn queryParam(path: string, param: string) -> string {
+    mut qIdx = indexOf(path, "?")
+    if qIdx < 0 return ""
+    mut query = substring(path, qIdx + 1, len(path))
+    mut pairs = split(query, "&")
+    for pair in pairs {
+        if startsWith(pair, param + "=") {
+            return substring(pair, len(param) + 1, len(pair))
+        }
+    }
+    ""
+}
+
+fn pathBase(path: string) -> string {
+    mut qIdx = indexOf(path, "?")
+    if qIdx >= 0 return substring(path, 0, qIdx)
+    path
+}
+
+fn respond(status: int, statusText: string, body: string) -> string {
+    mut r = "HTTP/1.1 " + status + " " + statusText + "\r\n"
+    r += "Content-Type: application/json\r\n"
+    r += "Content-Length: " + len(body) + "\r\n"
+    r += "Access-Control-Allow-Origin: *\r\n"
+    r += "Connection: close\r\n\r\n"
+    r += body
+    r
+}
+
+// ========== Database ==========
+
+fn dbExec(sql: string) {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
+    mut stmt = conn.createStatement()
+    stmt.execute(sql)
+    stmt.close()
+    conn.close()
+}
+
+fn dbQueryInt(sql: string) -> int {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery(sql)
+    rs.next()
+    mut val = rs.getInt(1)
+    stmt.close()
+    conn.close()
+    val
+}
+
+fn dbInsert(name: string, email: string, age: int) -> int {
+    dbExec("INSERT INTO users (name, email, age) VALUES ('" + name + "','" + email + "'," + age + ")")
+    dbQueryInt("SELECT last_insert_rowid()")
+}
+
+fn dbAllUsers() -> string {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
+    mut json = "["
+    mut first = true
+    while rs.next() {
+        if !first { json += "," }
+        first = false
+        mut fields = [jsonInt("id", rs.getInt("id")),
+                      jsonStr("name", rs.getString("name")),
+                      jsonStr("email", rs.getString("email")),
+                      jsonInt("age", rs.getInt("age"))]
+        json += jsonObj(fields)
+    }
+    json += "]"
+    stmt.close()
+    conn.close()
+    json
+}
+
+fn dbSearch(name: string) -> string {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%" + name + "%'")
+    mut json = "["
+    mut first = true
+    while rs.next() {
+        if !first { json += "," }
+        first = false
+        mut fields = [jsonInt("id", rs.getInt("id")),
+                      jsonStr("name", rs.getString("name")),
+                      jsonStr("email", rs.getString("email")),
+                      jsonInt("age", rs.getInt("age"))]
+        json += jsonObj(fields)
+    }
+    json += "]"
+    stmt.close()
+    conn.close()
+    json
+}
+
+fn dbDelete(id: int) -> bool {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
+    mut stmt = conn.createStatement()
+    mut n = stmt.executeUpdate("DELETE FROM users WHERE id=" + id)
+    stmt.close()
+    conn.close()
+    n > 0
+}
+
+// ========== Router ==========
+
+fn handle(method: string, path: string, body: string) -> string {
+    mut base = pathBase(path)
+
+    if method == "POST" {
+        if base == "/users" {
+            mut name = jsonFieldValue(body, "name")
+            mut email = jsonFieldValue(body, "email")
+            mut age = parseInt(jsonFieldValue(body, "age"))
+            if name == "" return respond(400, "Bad Request", jsonObj([jsonStr("error", "name required")]))
+            mut id = dbInsert(name, email, age)
+            return respond(201, "Created", jsonObj([jsonInt("id", id), jsonStr("name", name), jsonStr("email", email), jsonInt("age", age)]))
+        }
+    }
+
+    if method == "GET" {
+        if base == "/users" {
+            mut q = queryParam(path, "name")
+            if q != "" return respond(200, "OK", dbSearch(q))
+            return respond(200, "OK", dbAllUsers())
+        }
+        if base == "/stats" {
+            mut count = dbQueryInt("SELECT COUNT(*) FROM users")
+            return respond(200, "OK", jsonObj([jsonInt("user_count", count)]))
+        }
+        if base == "/health" {
+            return respond(200, "OK", jsonObj([jsonStr("status", "ok")]))
+        }
+    }
+
+    if method == "DELETE" {
+        if startsWith(base, "/users/") {
+            mut idStr = substring(base, 7, len(base))
+            mut id = parseInt(idStr)
+            if dbDelete(id) return respond(200, "OK", jsonObj([jsonInt("deleted", id)]))
+            return respond(404, "Not Found", jsonObj([jsonStr("error", "not found")]))
+        }
+    }
+
+    respond(404, "Not Found", jsonObj([jsonStr("error", "unknown route")]))
+}
+
+// ========== Server ==========
+
+println("=== Siyo REST API v2 ===")
+dbExec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, age INTEGER)")
+
+// Seed
+dbInsert("Alice", "alice@siyo.dev", 28)
+dbInsert("Bob", "bob@siyo.dev", 32)
+dbInsert("Charlie", "charlie@siyo.dev", 25)
+println("Seeded 3 users.")
+
+mut server = ServerSocket.new(3000)
+println("http://localhost:3000")
+
+while true {
+    mut socket = server.accept()
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+    mut requestLine = reader.readLine()
+    if requestLine == null { socket.close() }
+    else {
+        mut method = parseMethod(requestLine)
+        mut path = parsePath(requestLine)
+
+        // Read headers, find Content-Length
+        mut contentLength = 0
+        mut h = reader.readLine()
+        while h != null {
+            if len(h) == 0 { break }
+            if contains(h, "Content-Length") {
+                mut idx = indexOf(h, ":") + 1
+                contentLength = parseInt(trim(substring(h, idx, len(h))))
+            }
+            h = reader.readLine()
+        }
+
+        // Read body
+        mut body = ""
+        for i in range(0, contentLength) {
+            body += chr(reader.read())
+        }
+
+        // Route and respond
+        mut response = handle(method, path, body)
+        mut out = socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        socket.close()
+
+        println(method + " " + path + " -> " + len(response) + "b")
+    }
+}

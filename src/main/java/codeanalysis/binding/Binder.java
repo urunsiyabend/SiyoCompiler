@@ -202,6 +202,10 @@ public class Binder {
             } else {
                 _typeResolver.trackArrayType(variableSymbol, arr.getElementType());
             }
+        } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoArray.class) {
+            // Track element type for built-in functions that return arrays
+            Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
+            _typeResolver.trackArrayType(variableSymbol, elemType);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
         } else if (initializer instanceof BoundJavaMethodCallExpression javaCall && javaCall.getClassInfo() != null) {
