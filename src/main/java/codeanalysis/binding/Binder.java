@@ -32,44 +32,13 @@ public class Binder {
     DiagnosticBox _diagnostics = new DiagnosticBox();
     private BoundScope _scope;
     private FunctionSymbol _currentFunction = null;
-    private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
+    final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
-    private final Map<VariableSymbol, VariableTypeInfo> _typeInfo = new HashMap<>();
-    private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
-    private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
-    private ModuleRegistry _registry;
-    private String _filePath;
-    private final Map<String, codeanalysis.JavaClassInfo> _javaClasses = new HashMap<>();
 
-    private void trackArrayType(VariableSymbol var, Class<?> elementType) {
-        _typeInfo.put(var, VariableTypeInfo.forArray(elementType));
-    }
-    private void trackArrayType(VariableSymbol var, Class<?> elementType, StructSymbol structType) {
-        _typeInfo.put(var, VariableTypeInfo.forArray(elementType, structType));
-    }
-    private void trackStructType(VariableSymbol var, StructSymbol structType) {
-        _typeInfo.put(var, VariableTypeInfo.forStruct(structType));
-    }
-    private Class<?> getArrayElementType(VariableSymbol var) {
-        VariableTypeInfo info = _typeInfo.get(var);
-        return info != null ? info.getArrayElementType() : null;
-    }
-    private StructSymbol getVarStructType(VariableSymbol var) {
-        VariableTypeInfo info = _typeInfo.get(var);
-        return info != null ? info.getStructType() : null;
-    }
-    private codeanalysis.JavaClassInfo getVarJavaClassType(VariableSymbol var) {
-        VariableTypeInfo info = _typeInfo.get(var);
-        return info != null ? info.getJavaClassType() : null;
-    }
-    private void trackJavaClassType(VariableSymbol var, codeanalysis.JavaClassInfo classInfo) {
-        _typeInfo.put(var, VariableTypeInfo.forJavaClass(classInfo));
-    }
-    private StructSymbol getArrayStructElementType(VariableSymbol var) {
-        VariableTypeInfo info = _typeInfo.get(var);
-        return info != null ? info.getArrayElementStructType() : null;
-    }
+    private final TypeResolver _typeResolver;
+    private final ModuleHandler _moduleHandler;
+
     private int _labelCounter = 0;
 
     private LabelSymbol generateLabel(String prefix) {
@@ -85,6 +54,10 @@ public class Binder {
      */
     public Binder(BoundScope parent) {
         _scope = new BoundScope(parent);
+        _typeResolver = new TypeResolver(_structTypes);
+        _moduleHandler = new ModuleHandler(_structTypes, _typeResolver, _functionBodies);
+        _moduleHandler.setDiagnostics(_diagnostics);
+        _moduleHandler.setScope(_scope);
 
         for (FunctionSymbol builtin : BuiltinFunctions.getAll()) {
             _scope.tryDeclareFunction(builtin);
@@ -98,8 +71,8 @@ public class Binder {
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax, ModuleRegistry registry, String filePath) {
         var parentScope = createParentScopes(previous);
         Binder binder = new Binder(parentScope);
-        binder._registry = registry;
-        binder._filePath = filePath;
+        binder._moduleHandler.setRegistry(registry);
+        binder._moduleHandler.setFilePath(filePath);
         BoundStatement statement = binder.bindStatement(syntax.getStatement());
         Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
         Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
@@ -108,7 +81,7 @@ public class Binder {
         return new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
     }
 
-    private static BoundScope createParentScopes(BoundGlobalScope previous) {
+    static BoundScope createParentScopes(BoundGlobalScope previous) {
         Stack<BoundGlobalScope> scopeStack = new Stack<>();
         while (previous != null) {
             scopeStack.push(previous);
@@ -136,7 +109,7 @@ public class Binder {
      * @param syntax The statement syntax to bind.
      * @return The bound statement.
      */
-    private BoundStatement bindStatement(StatementSyntax syntax) {
+    BoundStatement bindStatement(StatementSyntax syntax) {
         return switch (syntax.getType()) {
             case BlockStatement -> bindBlockStatement((BlockStatementSyntax)syntax);
             case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
@@ -149,8 +122,8 @@ public class Binder {
             case ForInStatement -> bindForInStatement((ForInStatementSyntax)syntax);
             case BreakStatement -> bindBreakStatement((BreakStatementSyntax)syntax);
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
-            case StructDeclaration -> bindStructDeclaration((StructDeclarationSyntax)syntax);
-            case EnumDeclaration -> bindEnumDeclaration((EnumDeclarationSyntax)syntax);
+            case StructDeclaration -> _moduleHandler.bindStructDeclaration((StructDeclarationSyntax)syntax);
+            case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
@@ -167,6 +140,7 @@ public class Binder {
     private BoundStatement bindBlockStatement(BlockStatementSyntax syntax) {
         ArrayList<BoundStatement> statements = new ArrayList<>();
         _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
 
         // First pass: process imports, register function/struct/enum declarations
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
@@ -175,11 +149,11 @@ public class Binder {
             } else if (statementSyntax instanceof JavaImportStatementSyntax javaImportSyntax) {
                 bindJavaImportStatement(javaImportSyntax);
             } else if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
-                registerFunctionDeclaration(funcSyntax);
+                _moduleHandler.registerFunctionDeclaration(funcSyntax);
             } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
-                registerStructDeclaration(structSyntax);
+                _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
-                registerEnumDeclaration(enumSyntax);
+                _moduleHandler.registerEnumDeclaration(enumSyntax);
             }
         }
 
@@ -190,38 +164,8 @@ public class Binder {
         }
 
         _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
         return new BoundBlockStatement(statements);
-    }
-
-    /**
-     * Registers a function declaration in the current scope without binding the body.
-     * This enables forward declarations.
-     */
-    private void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
-        String name = syntax.getIdentifier().getData();
-
-        // Only skip if already declared in current scope (not parent)
-        // This allows shadowing built-in functions
-        if (_scope.hasDeclaredFunction(name)) {
-            return;
-        }
-
-        List<ParameterSymbol> parameters = new ArrayList<>();
-        for (ParameterSyntax parameterSyntax : syntax.getParameters()) {
-            String parameterName = parameterSyntax.getIdentifier().getData();
-            String typeName = parameterSyntax.getTypeToken().getData();
-            Class<?> parameterType = lookupType(typeName);
-            if (parameterType == null) parameterType = Integer.class;
-            parameters.add(new ParameterSymbol(parameterName, parameterType));
-        }
-
-        Class<?> returnType = null;
-        if (syntax.getTypeClause() != null) {
-            returnType = lookupType(syntax.getTypeClause().getIdentifier().getData());
-        }
-
-        FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
-        _scope.tryDeclareFunction(function);
     }
 
     /**
@@ -230,23 +174,6 @@ public class Binder {
      * @param syntax The expression statement syntax to bind.
      * @return The bound expression statement.
      */
-    private void registerStructDeclaration(StructDeclarationSyntax syntax) {
-        String name = syntax.getIdentifier().getData();
-        if (_structTypes.containsKey(name)) return;
-
-        java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
-        java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
-        for (ParameterSyntax field : syntax.getFields()) {
-            String fieldName = field.getIdentifier().getData();
-            String typeName = field.getTypeToken().getData();
-            Class<?> fieldType = lookupType(typeName);
-            if (fieldType == null) fieldType = Integer.class;
-            fields.put(fieldName, fieldType);
-            fieldTypeNames.put(fieldName, typeName);
-        }
-        _structTypes.put(name, new StructSymbol(name, fields, fieldTypeNames));
-    }
-
     private BoundStatement bindExpressionStatement(ExpressionStatementSyntax syntax) {
         BoundExpression expression = bindExpression(syntax.getExpression());
         return new BoundExpressionStatement(expression);
@@ -271,22 +198,22 @@ public class Binder {
         // Track element/struct types for type resolution
         if (initializer instanceof BoundArrayLiteralExpression arr) {
             if (!arr.getElements().isEmpty() && arr.getElements().get(0) instanceof BoundStructLiteralExpression structLit) {
-                trackArrayType(variableSymbol, arr.getElementType(), structLit.getStructType());
+                _typeResolver.trackArrayType(variableSymbol, arr.getElementType(), structLit.getStructType());
             } else {
-                trackArrayType(variableSymbol, arr.getElementType());
+                _typeResolver.trackArrayType(variableSymbol, arr.getElementType());
             }
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
-            trackStructType(variableSymbol, structLit.getStructType());
+            _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
         } else if (initializer instanceof BoundJavaMethodCallExpression javaCall && javaCall.getClassInfo() != null) {
-            // Track Java class for constructor results: mut file = File.new("x") → file is File
+            // Track Java class for constructor results: mut file = File.new("x") -> file is File
             if (javaCall.isConstructor()) {
-                trackJavaClassType(variableSymbol, javaCall.getClassInfo());
+                _typeResolver.trackJavaClassType(variableSymbol, javaCall.getClassInfo());
             } else if (javaCall.getResolvedSignature() != null) {
-                // Track return type's Java class: mut path = file.getAbsolutePath() → path is String (or Java class)
+                // Track return type's Java class: mut path = file.getAbsolutePath() -> path is String (or Java class)
                 String returnDesc = javaCall.getResolvedSignature().getReturnDescriptor();
-                codeanalysis.JavaClassInfo returnClassInfo = resolveJavaClassFromDescriptor(returnDesc);
+                codeanalysis.JavaClassInfo returnClassInfo = _typeResolver.resolveJavaClassFromDescriptor(returnDesc);
                 if (returnClassInfo != null) {
-                    trackJavaClassType(variableSymbol, returnClassInfo);
+                    _typeResolver.trackJavaClassType(variableSymbol, returnClassInfo);
                 }
             }
         }
@@ -531,7 +458,7 @@ public class Binder {
         for (ParameterSyntax parameterSyntax : syntax.getParameters()) {
             String parameterName = parameterSyntax.getIdentifier().getData();
             String typeName = parameterSyntax.getTypeToken().getData();
-            Class<?> parameterType = lookupType(typeName);
+            Class<?> parameterType = _typeResolver.lookupType(typeName);
 
             if (parameterType == null) {
                 _diagnostics.reportUndefinedType(parameterSyntax.getTypeToken().getSpan(), typeName);
@@ -550,7 +477,7 @@ public class Binder {
         Class<?> returnType = null;
         if (syntax.getTypeClause() != null) {
             String returnTypeName = syntax.getTypeClause().getIdentifier().getData();
-            returnType = lookupType(returnTypeName);
+            returnType = _typeResolver.lookupType(returnTypeName);
             if (returnType == null) {
                 _diagnostics.reportUndefinedType(syntax.getTypeClause().getIdentifier().getSpan(), returnTypeName);
             }
@@ -569,6 +496,7 @@ public class Binder {
 
         // Bind the function body in a new scope with parameters
         _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
         FunctionSymbol previousFunction = _currentFunction;
         _currentFunction = function;
 
@@ -579,15 +507,15 @@ public class Binder {
             // Track array element types from parameter type names
             if (paramIdx < syntax.getParameters().getCount()) {
                 String typeName = syntax.getParameters().get(paramIdx).getTypeToken().getData();
-                Class<?> elemType = lookupElementType(typeName);
+                Class<?> elemType = _typeResolver.lookupElementType(typeName);
                 if (elemType != null) {
-                    trackArrayType(parameter, elemType);
+                    _typeResolver.trackArrayType(parameter, elemType);
                 }
                 // Track struct types from parameter type names
                 String baseTypeName = typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName;
                 StructSymbol structSym = _structTypes.get(baseTypeName);
                 if (structSym != null && parameter.getType() == SiyoStruct.class) {
-                    trackStructType(parameter, structSym);
+                    _typeResolver.trackStructType(parameter, structSym);
                 }
             }
             paramIdx++;
@@ -606,6 +534,7 @@ public class Binder {
 
         _currentFunction = previousFunction;
         _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
 
         // Return a placeholder statement (function declarations don't produce values)
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
@@ -685,12 +614,6 @@ public class Binder {
         return new BoundCallExpression(function, boundArguments);
     }
 
-    /**
-     * Looks up a type by name.
-     *
-     * @param name The type name.
-     * @return The Class representing the type, or null if not found.
-     */
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
         BoundExpression collection = bindExpression(syntax.getCollection());
         String itemName = syntax.getItemName().getData();
@@ -699,6 +622,7 @@ public class Binder {
         // Create index and collection variables with unique names
         VariableSymbol indexVar = new VariableSymbol("_idx" + uid, false, Integer.class);
         _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
         _scope.tryDeclare(indexVar);
 
         BoundVariableDeclaration initializer = new BoundVariableDeclaration(indexVar, new BoundLiteralExpression(0));
@@ -725,19 +649,20 @@ public class Binder {
 
         // Body: { mut item = _col[_i]; original body }
         // Resolve element type from the original collection expression
-        Class<?> elementType = resolveArrayElementType(collection);
-        StructSymbol structType = resolveStructTypeFromCollection(collection);
+        Class<?> elementType = _typeResolver.resolveArrayElementType(collection);
+        StructSymbol structType = _typeResolver.resolveStructTypeFromCollection(collection);
         if (structType != null) {
-            trackArrayType(collectionVar, elementType, structType);
+            _typeResolver.trackArrayType(collectionVar, elementType, structType);
         } else {
-            trackArrayType(collectionVar, elementType);
+            _typeResolver.trackArrayType(collectionVar, elementType);
         }
         VariableSymbol itemVar = new VariableSymbol(itemName, false, elementType);
         _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
         _scope.tryDeclare(itemVar);
         // Track struct type if element is a struct
         if (elementType == SiyoStruct.class && structType != null) {
-            trackStructType(itemVar, structType);
+            _typeResolver.trackStructType(itemVar, structType);
         }
 
         BoundIndexExpression indexAccess = new BoundIndexExpression(
@@ -755,6 +680,7 @@ public class Binder {
 
         _loopStack.pop();
         _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
 
         ArrayList<BoundStatement> bodyStatements = new ArrayList<>();
         bodyStatements.add(itemDecl);
@@ -772,6 +698,7 @@ public class Binder {
         outerStatements.add(forStmt);
 
         _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
         return new BoundBlockStatement(outerStatements);
     }
 
@@ -822,7 +749,7 @@ public class Binder {
 
         Class<?> resultType;
         if (target.getClassType() == SiyoArray.class) {
-            resultType = resolveArrayElementType(target);
+            resultType = _typeResolver.resolveArrayElementType(target);
         } else if (target.getClassType() == String.class) {
             resultType = String.class;
         } else {
@@ -833,38 +760,11 @@ public class Binder {
         return new BoundIndexExpression(target, index, resultType);
     }
 
-    private Class<?> resolveArrayElementType(BoundExpression target) {
-        if (target instanceof BoundArrayLiteralExpression arr) {
-            return arr.getElementType();
-        }
-        if (target instanceof BoundVariableExpression varExpr) {
-            Class<?> elemType = getArrayElementType(varExpr.getVariable());
-            if (elemType != null) return elemType;
-        }
-        if (target instanceof BoundCallExpression callExpr) {
-            // range() returns int array
-            if (callExpr.getFunction() == BuiltinFunctions.RANGE) {
-                return Integer.class;
-            }
-        }
-        if (target instanceof BoundMemberAccessExpression memberExpr) {
-            StructSymbol structType = resolveStructType(memberExpr.getTarget());
-            if (structType != null) {
-                String fieldTypeName = structType.getFieldTypeName(memberExpr.getMemberName());
-                if (fieldTypeName != null) {
-                    Class<?> elemType = lookupElementType(fieldTypeName);
-                    if (elemType != null) return elemType;
-                }
-            }
-        }
-        return Object.class;
-    }
-
     private BoundExpression bindMemberAccessExpression(MemberAccessExpressionSyntax syntax) {
         // Check for enum access: EnumName.MemberName
         if (syntax.getTarget() instanceof NameExpressionSyntax nameExpr) {
             String typeName = nameExpr.getIdentifierToken().getData();
-            Map<String, Integer> enumMembers = _enumTypes.get(typeName);
+            Map<String, Integer> enumMembers = _moduleHandler.getEnumTypes().get(typeName);
             if (enumMembers != null) {
                 String memberName = syntax.getMember().getData();
                 Integer value = enumMembers.get(memberName);
@@ -886,23 +786,12 @@ public class Binder {
 
         // Resolve struct type from variable to get field type
         Class<?> memberType = Object.class;
-        StructSymbol structType = resolveStructType(target);
+        StructSymbol structType = _typeResolver.resolveStructType(target);
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
         }
 
         return new BoundMemberAccessExpression(target, memberName, memberType);
-    }
-
-    private StructSymbol resolveStructType(BoundExpression target) {
-        if (target instanceof BoundVariableExpression varExpr) {
-            StructSymbol type = getVarStructType(varExpr.getVariable());
-            if (type != null) return type;
-        }
-        if (target instanceof BoundStructLiteralExpression structLit) {
-            return structLit.getStructType();
-        }
-        return null;
     }
 
     private BoundExpression bindCompoundAssignment(CompoundAssignmentExpressionSyntax syntax) {
@@ -937,143 +826,21 @@ public class Binder {
         for (SyntaxNode node : syntax.getFieldAssignments()) {
             FieldAssignmentSyntax field = (FieldAssignmentSyntax) node;
             String fieldName = field.getFieldName().getData();
-            BoundExpression value = bindExpression(field.getValue());
-            fieldValues.put(fieldName, value);
+            BoundExpression fieldValue = bindExpression(field.getValue());
+            fieldValues.put(fieldName, fieldValue);
         }
 
         return new BoundStructLiteralExpression(structType, fieldValues);
     }
 
-    private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
-        String fullClassName = (String) syntax.getClassName().getValue();
-        if (fullClassName == null) return new BoundExpressionStatement(new BoundLiteralExpression(0));
-
-        String simpleName = fullClassName.contains(".")
-                ? fullClassName.substring(fullClassName.lastIndexOf('.') + 1)
-                : fullClassName;
-
-        // Load class metadata via ASM ClassReader (no reflection!)
-        codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(fullClassName);
-        if (metadata == null) {
-            _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), fullClassName);
-            return new BoundExpressionStatement(new BoundLiteralExpression(0));
-        }
-        _javaClasses.put(simpleName, new codeanalysis.JavaClassInfo(simpleName, fullClassName, metadata));
-
-        return new BoundExpressionStatement(new BoundLiteralExpression(0));
-    }
-
-    public Map<String, codeanalysis.JavaClassInfo> getJavaClasses() { return _javaClasses; }
-
     private BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
-        String moduleName = (String) syntax.getModuleName().getValue();
-        if (moduleName == null) {
-            moduleName = syntax.getModuleName().getData();
-            // Strip quotes if present
-            if (moduleName != null && moduleName.startsWith("\"")) {
-                moduleName = moduleName.substring(1, moduleName.length() - 1);
-            }
-        }
-
-        if (moduleName == null || _importedModules.contains(moduleName)) {
-            return new BoundExpressionStatement(new BoundLiteralExpression(0));
-        }
-        _importedModules.add(moduleName);
-
-        // Resolve file path
-        String moduleFilePath = resolveModulePath(moduleName);
-        if (moduleFilePath == null) {
-            _diagnostics.reportModuleNotFound(syntax.getModuleName().getSpan(), moduleName);
-            return new BoundExpressionStatement(new BoundLiteralExpression(0));
-        }
-
-        // Circular import check
-        if (_registry != null && _registry.isInProgress(moduleFilePath)) {
-            _diagnostics.reportCircularImport(syntax.getModuleName().getSpan(), moduleName);
-            return new BoundExpressionStatement(new BoundLiteralExpression(0));
-        }
-
-        // Get or compile the module
-        ModuleSymbol module;
-        if (_registry != null && _registry.isCompiled(moduleFilePath)) {
-            module = _registry.getModule(moduleFilePath);
-        } else {
-            module = compileModule(moduleName, moduleFilePath);
-            if (module == null) {
-                return new BoundExpressionStatement(new BoundLiteralExpression(0));
-            }
-        }
-
-        // Register imported functions with qualified name: "moduleName.funcName"
-        // This prevents all name conflicts (with builtins, locals, other modules)
-        String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
-        for (FunctionSymbol func : module.getFunctions()) {
-            if (BuiltinFunctions.isBuiltin(func)) continue;
-            String qualifiedName = moduleName + "." + func.getName();
-            FunctionSymbol importedFunc = new FunctionSymbol(
-                    qualifiedName, func.getParameters(), func.getReturnType(), className);
-            _scope.tryDeclareFunction(importedFunc);
-            BoundBlockStatement body = module.getFunctionBodies().get(func);
-            if (body != null) {
-                _functionBodies.put(importedFunc, body);
-            }
-        }
-
-        // Register imported structs
-        for (var entry : module.getStructs().entrySet()) {
-            _structTypes.put(entry.getKey(), entry.getValue());
-        }
-
-        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        BoundStatement result = _moduleHandler.bindImportStatement(syntax);
+        // Sync scope back in case module handler changed it
+        return result;
     }
 
-    private String resolveModulePath(String moduleName) {
-        String basePath = _filePath != null
-                ? java.nio.file.Paths.get(_filePath).getParent().toString()
-                : System.getProperty("user.dir");
-        java.nio.file.Path candidate = java.nio.file.Paths.get(basePath, moduleName + ".siyo");
-        if (java.nio.file.Files.exists(candidate)) {
-            return candidate.toAbsolutePath().toString();
-        }
-        return null;
-    }
-
-    private ModuleSymbol compileModule(String moduleName, String filePath) {
-        try {
-            if (_registry != null) _registry.markInProgress(filePath);
-
-            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
-            codeanalysis.syntax.SyntaxTree tree = codeanalysis.syntax.SyntaxTree.parse(source);
-
-            // Create a dedicated binder for the module so we can access its struct types
-            var parentScope = createParentScopes(null);
-            Binder moduleBinder = new Binder(parentScope);
-            moduleBinder._registry = _registry;
-            moduleBinder._filePath = filePath;
-            BoundStatement statement = moduleBinder.bindStatement(tree.getRoot().getStatement());
-
-            if (moduleBinder._diagnostics.size() > 0) {
-                _diagnostics.addAll(moduleBinder._diagnostics);
-                if (_registry != null) _registry.markComplete(filePath);
-                return null;
-            }
-
-            String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
-
-            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>(moduleBinder._functionBodies);
-            List<FunctionSymbol> functions = new ArrayList<>(bodies.keySet());
-            Map<String, StructSymbol> structs = new HashMap<>(moduleBinder._structTypes);
-
-            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies, structs);
-            if (_registry != null) {
-                _registry.register(filePath, module);
-                _registry.markComplete(filePath);
-            }
-            return module;
-        } catch (Exception e) {
-            if (_registry != null) _registry.markComplete(filePath);
-            return null;
-        }
+    private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
+        return _moduleHandler.bindJavaImportStatement(syntax);
     }
 
     private BoundExpression bindMemberCallExpression(MemberCallExpressionSyntax syntax) {
@@ -1113,7 +880,7 @@ public class Binder {
             }
 
             // Check if target is a Java class (static method or constructor)
-            codeanalysis.JavaClassInfo javaClass = _javaClasses.get(targetName);
+            codeanalysis.JavaClassInfo javaClass = _typeResolver.getJavaClasses().get(targetName);
             if (javaClass != null) {
                 List<BoundExpression> boundArgs = new ArrayList<>();
                 for (ExpressionSyntax argSyntax : syntax.getArguments()) {
@@ -1146,7 +913,7 @@ public class Binder {
         }
 
         // Resolve Java class info from the target expression
-        codeanalysis.JavaClassInfo targetClassInfo = resolveJavaClassInfo(target);
+        codeanalysis.JavaClassInfo targetClassInfo = _typeResolver.resolveJavaClassInfo(target);
         codeanalysis.JavaMethodSignature resolved = null;
         if (targetClassInfo != null) {
             resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(), getArgTypes(boundArgs));
@@ -1165,147 +932,35 @@ public class Binder {
         String errorName = syntax.getErrorVariable().getData();
         VariableSymbol errorVar = new VariableSymbol(errorName, true, String.class);
         _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
         _scope.tryDeclare(errorVar);
         BoundStatement catchBody = bindStatement(syntax.getCatchBody());
         _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
         return new BoundTryCatchStatement(tryBody, errorVar, catchBody);
     }
 
-    private void registerEnumDeclaration(EnumDeclarationSyntax syntax) {
-        String name = syntax.getIdentifier().getData();
-        if (_enumTypes.containsKey(name)) return;
-        Map<String, Integer> members = new HashMap<>();
-        int ordinal = 0;
-        for (SyntaxToken member : syntax.getMembers()) {
-            members.put(member.getData(), ordinal++);
-        }
-        _enumTypes.put(name, members);
-    }
-
-    private BoundStatement bindEnumDeclaration(EnumDeclarationSyntax syntax) {
-        String name = syntax.getIdentifier().getData();
-        if (!_enumTypes.containsKey(name)) {
-            registerEnumDeclaration(syntax);
-        }
-        return new BoundExpressionStatement(new BoundLiteralExpression(0));
-    }
-
-    private BoundStatement bindStructDeclaration(StructDeclarationSyntax syntax) {
-        // Struct already registered in first pass, just validate
-        String name = syntax.getIdentifier().getData();
-        if (!_structTypes.containsKey(name)) {
-            registerStructDeclaration(syntax);
-        }
-        return new BoundExpressionStatement(new BoundLiteralExpression(0));
-    }
-
-    public Map<String, StructSymbol> getStructTypes() {
-        return _structTypes;
-    }
-
-    private Class<?> lookupType(String name) {
-        if (name.endsWith("[]")) {
-            return SiyoArray.class;
-        }
-        return switch (name) {
-            case "int" -> Integer.class;
-            case "bool" -> Boolean.class;
-            case "float" -> Double.class;
-            case "string" -> String.class;
-            default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
-        };
-    }
-
-    private StructSymbol resolveStructTypeFromCollection(BoundExpression collection) {
-        if (collection instanceof BoundArrayLiteralExpression arr) {
-            if (!arr.getElements().isEmpty() && arr.getElements().get(0) instanceof BoundStructLiteralExpression structLit) {
-                return structLit.getStructType();
-            }
-        }
-        if (collection instanceof BoundVariableExpression varExpr) {
-            StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
-            if (structType != null) return structType;
-        }
-        return null;
-    }
-
-    /**
-     * Resolve a Java class from a JVM type descriptor.
-     * "Ljava/io/File;" → load File metadata, return JavaClassInfo.
-     * Primitive types and String return null (handled by Siyo's type system).
-     */
-    /**
-     * Resolve Java class info from an expression.
-     * Traces through variables, constructor results, and method return types.
-     */
     private Class<?>[] getArgTypes(List<BoundExpression> args) {
         Class<?>[] types = new Class<?>[args.size()];
         for (int i = 0; i < args.size(); i++) types[i] = args.get(i).getClassType();
         return types;
     }
 
-    private codeanalysis.JavaClassInfo resolveJavaClassInfo(BoundExpression expr) {
-        if (expr instanceof BoundVariableExpression varExpr) {
-            codeanalysis.JavaClassInfo info = getVarJavaClassType(varExpr.getVariable());
-            if (info != null) return info;
-            // Auto-resolve Java class for native Siyo types
-            return resolveJavaClassForSiyoType(varExpr.getVariable().getType());
-        }
-        if (expr instanceof BoundJavaMethodCallExpression javaCall) {
-            if (javaCall.isConstructor() && javaCall.getClassInfo() != null) {
-                return javaCall.getClassInfo();
-            }
-            if (javaCall.getResolvedSignature() != null) {
-                return resolveJavaClassFromDescriptor(javaCall.getResolvedSignature().getReturnDescriptor());
-            }
-        }
-        // For literal expressions and other typed expressions
-        return resolveJavaClassForSiyoType(expr.getClassType());
+    // --- Public accessors ---
+
+    public Map<String, StructSymbol> getStructTypes() {
+        return _structTypes;
     }
 
-    private codeanalysis.JavaClassInfo resolveJavaClassForSiyoType(Class<?> type) {
-        if (type == String.class) {
-            return getOrLoadJavaClass("String", "java.lang.String");
-        }
-        return null;
+    public Map<String, codeanalysis.JavaClassInfo> getJavaClasses() {
+        return _typeResolver.getJavaClasses();
     }
 
-    private codeanalysis.JavaClassInfo getOrLoadJavaClass(String simpleName, String fullName) {
-        codeanalysis.JavaClassInfo existing = _javaClasses.get(simpleName);
-        if (existing != null) return existing;
-        codeanalysis.JavaClassMetadata meta = codeanalysis.JavaClassMetadata.load(fullName);
-        if (meta != null) {
-            codeanalysis.JavaClassInfo info = new codeanalysis.JavaClassInfo(simpleName, fullName, meta);
-            _javaClasses.put(simpleName, info);
-            return info;
-        }
-        return null;
+    public ModuleHandler getModuleHandler() {
+        return _moduleHandler;
     }
 
-    private codeanalysis.JavaClassInfo resolveJavaClassFromDescriptor(String descriptor) {
-        if (descriptor == null || descriptor.length() <= 1) return null; // primitives/void
-        if (descriptor.equals("Ljava/lang/String;")) return null; // String is native Siyo type
-        if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
-            String fullName = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
-            // Check if already imported
-            String simpleName = fullName.contains(".") ? fullName.substring(fullName.lastIndexOf('.') + 1) : fullName;
-            codeanalysis.JavaClassInfo existing = _javaClasses.get(simpleName);
-            if (existing != null) return existing;
-            // Auto-load metadata for return types
-            codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(fullName);
-            if (metadata != null) {
-                codeanalysis.JavaClassInfo info = new codeanalysis.JavaClassInfo(simpleName, fullName, metadata);
-                _javaClasses.put(simpleName, info);
-                return info;
-            }
-        }
-        return null;
-    }
-
-    private Class<?> lookupElementType(String typeName) {
-        if (typeName.endsWith("[]")) {
-            return lookupType(typeName.substring(0, typeName.length() - 2));
-        }
-        return null;
+    public TypeResolver getTypeResolver() {
+        return _typeResolver;
     }
 }
