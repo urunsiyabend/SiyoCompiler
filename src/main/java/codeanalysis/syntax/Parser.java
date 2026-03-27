@@ -315,7 +315,14 @@ public class Parser {
      */
     private StatementSyntax parseFunctionDeclaration() {
         SyntaxToken fnKeyword = match(SyntaxType.FnKeyword);
-        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken identifier;
+        // Allow 'new' as function name in impl blocks
+        if (current().getType() == SyntaxType.NewKeyword) {
+            SyntaxToken newToken = nextToken();
+            identifier = new SyntaxToken(SyntaxType.IdentifierToken, newToken.getPosition(), "new", null);
+        } else {
+            identifier = match(SyntaxType.IdentifierToken);
+        }
         SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
         SeparatedSyntaxList<ParameterSyntax> parameters = parseParameterList();
         SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);

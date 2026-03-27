@@ -31,6 +31,14 @@ public class SiyoArray {
         return _elementType;
     }
 
+    public void add(Object value) {
+        _elements.add(value);
+    }
+
+    public Object remove(int index) {
+        return _elements.remove(index);
+    }
+
     public List<Object> getElements() {
         return _elements;
     }

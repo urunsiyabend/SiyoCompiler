@@ -101,6 +101,19 @@ public class TypeResolver {
         if (target instanceof BoundStructLiteralExpression structLit) {
             return structLit.getStructType();
         }
+        // Index expression on struct array: todos[i] → resolve element struct type
+        if (target instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
+            return resolveStructTypeFromCollection(indexExpr.getTarget());
+        }
+        // Call expression returning struct: User.create()
+        if (target instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
+            String funcName = callExpr.getFunction().getName();
+            if (funcName.contains(".")) {
+                String structName = funcName.substring(0, funcName.indexOf('.'));
+                StructSymbol st = _structTypes.get(structName);
+                if (st != null) return st;
+            }
+        }
         return null;
     }
 

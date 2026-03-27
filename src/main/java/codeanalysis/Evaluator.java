@@ -603,6 +603,15 @@ public class Evaluator {
         if (function == BuiltinFunctions.TRIM) {
             return ((String) arguments[0]).trim();
         }
+        if (function == BuiltinFunctions.REMOVE_AT) {
+            SiyoArray arr = (SiyoArray) arguments[0];
+            arr.remove((int) arguments[1]);
+            return null;
+        }
+        if (function == BuiltinFunctions.POP) {
+            SiyoArray arr = (SiyoArray) arguments[0];
+            return arr.remove(arr.length() - 1);
+        }
         if (function == BuiltinFunctions.SPLIT) {
             String[] parts = ((String) arguments[0]).split(java.util.regex.Pattern.quote((String) arguments[1]), -1);
             SiyoArray arr = new SiyoArray(java.util.Arrays.asList(parts), String.class);

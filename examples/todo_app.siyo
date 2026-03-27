@@ -12,7 +12,7 @@ struct Todo {
 }
 
 impl Todo {
-    fn create(id: int, title: string) -> Todo {
+    fn new(id: int, title: string) -> Todo {
         Todo { id: id, title: title, done: false }
     }
 
@@ -39,12 +39,12 @@ struct TodoList {
 }
 
 impl TodoList {
-    fn create(filename: string) -> TodoList {
-        TodoList { todos: [Todo.create(0, "")], count: 0, nextId: 1, filename: filename }
+    fn new(filename: string) -> TodoList {
+        TodoList { todos: [Todo.new(0, "placeholder")], count: 0, nextId: 1, filename: filename }
     }
 
     fn add(self, title: string) {
-        mut todo = Todo.create(self.nextId, title)
+        mut todo = Todo.new(self.nextId, title)
         if self.count == 0 {
             self.todos[0] = todo
         } else {
@@ -89,9 +89,7 @@ impl TodoList {
             }
         }
         if idx >= 0 {
-            for j in range(idx, self.count - 1) {
-                self.todos[j] = self.todos[j + 1]
-            }
+            removeAt(self.todos, idx)
             self.count -= 1
         } else {
             println("Todo #" + id + " not found")
@@ -152,7 +150,7 @@ impl TodoList {
 }
 
 // ========== Main ==========
-mut app = TodoList.create("todos.dat")
+mut app = TodoList.new("todos.dat")
 app.load()
 
 println("=== Todo App ===")

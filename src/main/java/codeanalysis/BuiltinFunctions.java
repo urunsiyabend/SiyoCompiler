@@ -132,6 +132,18 @@ public class BuiltinFunctions {
             String.class
     );
 
+    public static final FunctionSymbol REMOVE_AT = new FunctionSymbol(
+            "removeAt",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("index", Integer.class)),
+            null
+    );
+
+    public static final FunctionSymbol POP = new FunctionSymbol(
+            "pop",
+            List.of(new ParameterSymbol("arr", SiyoArray.class)),
+            Object.class
+    );
+
     public static final FunctionSymbol SPLIT = new FunctionSymbol(
             "split",
             List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("delimiter", String.class)),
@@ -140,7 +152,7 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT,
-                PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS, INPUT, ERROR,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, SUBSTRING, CONTAINS, INPUT, ERROR,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT);
     }
 
