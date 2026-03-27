@@ -7,7 +7,6 @@ import java "java.sql.ResultSet"
 import java "java.net.ServerSocket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
-import java "java.lang.Character"
 
 // ========== JSON Helpers ==========
 
@@ -360,7 +359,7 @@ while running {
     if contentLength > 0 {
         for i in range(0, contentLength) {
             mut charCode = reader.read()
-            body += Character.toString(charCode)
+            body += chr(charCode)
         }
     }
 

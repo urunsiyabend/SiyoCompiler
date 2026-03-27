@@ -90,15 +90,61 @@ public class BuiltinFunctions {
             null
     );
 
+    public static final FunctionSymbol CHR = new FunctionSymbol(
+            "chr",
+            List.of(new ParameterSymbol("code", Integer.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol ORD = new FunctionSymbol(
+            "ord",
+            List.of(new ParameterSymbol("ch", String.class)),
+            Integer.class
+    );
+
+    public static final FunctionSymbol INDEX_OF = new FunctionSymbol(
+            "indexOf",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("sub", String.class)),
+            Integer.class
+    );
+
+    public static final FunctionSymbol STARTS_WITH = new FunctionSymbol(
+            "startsWith",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("prefix", String.class)),
+            Boolean.class
+    );
+
+    public static final FunctionSymbol ENDS_WITH = new FunctionSymbol(
+            "endsWith",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("suffix", String.class)),
+            Boolean.class
+    );
+
+    public static final FunctionSymbol REPLACE = new FunctionSymbol(
+            "replace",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("old", String.class), new ParameterSymbol("new_", String.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol TRIM = new FunctionSymbol(
+            "trim",
+            List.of(new ParameterSymbol("s", String.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol SPLIT = new FunctionSymbol(
+            "split",
+            List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("delimiter", String.class)),
+            SiyoArray.class
+    );
+
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT, PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS, INPUT, ERROR);
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT,
+                PRINT, PRINTLN, RANGE, PUSH, SUBSTRING, CONTAINS, INPUT, ERROR,
+                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
-        return function == LEN || function == TO_STRING || function == PARSE_INT
-                || function == PARSE_FLOAT || function == TO_INT || function == TO_FLOAT
-                || function == PRINT || function == PRINTLN || function == RANGE
-                || function == PUSH || function == SUBSTRING || function == CONTAINS
-                || function == RANGE || function == INPUT || function == ERROR;
+        return getAll().contains(function);
     }
 }

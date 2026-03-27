@@ -580,6 +580,33 @@ public class Evaluator {
             System.out.println(arguments[0]);
             return null;
         }
+        if (function == BuiltinFunctions.CHR) {
+            return Character.toString((int) arguments[0]);
+        }
+        if (function == BuiltinFunctions.ORD) {
+            String s = (String) arguments[0];
+            return s.isEmpty() ? 0 : (int) s.charAt(0);
+        }
+        if (function == BuiltinFunctions.INDEX_OF) {
+            return ((String) arguments[0]).indexOf((String) arguments[1]);
+        }
+        if (function == BuiltinFunctions.STARTS_WITH) {
+            return ((String) arguments[0]).startsWith((String) arguments[1]);
+        }
+        if (function == BuiltinFunctions.ENDS_WITH) {
+            return ((String) arguments[0]).endsWith((String) arguments[1]);
+        }
+        if (function == BuiltinFunctions.REPLACE) {
+            return ((String) arguments[0]).replace((String) arguments[1], (String) arguments[2]);
+        }
+        if (function == BuiltinFunctions.TRIM) {
+            return ((String) arguments[0]).trim();
+        }
+        if (function == BuiltinFunctions.SPLIT) {
+            String[] parts = ((String) arguments[0]).split(java.util.regex.Pattern.quote((String) arguments[1]), -1);
+            SiyoArray arr = new SiyoArray(java.util.Arrays.asList(parts), String.class);
+            return arr;
+        }
         throw new Exception("Unknown built-in function: " + function.getName());
     }
 }

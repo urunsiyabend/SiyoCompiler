@@ -809,6 +809,65 @@ public class Emitter {
             return;
         }
 
+        if (function == BuiltinFunctions.CHR) {
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Character", "toString", "(I)Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.ORD) {
+            emitExpression(node.getArguments().get(0));
+            _mv.visitInsn(ICONST_0);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "charAt", "(I)C", false);
+            return;
+        }
+        if (function == BuiltinFunctions.INDEX_OF) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "indexOf", "(Ljava/lang/String;)I", false);
+            return;
+        }
+        if (function == BuiltinFunctions.STARTS_WITH) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "startsWith", "(Ljava/lang/String;)Z", false);
+            return;
+        }
+        if (function == BuiltinFunctions.ENDS_WITH) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "endsWith", "(Ljava/lang/String;)Z", false);
+            return;
+        }
+        if (function == BuiltinFunctions.REPLACE) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            emitExpression(node.getArguments().get(2));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "replace", "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TRIM) {
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.SPLIT) {
+            emitExpression(node.getArguments().get(0));
+            emitExpression(node.getArguments().get(1));
+            // Pattern.quote the delimiter, then split
+            _mv.visitMethodInsn(INVOKESTATIC, "java/util/regex/Pattern", "quote", "(Ljava/lang/String;)Ljava/lang/String;", false);
+            _mv.visitInsn(ICONST_M1);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "split", "(Ljava/lang/String;I)[Ljava/lang/String;", false);
+            // Convert String[] to SiyoArray
+            _mv.visitMethodInsn(INVOKESTATIC, "java/util/Arrays", "asList", "([Ljava/lang/Object;)Ljava/util/List;", false);
+            _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
+            _mv.visitTypeInsn(NEW, "codeanalysis/SiyoArray");
+            _mv.visitInsn(DUP_X2);
+            _mv.visitInsn(DUP_X2);
+            _mv.visitInsn(POP);
+            _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
+            return;
+        }
+
         // User-defined functions: push args and invoke static method
         for (BoundExpression arg : node.getArguments()) {
             emitExpression(arg);

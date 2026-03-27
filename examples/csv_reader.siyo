@@ -4,26 +4,6 @@ import java "java.io.BufferedReader"
 import java "java.io.FileReader"
 import java "java.io.File"
 
-fn split(text: string, delimiter: string) -> string[] {
-    mut words = [""]
-    mut wordCount = 0
-    mut current = ""
-    for i in range(0, len(text)) {
-        mut ch = text[i]
-        if ch == delimiter {
-            if wordCount == 0 { words[0] = current }
-            else { push(words, current) }
-            wordCount = wordCount + 1
-            current = ""
-        } else {
-            current += ch
-        }
-    }
-    if wordCount == 0 { words[0] = current }
-    else { push(words, current) }
-    words
-}
-
 // Create test CSV file
 mut writer = FileWriter.new("test_data.csv")
 writer.write("Name,Age,City,Score\n")
