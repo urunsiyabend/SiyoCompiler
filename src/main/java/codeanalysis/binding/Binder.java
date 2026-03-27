@@ -468,7 +468,7 @@ public class Binder {
             if (!seenParameterNames.add(parameterName)) {
                 _diagnostics.reportDuplicateParameter(parameterSyntax.getIdentifier().getSpan(), parameterName);
             } else {
-                ParameterSymbol parameter = new ParameterSymbol(parameterName, parameterType);
+                ParameterSymbol parameter = new ParameterSymbol(parameterName, parameterSyntax.isMutable(), parameterType);
                 parameters.add(parameter);
             }
         }

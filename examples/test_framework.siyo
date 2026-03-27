@@ -43,15 +43,13 @@ fn isPrime(n: int) -> bool {
     true
 }
 
-fn gcd(a: int, b: int) -> int {
-    mut x = a
-    mut y = b
-    while y != 0 {
-        mut temp = y
-        y = x % y
-        x = temp
+fn gcd(mut a: int, mut b: int) -> int {
+    while b != 0 {
+        mut temp = b
+        b = a % b
+        a = temp
     }
-    x
+    a
 }
 
 fn power(base: int, exp: int) -> int {

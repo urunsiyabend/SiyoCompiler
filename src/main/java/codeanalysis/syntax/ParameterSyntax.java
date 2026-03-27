@@ -13,22 +13,26 @@ import java.util.NoSuchElementException;
  * @version 1.0
  */
 public class ParameterSyntax extends SyntaxNode {
+    private final SyntaxToken _mutKeyword; // null if not mutable
     private final SyntaxToken _identifier;
     private final SyntaxToken _colonToken;
     private final SyntaxToken _type;
 
-    /**
-     * Creates a new instance of the ParameterSyntax class.
-     *
-     * @param identifier The identifier token representing the parameter name.
-     * @param colonToken The colon token separating name and type.
-     * @param type       The type token representing the parameter type.
-     */
     public ParameterSyntax(SyntaxToken identifier, SyntaxToken colonToken, SyntaxToken type) {
+        _mutKeyword = null;
         _identifier = identifier;
         _colonToken = colonToken;
         _type = type;
     }
+
+    public ParameterSyntax(SyntaxToken mutKeyword, SyntaxToken identifier, SyntaxToken colonToken, SyntaxToken type) {
+        _mutKeyword = mutKeyword;
+        _identifier = identifier;
+        _colonToken = colonToken;
+        _type = type;
+    }
+
+    public boolean isMutable() { return _mutKeyword != null; }
 
     /**
      * Gets the identifier token.

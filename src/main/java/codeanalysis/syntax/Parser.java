@@ -352,6 +352,11 @@ public class Parser {
      * @return The parsed parameter syntax.
      */
     private ParameterSyntax parseParameter() {
+        // Optional mut keyword: fn foo(mut x: int)
+        SyntaxToken mutKeyword = null;
+        if (current().getType() == SyntaxType.MutableKeyword) {
+            mutKeyword = nextToken();
+        }
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         SyntaxToken colon = match(SyntaxType.ColonToken);
         SyntaxToken type = match(SyntaxType.IdentifierToken);
@@ -360,6 +365,9 @@ public class Parser {
             nextToken(); // consume [
             nextToken(); // consume ]
             type = new SyntaxToken(SyntaxType.IdentifierToken, type.getPosition(), type.getData() + "[]", type.getValue());
+        }
+        if (mutKeyword != null) {
+            return new ParameterSyntax(mutKeyword, identifier, colon, type);
         }
         return new ParameterSyntax(identifier, colon, type);
     }

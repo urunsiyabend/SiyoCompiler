@@ -218,7 +218,7 @@ public class ModuleHandler {
             String typeName = parameterSyntax.getTypeToken().getData();
             Class<?> parameterType = _typeResolver.lookupType(typeName);
             if (parameterType == null) parameterType = Integer.class;
-            parameters.add(new ParameterSymbol(parameterName, parameterType));
+            parameters.add(new ParameterSymbol(parameterName, parameterSyntax.isMutable(), parameterType));
         }
 
         Class<?> returnType = null;
