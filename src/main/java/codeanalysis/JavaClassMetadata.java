@@ -147,12 +147,16 @@ public class JavaClassMetadata {
     }
 
     private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
-        if (siyoType == null || siyoType == Object.class) return true; // any
+        if (siyoType == null) return true;
         if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
         if (siyoType == Boolean.class) return jvmDesc.equals("Z");
         if (siyoType == Double.class) return jvmDesc.equals("D") || jvmDesc.equals("F");
         if (siyoType == String.class) return jvmDesc.equals("Ljava/lang/String;") || jvmDesc.startsWith("Ljava/lang/CharSequence;");
-        return true; // Object types are compatible with any reference param
+        if (siyoType == Object.class) {
+            // Object is compatible with reference types only, NOT primitives
+            return jvmDesc.startsWith("L") || jvmDesc.startsWith("[");
+        }
+        return jvmDesc.startsWith("L") || jvmDesc.startsWith("["); // reference types
     }
 
     public JavaMethodSignature resolveConstructor(int argCount) {

@@ -1246,7 +1246,10 @@ public class Binder {
 
     private codeanalysis.JavaClassInfo resolveJavaClassInfo(BoundExpression expr) {
         if (expr instanceof BoundVariableExpression varExpr) {
-            return getVarJavaClassType(varExpr.getVariable());
+            codeanalysis.JavaClassInfo info = getVarJavaClassType(varExpr.getVariable());
+            if (info != null) return info;
+            // Auto-resolve Java class for native Siyo types
+            return resolveJavaClassForSiyoType(varExpr.getVariable().getType());
         }
         if (expr instanceof BoundJavaMethodCallExpression javaCall) {
             if (javaCall.isConstructor() && javaCall.getClassInfo() != null) {
@@ -1255,6 +1258,26 @@ public class Binder {
             if (javaCall.getResolvedSignature() != null) {
                 return resolveJavaClassFromDescriptor(javaCall.getResolvedSignature().getReturnDescriptor());
             }
+        }
+        // For literal expressions and other typed expressions
+        return resolveJavaClassForSiyoType(expr.getClassType());
+    }
+
+    private codeanalysis.JavaClassInfo resolveJavaClassForSiyoType(Class<?> type) {
+        if (type == String.class) {
+            return getOrLoadJavaClass("String", "java.lang.String");
+        }
+        return null;
+    }
+
+    private codeanalysis.JavaClassInfo getOrLoadJavaClass(String simpleName, String fullName) {
+        codeanalysis.JavaClassInfo existing = _javaClasses.get(simpleName);
+        if (existing != null) return existing;
+        codeanalysis.JavaClassMetadata meta = codeanalysis.JavaClassMetadata.load(fullName);
+        if (meta != null) {
+            codeanalysis.JavaClassInfo info = new codeanalysis.JavaClassInfo(simpleName, fullName, meta);
+            _javaClasses.put(simpleName, info);
+            return info;
         }
         return null;
     }

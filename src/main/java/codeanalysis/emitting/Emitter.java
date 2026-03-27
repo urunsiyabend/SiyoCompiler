@@ -577,12 +577,25 @@ public class Emitter {
         String[] paramDescs = sig.getParamDescriptors();
         for (int i = 0; i < arguments.size(); i++) {
             emitExpression(arguments.get(i));
-            // Box Siyo primitives to match Java parameter types
             Class<?> argType = arguments.get(i).getClassType();
             String paramDesc = i < paramDescs.length ? paramDescs[i] : "Ljava/lang/Object;";
-            // If Java param expects Object but Siyo has primitive, box it
-            if (paramDesc.startsWith("L") || paramDesc.startsWith("[")) {
-                emitBoxIfNeeded(argType);
+
+            if (argType == Integer.class && paramDesc.equals("I")) {
+                // int → int, no conversion needed
+            } else if (argType == Boolean.class && paramDesc.equals("Z")) {
+                // bool → bool
+            } else if (argType == Double.class && paramDesc.equals("D")) {
+                // double → double
+            } else if (paramDesc.startsWith("L") || paramDesc.startsWith("[")) {
+                // Reference type parameter
+                if (argType == Integer.class || argType == Boolean.class || argType == Double.class) {
+                    emitBoxIfNeeded(argType); // box primitive to Object
+                }
+                // Cast to expected type if not Object
+                if (!paramDesc.equals("Ljava/lang/Object;") && !paramDesc.equals("Ljava/lang/String;") && argType == Object.class) {
+                    String castType = paramDesc.startsWith("[") ? paramDesc : paramDesc.substring(1, paramDesc.length() - 1);
+                    _mv.visitTypeInsn(CHECKCAST, castType);
+                }
             }
         }
     }
