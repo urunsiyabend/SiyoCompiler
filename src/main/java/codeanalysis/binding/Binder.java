@@ -59,6 +59,13 @@ public class Binder {
         VariableTypeInfo info = _typeInfo.get(var);
         return info != null ? info.getStructType() : null;
     }
+    private codeanalysis.JavaClassInfo getVarJavaClassType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getJavaClassType() : null;
+    }
+    private void trackJavaClassType(VariableSymbol var, codeanalysis.JavaClassInfo classInfo) {
+        _typeInfo.put(var, VariableTypeInfo.forJavaClass(classInfo));
+    }
     private StructSymbol getArrayStructElementType(VariableSymbol var) {
         VariableTypeInfo info = _typeInfo.get(var);
         return info != null ? info.getArrayElementStructType() : null;
@@ -270,6 +277,18 @@ public class Binder {
             }
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             trackStructType(variableSymbol, structLit.getStructType());
+        } else if (initializer instanceof BoundJavaMethodCallExpression javaCall && javaCall.getClassInfo() != null) {
+            // Track Java class for constructor results: mut file = File.new("x") → file is File
+            if (javaCall.isConstructor()) {
+                trackJavaClassType(variableSymbol, javaCall.getClassInfo());
+            } else if (javaCall.getResolvedSignature() != null) {
+                // Track return type's Java class: mut path = file.getAbsolutePath() → path is String (or Java class)
+                String returnDesc = javaCall.getResolvedSignature().getReturnDescriptor();
+                codeanalysis.JavaClassInfo returnClassInfo = resolveJavaClassFromDescriptor(returnDesc);
+                if (returnClassInfo != null) {
+                    trackJavaClassType(variableSymbol, returnClassInfo);
+                }
+            }
         }
 
         return new BoundVariableDeclaration(variableSymbol, initializer);
@@ -1125,7 +1144,20 @@ public class Binder {
         for (ExpressionSyntax argSyntax : syntax.getArguments()) {
             boundArgs.add(bindExpression(argSyntax));
         }
-        return new BoundJavaMethodCallExpression(null, target, methodName, boundArgs, null);
+
+        // Resolve Java class info from the target expression
+        codeanalysis.JavaClassInfo targetClassInfo = resolveJavaClassInfo(target);
+        codeanalysis.JavaMethodSignature resolved = null;
+        if (targetClassInfo != null) {
+            resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size());
+            if (resolved == null) {
+                _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
+                        targetClassInfo.getSimpleName() + "." + methodName);
+                return new BoundLiteralExpression(0);
+            }
+        }
+
+        return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved);
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {
@@ -1193,6 +1225,50 @@ public class Binder {
         if (collection instanceof BoundVariableExpression varExpr) {
             StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
+        }
+        return null;
+    }
+
+    /**
+     * Resolve a Java class from a JVM type descriptor.
+     * "Ljava/io/File;" → load File metadata, return JavaClassInfo.
+     * Primitive types and String return null (handled by Siyo's type system).
+     */
+    /**
+     * Resolve Java class info from an expression.
+     * Traces through variables, constructor results, and method return types.
+     */
+    private codeanalysis.JavaClassInfo resolveJavaClassInfo(BoundExpression expr) {
+        if (expr instanceof BoundVariableExpression varExpr) {
+            return getVarJavaClassType(varExpr.getVariable());
+        }
+        if (expr instanceof BoundJavaMethodCallExpression javaCall) {
+            if (javaCall.isConstructor() && javaCall.getClassInfo() != null) {
+                return javaCall.getClassInfo();
+            }
+            if (javaCall.getResolvedSignature() != null) {
+                return resolveJavaClassFromDescriptor(javaCall.getResolvedSignature().getReturnDescriptor());
+            }
+        }
+        return null;
+    }
+
+    private codeanalysis.JavaClassInfo resolveJavaClassFromDescriptor(String descriptor) {
+        if (descriptor == null || descriptor.length() <= 1) return null; // primitives/void
+        if (descriptor.equals("Ljava/lang/String;")) return null; // String is native Siyo type
+        if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
+            String fullName = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
+            // Check if already imported
+            String simpleName = fullName.contains(".") ? fullName.substring(fullName.lastIndexOf('.') + 1) : fullName;
+            codeanalysis.JavaClassInfo existing = _javaClasses.get(simpleName);
+            if (existing != null) return existing;
+            // Auto-load metadata for return types
+            codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(fullName);
+            if (metadata != null) {
+                codeanalysis.JavaClassInfo info = new codeanalysis.JavaClassInfo(simpleName, fullName, metadata);
+                _javaClasses.put(simpleName, info);
+                return info;
+            }
         }
         return null;
     }

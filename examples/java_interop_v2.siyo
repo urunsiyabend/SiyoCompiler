@@ -1,0 +1,28 @@
+import java "java.io.File"
+import java "java.lang.System"
+import java "java.lang.StringBuilder"
+
+// 1. Constructor + instance method (compile-time resolved)
+mut file = File.new("test.txt")
+println("File: " + file.getAbsolutePath())
+println("Exists: " + toString(file.exists()))
+println("Name: " + file.getName())
+
+// 2. Return type tracking: file.getAbsoluteFile() returns File
+mut absFile = file.getAbsoluteFile()
+mut parent = absFile.getParentFile()
+println("Parent: " + parent.getAbsolutePath())
+
+// 3. Static method
+mut os = System.getProperty("os.name")
+println("OS: " + os)
+
+// 4. Method chaining via StringBuilder
+mut sb = StringBuilder.new()
+sb.append("Hello")
+sb.append(" from")
+sb.append(" Siyo!")
+println(sb.toString())
+
+// 5. Compile-time error detection would catch:
+// file.nonExistent()  // → should give compile error
