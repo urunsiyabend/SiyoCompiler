@@ -1,0 +1,25 @@
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+
+// Write a file
+mut writer = FileWriter.new("hello.txt")
+writer.write("Hello from Siyo!\nThis is line 2.\nLine 3 here.")
+writer.close()
+println("File written!")
+
+// Read it back
+mut reader = BufferedReader.new(FileReader.new("hello.txt"))
+mut line = reader.readLine()
+while line != null {
+    println("Read: " + line.toString())
+    line = reader.readLine()
+}
+reader.close()
+
+// Clean up
+mut file = File.new("hello.txt")
+file.delete()
+file.delete()
+println("File deleted!")

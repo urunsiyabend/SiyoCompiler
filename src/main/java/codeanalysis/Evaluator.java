@@ -194,6 +194,7 @@ public class Evaluator {
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
+            case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -370,6 +371,60 @@ public class Evaluator {
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
         }
+    }
+
+    private Object evaluateJavaMethodCall(BoundJavaMethodCallExpression node) throws Exception {
+        // Evaluate arguments
+        Object[] args = new Object[node.getArguments().size()];
+        for (int i = 0; i < args.length; i++) {
+            args[i] = evaluateExpression(node.getArguments().get(i));
+        }
+
+        if (node.isConstructor()) {
+            // File.new("path") → new File("path")
+            Class<?> cls = node.getClassInfo().getJavaClass();
+            for (var ctor : cls.getConstructors()) {
+                if (ctor.getParameterCount() == args.length) {
+                    try {
+                        return ctor.newInstance(args);
+                    } catch (IllegalArgumentException e) {
+                        continue; // try next constructor
+                    }
+                }
+            }
+            throw new Exception("No matching constructor for " + cls.getName() + " with " + args.length + " args");
+        }
+
+        if (node.isStatic()) {
+            // Files.readString(path) → static method
+            Class<?> cls = node.getClassInfo().getJavaClass();
+            return invokeMethod(cls, null, node.getMethodName(), args);
+        }
+
+        // Instance method: obj.method(args)
+        Object target = evaluateExpression(node.getTarget());
+        if (target == null) throw new RuntimeException("Cannot call method on null");
+        return invokeMethod(target.getClass(), target, node.getMethodName(), args);
+    }
+
+    private Object invokeMethod(Class<?> cls, Object target, String methodName, Object[] args) throws Exception {
+        for (var method : cls.getMethods()) {
+            if (method.getName().equals(methodName) && method.getParameterCount() == args.length) {
+                try {
+                    Object result = method.invoke(target, args);
+                    // Convert Java types to Siyo types
+                    if (result instanceof Long l) return l.intValue();
+                    if (result instanceof Short s) return (int) s;
+                    if (result instanceof Byte b) return (int) b;
+                    if (result instanceof Float f) return f.doubleValue();
+                    if (result instanceof Character c) return String.valueOf(c);
+                    return result;
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+            }
+        }
+        throw new Exception("No matching method: " + cls.getName() + "." + methodName + " with " + args.length + " args");
     }
 
     private Object evaluateIndexAssignment(BoundIndexAssignmentExpression node) throws Exception {

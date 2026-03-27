@@ -37,4 +37,5 @@ public enum BoundNodeType {
     StructLiteralExpression,
     EnumDeclaration,
     TryCatchStatement,
+    JavaMethodCallExpression,
 }

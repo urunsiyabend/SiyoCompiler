@@ -288,6 +288,7 @@ public class Emitter {
             case StructLiteralExpression -> emitStructLiteralExpression((BoundStructLiteralExpression) node);
             case MemberAccessExpression -> emitMemberAccessExpression((BoundMemberAccessExpression) node);
             case MemberAssignmentExpression -> emitMemberAssignmentExpression((BoundMemberAssignmentExpression) node);
+            case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
             default -> throw new UnsupportedOperationException("Cannot emit expression: " + node.getType());
         }
     }
@@ -512,6 +513,109 @@ public class Emitter {
         emitExpression(node.getRight());
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false);
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false);
+    }
+
+    // ========== Java Interop Emission ==========
+
+    private void emitJavaMethodCall(BoundJavaMethodCallExpression node) {
+        if (node.isConstructor()) {
+            // ClassName.new(args) → NEW + DUP + args + INVOKESPECIAL <init>
+            String internalName = node.getClassInfo().getInternalName();
+            _mv.visitTypeInsn(NEW, internalName);
+            _mv.visitInsn(DUP);
+            for (BoundExpression arg : node.getArguments()) {
+                emitExpression(arg);
+                emitBoxIfNeeded(arg.getClassType());
+            }
+            String desc = buildJavaCtorDescriptor(node);
+            _mv.visitMethodInsn(INVOKESPECIAL, internalName, "<init>", desc, false);
+            return;
+        }
+
+        if (node.isStatic()) {
+            // ClassName.method(args) → args + INVOKESTATIC
+            for (BoundExpression arg : node.getArguments()) {
+                emitExpression(arg);
+                emitBoxIfNeeded(arg.getClassType());
+            }
+            String internalName = node.getClassInfo().getInternalName();
+            String desc = buildJavaMethodDescriptor(node);
+            _mv.visitMethodInsn(INVOKESTATIC, internalName, node.getMethodName(), desc, false);
+            return;
+        }
+
+        // Instance method: obj.method(args) → obj + args + INVOKEVIRTUAL
+        emitExpression(node.getTarget());
+        for (BoundExpression arg : node.getArguments()) {
+            emitExpression(arg);
+            emitBoxIfNeeded(arg.getClassType());
+        }
+        // We don't know the exact class at compile time, use reflection-based approach
+        // For now use INVOKEVIRTUAL on Object - this works for most cases via JVM method dispatch
+        // TODO: proper method resolution with class info tracking
+        String desc = buildJavaMethodDescriptor(node);
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", node.getMethodName(), desc, false);
+    }
+
+    private String buildJavaCtorDescriptor(BoundJavaMethodCallExpression node) {
+        // Find matching constructor via reflection
+        try {
+            Class<?> cls = node.getClassInfo().getJavaClass();
+            for (var ctor : cls.getConstructors()) {
+                if (ctor.getParameterCount() == node.getArguments().size()) {
+                    StringBuilder sb = new StringBuilder("(");
+                    for (Class<?> paramType : ctor.getParameterTypes()) {
+                        sb.append(javaTypeDescriptor(paramType));
+                    }
+                    sb.append(")V");
+                    return sb.toString();
+                }
+            }
+        } catch (Exception e) { /* fall through */ }
+        // Fallback: all Object params
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < node.getArguments().size(); i++) sb.append("Ljava/lang/Object;");
+        sb.append(")V");
+        return sb.toString();
+    }
+
+    private String buildJavaMethodDescriptor(BoundJavaMethodCallExpression node) {
+        // Find matching method via reflection
+        try {
+            Class<?> cls = node.isStatic() ? node.getClassInfo().getJavaClass() : Object.class;
+            if (node.getTarget() != null && node.getClassInfo() != null) {
+                cls = node.getClassInfo().getJavaClass();
+            }
+            for (var method : cls.getMethods()) {
+                if (method.getName().equals(node.getMethodName()) && method.getParameterCount() == node.getArguments().size()) {
+                    StringBuilder sb = new StringBuilder("(");
+                    for (Class<?> paramType : method.getParameterTypes()) {
+                        sb.append(javaTypeDescriptor(paramType));
+                    }
+                    sb.append(")").append(javaTypeDescriptor(method.getReturnType()));
+                    return sb.toString();
+                }
+            }
+        } catch (Exception e) { /* fall through */ }
+        // Fallback
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < node.getArguments().size(); i++) sb.append("Ljava/lang/Object;");
+        sb.append(")Ljava/lang/Object;");
+        return sb.toString();
+    }
+
+    private String javaTypeDescriptor(Class<?> type) {
+        if (type == void.class) return "V";
+        if (type == int.class) return "I";
+        if (type == long.class) return "J";
+        if (type == double.class) return "D";
+        if (type == float.class) return "F";
+        if (type == boolean.class) return "Z";
+        if (type == byte.class) return "B";
+        if (type == char.class) return "C";
+        if (type == short.class) return "S";
+        if (type.isArray()) return "[" + javaTypeDescriptor(type.getComponentType());
+        return "L" + type.getName().replace('.', '/') + ";";
     }
 
     // ========== Composite Type Emission ==========

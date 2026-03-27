@@ -284,6 +284,15 @@ public enum SyntaxType {
     /* Represents a member call expression (module.func(args)). */
     MemberCallExpression,
 
+    /* Represents a Java import statement (import java "class.name"). */
+    JavaImportStatement,
+
+    /* Represents a 'java' keyword. */
+    JavaKeyword,
+
+    /* Represents a 'new' keyword. */
+    NewKeyword,
+
     /* Represents a 'try' keyword. */
     TryKeyword,
 

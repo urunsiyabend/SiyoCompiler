@@ -417,6 +417,12 @@ public class Parser {
 
     private StatementSyntax parseImportStatement() {
         SyntaxToken importKeyword = match(SyntaxType.ImportKeyword);
+        // import java "class.name" vs import "module"
+        if (current().getType() == SyntaxType.JavaKeyword) {
+            SyntaxToken javaKeyword = nextToken();
+            SyntaxToken className = match(SyntaxType.StringToken);
+            return new JavaImportStatementSyntax(importKeyword, javaKeyword, className);
+        }
         SyntaxToken moduleName = match(SyntaxType.StringToken);
         return new ImportStatementSyntax(importKeyword, moduleName);
     }
@@ -602,7 +608,14 @@ public class Parser {
                 expr = new IndexExpressionSyntax(expr, openBracket, index, closeBracket);
             } else if (current().getType() == SyntaxType.DotToken) {
                 SyntaxToken dot = match(SyntaxType.DotToken);
-                SyntaxToken member = match(SyntaxType.IdentifierToken);
+                // Allow 'new' as member name for Java constructor calls
+                SyntaxToken member;
+                if (current().getType() == SyntaxType.NewKeyword) {
+                    SyntaxToken newToken = nextToken();
+                    member = new SyntaxToken(SyntaxType.IdentifierToken, newToken.getPosition(), "new", null);
+                } else {
+                    member = match(SyntaxType.IdentifierToken);
+                }
                 MemberAccessExpressionSyntax memberAccess = new MemberAccessExpressionSyntax(expr, dot, member);
                 // Check if this is a member call: module.func(args)
                 if (current().getType() == SyntaxType.OpenParenthesisToken) {

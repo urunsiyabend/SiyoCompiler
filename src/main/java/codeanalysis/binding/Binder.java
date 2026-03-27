@@ -40,6 +40,7 @@ public class Binder {
     private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
     private ModuleRegistry _registry;
     private String _filePath;
+    private final Map<String, codeanalysis.JavaClassInfo> _javaClasses = new HashMap<>();
 
     private void trackArrayType(VariableSymbol var, Class<?> elementType) {
         _typeInfo.put(var, VariableTypeInfo.forArray(elementType));
@@ -145,6 +146,7 @@ public class Binder {
             case EnumDeclaration -> bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
+            case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
         };
     }
@@ -163,6 +165,8 @@ public class Binder {
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
             if (statementSyntax instanceof ImportStatementSyntax importSyntax) {
                 bindImportStatement(importSyntax);
+            } else if (statementSyntax instanceof JavaImportStatementSyntax javaImportSyntax) {
+                bindJavaImportStatement(javaImportSyntax);
             } else if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
                 registerFunctionDeclaration(funcSyntax);
             } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
@@ -921,6 +925,26 @@ public class Binder {
         return new BoundStructLiteralExpression(structType, fieldValues);
     }
 
+    private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
+        String fullClassName = (String) syntax.getClassName().getValue();
+        if (fullClassName == null) return new BoundExpressionStatement(new BoundLiteralExpression(0));
+
+        String simpleName = fullClassName.contains(".")
+                ? fullClassName.substring(fullClassName.lastIndexOf('.') + 1)
+                : fullClassName;
+
+        try {
+            Class<?> javaClass = Class.forName(fullClassName);
+            _javaClasses.put(simpleName, new codeanalysis.JavaClassInfo(simpleName, fullClassName, javaClass));
+        } catch (ClassNotFoundException e) {
+            _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), fullClassName);
+        }
+
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    public Map<String, codeanalysis.JavaClassInfo> getJavaClasses() { return _javaClasses; }
+
     private BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
         String moduleName = (String) syntax.getModuleName().getValue();
         if (moduleName == null) {
@@ -1068,13 +1092,29 @@ public class Binder {
                 return new BoundCallExpression(func, boundArgs);
             }
 
-            // Check if it's an enum access + call (shouldn't be, but give useful error)
-            _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), qualifiedName);
-            return new BoundLiteralExpression(0);
+            // Check if target is a Java class (static method or constructor)
+            codeanalysis.JavaClassInfo javaClass = _javaClasses.get(targetName);
+            if (javaClass != null) {
+                List<BoundExpression> boundArgs = new ArrayList<>();
+                for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                    boundArgs.add(bindExpression(argSyntax));
+                }
+                boolean isConstructor = funcName.equals("new");
+                return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, isConstructor, !isConstructor);
+            }
+
+            // Not a module or Java class - fall through to instance method call
         }
 
-        _diagnostics.reportUndefinedFunction(syntax.getMemberAccess().getSpan(), "member call");
-        return new BoundLiteralExpression(0);
+        // Instance method call on a variable: obj.method(args)
+        BoundExpression target = bindExpression(memberAccess.getTarget());
+        String methodName = memberAccess.getMember().getData();
+        List<BoundExpression> boundArgs = new ArrayList<>();
+        for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+            boundArgs.add(bindExpression(argSyntax));
+        }
+        // For Java objects (Object.class), emit as Java instance method call
+        return new BoundJavaMethodCallExpression(null, target, methodName, boundArgs, false, false);
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {

@@ -35,6 +35,8 @@ public class SyntaxRules {
             case "struct" -> SyntaxType.StructKeyword;
             case "enum" -> SyntaxType.EnumKeyword;
             case "import" -> SyntaxType.ImportKeyword;
+            case "java" -> SyntaxType.JavaKeyword;
+            case "new" -> SyntaxType.NewKeyword;
             case "try" -> SyntaxType.TryKeyword;
             case "catch" -> SyntaxType.CatchKeyword;
             case "in" -> SyntaxType.InKeyword;
