@@ -38,9 +38,14 @@ public class JavaClassMetadata {
         String internalName = fullClassName.replace('.', '/');
         String resourcePath = internalName + ".class";
 
+        // Search order: system classloader → context classloader → external JARs
         InputStream is = ClassLoader.getSystemResourceAsStream(resourcePath);
         if (is == null) {
             is = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath);
+        }
+        if (is == null) {
+            // Search external JARs registered via -cp flag
+            is = JavaClasspath.findClass(resourcePath);
         }
         if (is == null) return null;
 

@@ -21,20 +21,37 @@ public class Main {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
-        if (args.length >= 2 && args[0].equals("run")) {
-            runFile(args[1]);
+        // Parse -cp flag: siyoc -cp lib.jar run file.siyo
+        String classpath = null;
+        java.util.List<String> remaining = new java.util.ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            if ((args[i].equals("-cp") || args[i].equals("--classpath")) && i + 1 < args.length) {
+                classpath = args[++i];
+            } else {
+                remaining.add(args[i]);
+            }
+        }
+
+        // Register external classpath for ASM metadata resolution
+        if (classpath != null) {
+            codeanalysis.JavaClasspath.addClasspath(classpath);
+        }
+
+        String[] cargs = remaining.toArray(new String[0]);
+        if (cargs.length >= 2 && cargs[0].equals("run")) {
+            runFile(cargs[1]);
             return;
         }
-        if (args.length >= 2 && args[0].equals("compile")) {
-            compileFile(args[1]);
+        if (cargs.length >= 2 && cargs[0].equals("compile")) {
+            compileFile(cargs[1]);
             return;
         }
-        if (args.length >= 2 && (args[0].equals("-c") || args[0].equals("exec"))) {
-            compileAndRun(args[1]);
+        if (cargs.length >= 2 && (cargs[0].equals("-c") || cargs[0].equals("exec"))) {
+            compileAndRun(cargs[1]);
             return;
         }
-        if (args.length >= 1 && !args[0].equals("repl")) {
-            runFile(args[0]);
+        if (cargs.length >= 1 && !cargs[0].equals("repl")) {
+            runFile(cargs[0]);
             return;
         }
         repl();
