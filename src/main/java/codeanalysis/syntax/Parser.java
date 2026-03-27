@@ -163,6 +163,7 @@ public class Parser {
             case BreakKeyword -> parseBreakStatement();
             case ContinueKeyword -> parseContinueStatement();
             case StructKeyword -> parseStructDeclaration();
+            case ImplKeyword -> parseImplDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
             case TryKeyword -> parseTryCatchStatement();
             case ImportKeyword -> parseImportStatement();
@@ -352,6 +353,15 @@ public class Parser {
      * @return The parsed parameter syntax.
      */
     private ParameterSyntax parseParameter() {
+        // self parameter (no type needed): fn greet(self)
+        if (current().getType() == SyntaxType.SelfKeyword) {
+            SyntaxToken selfToken = nextToken();
+            // Create synthetic identifier/colon/type
+            SyntaxToken identifier = new SyntaxToken(SyntaxType.IdentifierToken, selfToken.getPosition(), "self", null);
+            SyntaxToken colon = new SyntaxToken(SyntaxType.ColonToken, selfToken.getPosition(), ":", null);
+            SyntaxToken type = new SyntaxToken(SyntaxType.IdentifierToken, selfToken.getPosition(), "Self", null);
+            return new ParameterSyntax(identifier, colon, type);
+        }
         // Optional mut keyword: fn foo(mut x: int)
         SyntaxToken mutKeyword = null;
         if (current().getType() == SyntaxType.MutableKeyword) {
@@ -461,6 +471,18 @@ public class Parser {
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, closeBrace);
+    }
+
+    private StatementSyntax parseImplDeclaration() {
+        SyntaxToken implKeyword = match(SyntaxType.ImplKeyword);
+        SyntaxToken typeName = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+        java.util.List<FunctionDeclarationSyntax> methods = new java.util.ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            methods.add((FunctionDeclarationSyntax) parseFunctionDeclaration());
+        }
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new ImplDeclarationSyntax(implKeyword, typeName, openBrace, methods, closeBrace);
     }
 
     private StatementSyntax parseStructDeclaration() {
@@ -615,6 +637,12 @@ public class Parser {
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
             case OpenBracketToken -> parseArrayLiteral();
+            case SelfKeyword -> {
+                // self keyword used as expression → treat as identifier
+                SyntaxToken selfToken = nextToken();
+                SyntaxToken selfId = new SyntaxToken(SyntaxType.IdentifierToken, selfToken.getPosition(), "self", null);
+                yield new NameExpressionSyntax(selfId);
+            }
             case IdentifierToken -> {
                 if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
                     yield parseCallExpression();

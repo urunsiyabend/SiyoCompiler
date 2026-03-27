@@ -6,6 +6,7 @@ import codeanalysis.FunctionSymbol;
 import codeanalysis.ModuleRegistry;
 import codeanalysis.ModuleSymbol;
 import codeanalysis.ParameterSymbol;
+import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
 import codeanalysis.syntax.*;
 
@@ -245,6 +246,39 @@ public class ModuleHandler {
             fieldTypeNames.put(fieldName, typeName);
         }
         _structTypes.put(name, new StructSymbol(name, fields, fieldTypeNames));
+    }
+
+    public void registerImplDeclaration(ImplDeclarationSyntax syntax) {
+        String structName = syntax.getTypeName().getData();
+        for (FunctionDeclarationSyntax method : syntax.getMethods()) {
+            String methodName = method.getIdentifier().getData();
+            String qualifiedName = structName + "." + methodName;
+
+            List<ParameterSymbol> parameters = new ArrayList<>();
+            boolean isInstance = false;
+            for (ParameterSyntax paramSyntax : method.getParameters()) {
+                String paramName = paramSyntax.getIdentifier().getData();
+                if (paramName.equals("self")) {
+                    isInstance = true;
+                    parameters.add(new ParameterSymbol("self", true, SiyoStruct.class));
+                    continue;
+                }
+                String typeName = paramSyntax.getTypeToken().getData();
+                Class<?> paramType = _typeResolver.lookupType(typeName);
+                if (paramType == null) paramType = Integer.class;
+                parameters.add(new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType));
+            }
+
+            Class<?> returnType = null;
+            if (method.getTypeClause() != null) {
+                String rtName = method.getTypeClause().getIdentifier().getData();
+                returnType = _typeResolver.lookupType(rtName);
+                if (returnType == null && rtName.equals(structName)) returnType = SiyoStruct.class;
+            }
+
+            FunctionSymbol func = new FunctionSymbol(qualifiedName, parameters, returnType);
+            _scope.tryDeclareFunction(func);
+        }
     }
 
     public void registerEnumDeclaration(EnumDeclarationSyntax syntax) {

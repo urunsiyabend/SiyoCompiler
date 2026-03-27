@@ -31,6 +31,8 @@ public class SyntaxRules {
             case "fn" -> SyntaxType.FnKeyword;
             case "return" -> SyntaxType.ReturnKeyword;
             case "as" -> SyntaxType.AsKeyword;
+            case "impl" -> SyntaxType.ImplKeyword;
+            case "self" -> SyntaxType.SelfKeyword;
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
@@ -91,6 +93,8 @@ public class SyntaxRules {
             case FnKeyword -> "fn";
             case ReturnKeyword -> "return";
             case AsKeyword -> "as";
+            case ImplKeyword -> "impl";
+            case SelfKeyword -> "self";
             case ColonToken -> ":";
             case CommaToken -> ",";
             case ArrowToken -> "->";

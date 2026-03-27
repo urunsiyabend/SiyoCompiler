@@ -122,7 +122,7 @@ public class Emitter {
         if (function.getModuleName() != null) return; // imported functions compiled in their own class
 
         String descriptor = getFunctionDescriptor(function);
-        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName(), descriptor, null, null);
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName().replace('.', '$'), descriptor, null, null);
         _mv.visitCode();
         _locals.clear();
         _labels.clear();
@@ -875,10 +875,7 @@ public class Emitter {
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
         // For imported functions, name is "module.func" - extract just the function name
-        String methodName = function.getName();
-        if (methodName.contains(".")) {
-            methodName = methodName.substring(methodName.lastIndexOf('.') + 1);
-        }
+        String methodName = function.getName().replace('.', '$');
         _mv.visitMethodInsn(INVOKESTATIC, owner, methodName, descriptor, false);
     }
 

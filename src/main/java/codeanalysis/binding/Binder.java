@@ -125,6 +125,7 @@ public class Binder {
             case StructDeclaration -> _moduleHandler.bindStructDeclaration((StructDeclarationSyntax)syntax);
             case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
+            case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
@@ -154,6 +155,8 @@ public class Binder {
                 _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
                 _moduleHandler.registerEnumDeclaration(enumSyntax);
+            } else if (statementSyntax instanceof ImplDeclarationSyntax implSyntax) {
+                _moduleHandler.registerImplDeclaration(implSyntax);
             }
         }
 
@@ -202,7 +205,15 @@ public class Binder {
             } else {
                 _typeResolver.trackArrayType(variableSymbol, arr.getElementType());
             }
-        } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoArray.class) {
+        } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
+            // Track struct type from impl static method: mut u = User.create()
+            String funcName = callExpr.getFunction().getName();
+            if (funcName.contains(".")) {
+                String structName = funcName.substring(0, funcName.indexOf('.'));
+                StructSymbol st = _structTypes.get(structName);
+                if (st != null) _typeResolver.trackStructType(variableSymbol, st);
+            }
+        } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
             // Track element type for built-in functions that return arrays
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
             _typeResolver.trackArrayType(variableSymbol, elemType);
@@ -947,6 +958,22 @@ public class Binder {
             boundArgs.add(bindExpression(argSyntax));
         }
 
+        // Check for struct instance method: u.greet() → User.greet(u)
+        if (target.getClassType() == SiyoStruct.class) {
+            StructSymbol structType = _typeResolver.resolveStructType(target);
+            if (structType != null) {
+                String qualifiedName = structType.getName() + "." + methodName;
+                if (_scope.tryLookupFunction(qualifiedName)) {
+                    FunctionSymbol func = _scope.lookupFunction(qualifiedName);
+                    // Desugar: prepend self (target) to args
+                    List<BoundExpression> argsWithSelf = new ArrayList<>();
+                    argsWithSelf.add(target);
+                    argsWithSelf.addAll(boundArgs);
+                    return new BoundCallExpression(func, argsWithSelf);
+                }
+            }
+        }
+
         // Resolve Java class info from the target expression (with generic type bindings)
         codeanalysis.JavaResolvedType targetResolvedType = _typeResolver.resolveJavaResolvedType(target);
         codeanalysis.JavaClassInfo targetClassInfo = targetResolvedType != null
@@ -966,6 +993,40 @@ public class Binder {
         }
 
         return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
+    }
+
+    private BoundStatement bindImplDeclaration(ImplDeclarationSyntax syntax) {
+        String structName = syntax.getTypeName().getData();
+        StructSymbol structType = _structTypes.get(structName);
+
+        for (FunctionDeclarationSyntax method : syntax.getMethods()) {
+            String qualifiedName = structName + "." + method.getIdentifier().getData();
+            if (!_scope.tryLookupFunction(qualifiedName)) continue;
+            FunctionSymbol func = _scope.lookupFunction(qualifiedName);
+
+            // Bind the method body in a new scope with parameters
+            _scope = new BoundScope(_scope);
+            _moduleHandler.setScope(_scope);
+            for (ParameterSymbol param : func.getParameters()) {
+                _scope.tryDeclare(param);
+                if (param.getName().equals("self") && structType != null) {
+                    _typeResolver.trackStructType(param, structType);
+                }
+            }
+
+            _currentFunction = func;
+            BoundStatement body = bindStatement(method.getBody());
+            _currentFunction = null;
+
+            _scope = _scope.getParent();
+            _moduleHandler.setScope(_scope);
+
+            BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(
+                    body instanceof BoundBlockStatement block ? block : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body))));
+            _functionBodies.put(func, loweredBody);
+        }
+
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {

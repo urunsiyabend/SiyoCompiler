@@ -187,6 +187,9 @@ public enum SyntaxType {
 
     /* Represents an 'as' keyword for type casting. */
     AsKeyword,
+    ImplKeyword,
+    SelfKeyword,
+    ImplDeclaration,
 
     /* Represents a parameter in function declaration. */
     Parameter,
