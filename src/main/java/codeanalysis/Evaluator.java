@@ -200,6 +200,8 @@ public class Evaluator {
             case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression());
             case LambdaExpression -> evaluateLambdaExpression((BoundLambdaExpression) node);
             case ClosureCallExpression -> evaluateClosureCall((BoundClosureCallExpression) node);
+            case ScopeExpression -> evaluateScopeExpression((BoundScopeExpression) node);
+            case SpawnExpression -> evaluateSpawnExpression((BoundSpawnExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -509,6 +511,67 @@ public class Evaluator {
         return result;
     }
 
+    private Object evaluateScopeExpression(BoundScopeExpression node) throws Exception {
+        // Collect spawn tasks during body evaluation
+        java.util.List<Thread> threads = new java.util.ArrayList<>();
+        java.util.List<Exception> errors = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        _scopeThreads = threads;
+        _scopeErrors = errors;
+
+        evaluateBlock(node.getBody());
+
+        // Wait for all spawned tasks to complete (structured concurrency)
+        for (Thread t : threads) {
+            try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+        _scopeThreads = null;
+        _scopeErrors = null;
+
+        if (!errors.isEmpty()) {
+            throw errors.get(0);
+        }
+        return null;
+    }
+
+    private java.util.List<Thread> _scopeThreads = null;
+    private java.util.List<Exception> _scopeErrors = null;
+
+    private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
+        if (_scopeThreads == null) {
+            throw new Exception("spawn must be inside a scope block");
+        }
+
+        // Capture current variable values for the spawn body
+        java.util.Map<VariableSymbol, Object> capturedSnapshot = new java.util.HashMap<>();
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            capturedSnapshot.put(var, lookupVariable(var));
+        }
+
+        // Copy current function table reference
+        java.util.Map<FunctionSymbol, codeanalysis.binding.BoundBlockStatement> funcsCopy = _functions;
+        BoundBlockStatement body = node.getBody();
+
+        Thread thread = Thread.startVirtualThread(() -> {
+            try {
+                // Create isolated evaluator for this task
+                Evaluator taskEval = new Evaluator(body, _globals, funcsCopy);
+                // Inject captured variables
+                StackFrame frame = new StackFrame(null);
+                for (var entry : capturedSnapshot.entrySet()) {
+                    frame.getLocals().put(entry.getKey(), entry.getValue());
+                }
+                taskEval._callStack.push(frame);
+                taskEval.evaluateBlock(body);
+                taskEval._callStack.pop();
+            } catch (Exception e) {
+                _scopeErrors.add(e);
+            }
+        });
+
+        _scopeThreads.add(thread);
+        return null;
+    }
+
     private Object evaluateLambdaExpression(BoundLambdaExpression node) {
         // Capture current variable values from the active scope
         java.util.Map<VariableSymbol, Object> capturedVars = new java.util.HashMap<>();
@@ -666,6 +729,9 @@ public class Evaluator {
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
             return null;
+        }
+        if (function == BuiltinFunctions.CHANNEL) {
+            return new SiyoChannel();
         }
         if (function == BuiltinFunctions.CHR) {
             int code = (arguments[0] instanceof Byte b) ? (int) b : (int) arguments[0];

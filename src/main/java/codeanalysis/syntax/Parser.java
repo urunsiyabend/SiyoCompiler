@@ -662,8 +662,17 @@ public class Parser {
             case StringToken -> parseStringLiteral();
             case OpenBracketToken -> parseArrayLiteral();
             case FnKeyword -> {
-                // Lambda expression: fn(x: int) -> int { body }
                 yield parseLambdaExpression();
+            }
+            case ScopeKeyword -> {
+                SyntaxToken keyword = nextToken();
+                StatementSyntax body = parseBlockStatement();
+                yield new ScopeExpressionSyntax(keyword, body);
+            }
+            case SpawnKeyword -> {
+                SyntaxToken keyword = nextToken();
+                StatementSyntax body = parseBlockStatement();
+                yield new SpawnExpressionSyntax(keyword, body);
             }
             case SelfKeyword -> {
                 // self keyword used as expression → treat as identifier

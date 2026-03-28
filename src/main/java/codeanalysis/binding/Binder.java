@@ -8,6 +8,7 @@ import codeanalysis.FunctionSymbol;
 import codeanalysis.LabelSymbol;
 import codeanalysis.ParameterSymbol;
 import codeanalysis.SiyoArray;
+import codeanalysis.SiyoChannel;
 import codeanalysis.SiyoClosure;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
@@ -33,6 +34,8 @@ public class Binder {
     DiagnosticBox _diagnostics = new DiagnosticBox();
     private BoundScope _scope;
     private FunctionSymbol _currentFunction = null;
+    private boolean _insideScope = false;
+    private boolean _insideSpawn = false;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
@@ -317,6 +320,8 @@ public class Binder {
             case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
             case CastExpression -> bindCastExpression((CastExpressionSyntax) syntax);
             case LambdaExpression -> bindLambdaExpression((LambdaExpressionSyntax) syntax);
+            case ScopeExpression -> bindScopeExpression((ScopeExpressionSyntax) syntax);
+            case SpawnExpression -> bindSpawnExpression((SpawnExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -882,6 +887,94 @@ public class Binder {
 
     private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
         return _moduleHandler.bindJavaImportStatement(syntax);
+    }
+
+    private BoundExpression bindScopeExpression(ScopeExpressionSyntax syntax) {
+        boolean wasInScope = _insideScope;
+        _insideScope = true;
+        BoundStatement body = bindStatement(syntax.getBody());
+        _insideScope = wasInScope;
+
+        BoundBlockStatement block = body instanceof BoundBlockStatement b
+                ? b : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+        return new BoundScopeExpression(block);
+    }
+
+    private BoundExpression bindSpawnExpression(SpawnExpressionSyntax syntax) {
+        // spawn must be inside scope
+        if (!_insideScope) {
+            _diagnostics.reportSpawnOutsideScope(syntax.getSpawnKeyword().getSpan());
+            return new BoundLiteralExpression(0);
+        }
+
+        boolean wasInSpawn = _insideSpawn;
+        _insideSpawn = true;
+
+        BoundStatement body = bindStatement(syntax.getBody());
+        BoundBlockStatement block = body instanceof BoundBlockStatement b
+                ? b : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+
+        // Detect captured variables and CHECK for mutable captures
+        java.util.Set<VariableSymbol> captured = new java.util.LinkedHashSet<>();
+        java.util.Set<VariableSymbol> mutableCaptures = new java.util.LinkedHashSet<>();
+        collectSpawnCaptures(block, captured, mutableCaptures);
+
+        // Report mutable capture errors with helpful messages
+        for (VariableSymbol var : mutableCaptures) {
+            _diagnostics.reportMutableCaptureInSpawn(syntax.getSpawnKeyword().getSpan(), var.getName());
+        }
+
+        _insideSpawn = wasInSpawn;
+
+        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(block);
+        return new BoundSpawnExpression(loweredBody, captured);
+    }
+
+    private void collectSpawnCaptures(BoundNode node, java.util.Set<VariableSymbol> captured,
+                                       java.util.Set<VariableSymbol> mutableCaptures) {
+        // First: collect all locally declared variables in this body
+        java.util.Set<VariableSymbol> localVars = new java.util.HashSet<>();
+        collectDeclaredVars(node, localVars);
+
+        // Then: find referenced variables that are NOT local → these are captures
+        collectCapturedVarsFromBody(node, localVars, captured, mutableCaptures);
+    }
+
+    private void collectDeclaredVars(BoundNode node, java.util.Set<VariableSymbol> locals) {
+        if (node instanceof BoundVariableDeclaration decl) {
+            locals.add(decl.getVariable());
+        }
+        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectDeclaredVars(it.next(), locals);
+        }
+    }
+
+    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<VariableSymbol> localVars,
+                                              java.util.Set<VariableSymbol> captured,
+                                              java.util.Set<VariableSymbol> mutableCaptures) {
+        if (node instanceof BoundVariableExpression varExpr) {
+            VariableSymbol var = varExpr.getVariable();
+            if (!(var instanceof ParameterSymbol) && !localVars.contains(var)) {
+                captured.add(var);
+                if (!var.isReadOnly() && var.getType() != SiyoChannel.class) {
+                    mutableCaptures.add(var);
+                }
+            }
+        }
+        if (node instanceof BoundAssignmentExpression assignExpr) {
+            VariableSymbol var = assignExpr.getVariable();
+            if (!(var instanceof ParameterSymbol) && !localVars.contains(var)) {
+                captured.add(var);
+                if (!var.isReadOnly()) {
+                    mutableCaptures.add(var);
+                }
+            }
+        }
+        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectCapturedVarsFromBody(it.next(), localVars, captured, mutableCaptures);
+        }
     }
 
     private BoundExpression bindLambdaExpression(LambdaExpressionSyntax syntax) {

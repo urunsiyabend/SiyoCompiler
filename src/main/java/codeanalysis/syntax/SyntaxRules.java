@@ -33,6 +33,8 @@ public class SyntaxRules {
             case "as" -> SyntaxType.AsKeyword;
             case "impl" -> SyntaxType.ImplKeyword;
             case "self" -> SyntaxType.SelfKeyword;
+            case "scope" -> SyntaxType.ScopeKeyword;
+            case "spawn" -> SyntaxType.SpawnKeyword;
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
@@ -95,6 +97,8 @@ public class SyntaxRules {
             case AsKeyword -> "as";
             case ImplKeyword -> "impl";
             case SelfKeyword -> "self";
+            case ScopeKeyword -> "scope";
+            case SpawnKeyword -> "spawn";
             case ColonToken -> ":";
             case CommaToken -> ",";
             case ArrowToken -> "->";

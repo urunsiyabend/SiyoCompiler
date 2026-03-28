@@ -144,6 +144,12 @@ public class BuiltinFunctions {
             Object.class
     );
 
+    public static final FunctionSymbol CHANNEL = new FunctionSymbol(
+            "channel",
+            List.of(),
+            SiyoChannel.class
+    );
+
     public static final FunctionSymbol SPLIT = new FunctionSymbol(
             "split",
             List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("delimiter", String.class)),
@@ -152,7 +158,7 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, SUBSTRING, CONTAINS, INPUT, ERROR,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, CHANNEL, SUBSTRING, CONTAINS, INPUT, ERROR,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT);
     }
 

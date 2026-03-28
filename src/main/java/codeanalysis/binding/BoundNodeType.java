@@ -42,4 +42,6 @@ public enum BoundNodeType {
     CastExpression,
     LambdaExpression,
     ClosureCallExpression,
+    ScopeExpression,
+    SpawnExpression,
 }
