@@ -555,7 +555,9 @@ public class Evaluator {
             try {
                 // Each spawn gets its own isolated globals copy
                 // Channel/SiyoChannel objects are shared by reference (thread-safe)
-                java.util.Map<VariableSymbol, Object> isolatedGlobals = new java.util.concurrent.ConcurrentHashMap<>(_globals);
+                // Use synchronized HashMap (not ConcurrentHashMap which rejects null values)
+                java.util.Map<VariableSymbol, Object> isolatedGlobals =
+                        java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                 Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
 
                 // Inject captured variables (immutable values + channels)

@@ -11,9 +11,16 @@ fn fetch(url: string) -> string {
         mut u = URL.new(url)
         mut conn = u.openConnection()
         mut reader = BufferedReader.new(InputStreamReader.new(conn.getInputStream()))
-        mut first = reader.readLine()
+        mut lineCount = 0
+        mut totalBytes = 0
+        mut line = reader.readLine()
+        while line != null {
+            lineCount += 1
+            totalBytes += len(toString(line))
+            line = reader.readLine()
+        }
         reader.close()
-        return "ok: " + len(toString(first)) + " bytes (first line)"
+        return "" + lineCount + " lines, " + totalBytes + " bytes"
     } catch e {
         return "error: " + toString(e)
     }
