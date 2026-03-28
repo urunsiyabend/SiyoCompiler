@@ -51,7 +51,17 @@ public class Emitter {
      */
     public byte[] emit(String className) {
         _className = className;
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                // Safe fallback for frame computation - avoids class loading issues
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (Exception | LinkageError e) {
+                    return "java/lang/Object";
+                }
+            }
+        };
         _classWriter = cw;
         cw.visit(V21, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
 
@@ -168,10 +178,11 @@ public class Emitter {
 
     private void emitFunction(ClassWriter cw, FunctionSymbol function, BoundBlockStatement body, String className) {
         if (BuiltinFunctions.isBuiltin(function)) return;
-        if (function.getModuleName() != null) return; // imported functions compiled in their own class
+        if (function.getModuleName() != null) return;
 
+        String methodName = function.getName().replace('.', '$');
         String descriptor = getFunctionDescriptor(function);
-        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName().replace('.', '$'), descriptor, null, null);
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, methodName, descriptor, null, null);
         _mv.visitCode();
         _locals.clear();
         _labels.clear();
@@ -187,7 +198,12 @@ public class Emitter {
         // Emit function body, handling implicit return for the last expression
         emitFunctionBody(body, function);
 
-        _mv.visitMaxs(0, 0);
+        try {
+            _mv.visitMaxs(0, 0);
+        } catch (Exception e) {
+            System.err.println("[ASM ERROR] Function " + function.getName() + ": " + e.getMessage());
+            throw e;
+        }
         _mv.visitEnd();
     }
 
@@ -208,9 +224,21 @@ public class Emitter {
             emitStatement(stmt);
         }
 
-        // Add default return if no explicit return was emitted
+        // Add default return for all functions (safety net for try/catch paths)
         if (function.getReturnType() == null) {
             _mv.visitInsn(RETURN);
+        } else {
+            // Push default value and return (unreachable if all paths return, but needed for frame computation)
+            if (function.getReturnType() == Integer.class || function.getReturnType() == Boolean.class) {
+                _mv.visitInsn(ICONST_0);
+                _mv.visitInsn(IRETURN);
+            } else if (function.getReturnType() == Double.class) {
+                _mv.visitInsn(DCONST_0);
+                _mv.visitInsn(DRETURN);
+            } else {
+                _mv.visitInsn(ACONST_NULL);
+                _mv.visitInsn(ARETURN);
+            }
         }
     }
 
@@ -293,22 +321,28 @@ public class Emitter {
         Label catchStart = new Label();
         Label catchEnd = new Label();
 
-        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Exception");
+        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
 
         // Try body
         _mv.visitLabel(tryStart);
-        emitStatement(node.getTryBody());
+        if (node.getTryBody() instanceof BoundBlockStatement tryBlock) {
+            emitBlockStatement(tryBlock);
+        } else {
+            emitStatement(node.getTryBody());
+        }
         _mv.visitLabel(tryEnd);
         _mv.visitJumpInsn(GOTO, catchEnd);
 
-        // Catch body
+        // Catch body - exception on stack
         _mv.visitLabel(catchStart);
-        // Exception is on stack, get message
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Exception", "getMessage", "()Ljava/lang/String;", false);
-        // Store in error variable
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Throwable", "getMessage", "()Ljava/lang/String;", false);
         int errorSlot = declareLocal(node.getErrorVariable());
         _mv.visitVarInsn(ASTORE, errorSlot);
-        emitStatement(node.getCatchBody());
+        if (node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
+            emitBlockStatement(catchBlock);
+        } else {
+            emitStatement(node.getCatchBody());
+        }
         _mv.visitLabel(catchEnd);
     }
 
@@ -1018,11 +1052,19 @@ public class Emitter {
             String paramDesc = i < paramDescs.length ? paramDescs[i] : "Ljava/lang/Object;";
 
             if (argType == Integer.class && paramDesc.equals("I")) {
-                // int → int, no conversion needed
+                // int → int
+            } else if (argType == Integer.class && paramDesc.equals("J")) {
+                _mv.visitInsn(I2L); // int → long
+            } else if (argType == Integer.class && paramDesc.equals("D")) {
+                _mv.visitInsn(I2D); // int → double
+            } else if (argType == Integer.class && paramDesc.equals("F")) {
+                _mv.visitInsn(I2F); // int → float
             } else if (argType == Boolean.class && paramDesc.equals("Z")) {
                 // bool → bool
             } else if (argType == Double.class && paramDesc.equals("D")) {
                 // double → double
+            } else if (argType == Double.class && paramDesc.equals("F")) {
+                _mv.visitInsn(D2F); // double → float
             } else if (paramDesc.startsWith("L") || paramDesc.startsWith("[")) {
                 // Reference type parameter
                 if (argType == Integer.class || argType == Boolean.class || argType == Double.class) {

@@ -193,6 +193,9 @@ public abstract class BoundTreeRewriter {
      * @return The rewritten expression statement.
      */
     protected BoundStatement rewriteTryCatchStatement(BoundTryCatchStatement node) {
+        // Lower while/for inside try/catch bodies, but DON'T lower return statements
+        // inside try body - they must remain as actual returns, not gotos,
+        // because goto jumping out of try block breaks ASM's frame computation
         BoundStatement tryBody = rewriteStatement(node.getTryBody());
         BoundStatement catchBody = rewriteStatement(node.getCatchBody());
         if (tryBody == node.getTryBody() && catchBody == node.getCatchBody()) {

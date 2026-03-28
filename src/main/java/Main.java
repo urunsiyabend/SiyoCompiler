@@ -117,11 +117,13 @@ public class Main {
             cls.getMethod("main", String[].class).invoke(null, (Object) new String[]{});
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
-                System.err.println("Error: " + e.getCause().getMessage());
+                e.getCause().printStackTrace(System.err);
+                System.err.flush();
             }
             System.exit(1);
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace(System.err);
+            System.err.flush();
             System.exit(1);
         }
     }
@@ -201,7 +203,8 @@ public class Main {
                 System.out.println(result.getValue());
             }
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace(System.err);
+            System.err.flush();
             System.exit(1);
         }
     }
