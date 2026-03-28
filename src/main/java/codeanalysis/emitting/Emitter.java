@@ -259,7 +259,7 @@ public class Emitter {
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
-        if (_globalFields.contains(node.getVariable())) {
+        if (isGlobalField(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = declareLocal(node.getVariable());
@@ -371,7 +371,7 @@ public class Emitter {
     }
 
     private void emitVariableLoad(VariableSymbol var) {
-        if (_globalFields.contains(var)) {
+        if (isGlobalField(var)) {
             _mv.visitFieldInsn(GETSTATIC, _className, var.getName(), getTypeDescriptor(var.getType()));
             return;
         }
@@ -392,7 +392,7 @@ public class Emitter {
         } else {
             _mv.visitInsn(DUP);
         }
-        if (_globalFields.contains(node.getVariable())) {
+        if (isGlobalField(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = getLocal(node.getVariable());
@@ -1371,9 +1371,22 @@ public class Emitter {
         return slot;
     }
 
+    private boolean isGlobalField(VariableSymbol var) {
+        for (VariableSymbol g : _globalFields) {
+            if (g.getName().equals(var.getName())) return true;
+        }
+        return false;
+    }
+
     private int getLocal(VariableSymbol variable) {
         Integer slot = _locals.get(variable);
         if (slot == null) {
+            // Try name-based lookup as fallback (different VariableSymbol instances with same name)
+            for (var entry : _locals.entrySet()) {
+                if (entry.getKey().getName().equals(variable.getName())) {
+                    return entry.getValue();
+                }
+            }
             throw new IllegalStateException("Variable not declared: " + variable.getName());
         }
         return slot;
@@ -1396,7 +1409,11 @@ public class Emitter {
     private void collectGlobalVariables(BoundBlockStatement block) {
         for (BoundStatement stmt : block.getStatements()) {
             if (stmt instanceof BoundVariableDeclaration varDecl) {
-                _globalFields.add(varDecl.getVariable());
+                String name = varDecl.getVariable().getName();
+                // Don't treat synthetic lowered variables as globals
+                if (!name.startsWith("_idx") && !name.startsWith("_col")) {
+                    _globalFields.add(varDecl.getVariable());
+                }
             }
         }
     }

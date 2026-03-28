@@ -917,7 +917,10 @@ public class Binder {
         // Detect captured variables and CHECK for mutable captures
         java.util.Set<VariableSymbol> captured = new java.util.LinkedHashSet<>();
         java.util.Set<VariableSymbol> mutableCaptures = new java.util.LinkedHashSet<>();
-        collectSpawnCaptures(block, captured, mutableCaptures);
+        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(block);
+
+        // Compute captures on the LOWERED (flattened) body so synthetic vars are properly detected as locals
+        collectSpawnCaptures(loweredBody, captured, mutableCaptures);
 
         // Report mutable capture errors with helpful messages
         for (VariableSymbol var : mutableCaptures) {
@@ -926,7 +929,6 @@ public class Binder {
 
         _insideSpawn = wasInSpawn;
 
-        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(block);
         return new BoundSpawnExpression(loweredBody, captured);
     }
 
