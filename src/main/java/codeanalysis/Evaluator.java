@@ -567,6 +567,7 @@ public class Evaluator {
                 taskEval.evaluateBlock(body);
                 taskEval._callStack.pop();
             } catch (Exception e) {
+                e.printStackTrace();
                 _scopeErrors.add(e);
             }
         });
