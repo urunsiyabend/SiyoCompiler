@@ -284,6 +284,7 @@ public class TypeResolver {
             case "float" -> Double.class;
             case "string" -> String.class;
             case "fn", "func", "function" -> SiyoClosure.class;
+            case "channel" -> SiyoChannel.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
     }

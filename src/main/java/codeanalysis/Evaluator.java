@@ -544,7 +544,8 @@ public class Evaluator {
         // Capture current variable values for the spawn body
         java.util.Map<VariableSymbol, Object> capturedSnapshot = new java.util.HashMap<>();
         for (VariableSymbol var : node.getCapturedVariables()) {
-            capturedSnapshot.put(var, lookupVariable(var));
+            Object val = lookupVariable(var);
+            capturedSnapshot.put(var, val);
         }
 
         // Copy current function table reference
@@ -569,7 +570,6 @@ public class Evaluator {
                 taskEval.evaluateBlock(body);
                 taskEval._callStack.pop();
             } catch (Exception e) {
-                e.printStackTrace();
                 _scopeErrors.add(e);
             }
         });

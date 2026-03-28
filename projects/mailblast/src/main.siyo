@@ -1,0 +1,85 @@
+// MailBlast - High Volume Email Marketing System
+// Multi-module: contacts, templates, campaigns, concurrent sender
+// Run: siyoc -cp lib/sqlite-jdbc.jar run projects/mailblast/src/main.siyo
+import "contact"
+import "template"
+import "campaign"
+import "sender"
+import java "java.lang.System"
+import java "java.io.File"
+
+println("========================================")
+println("  MailBlast - Email Marketing System")
+println("========================================")
+println("")
+
+// Initialize databases
+imut contactDb = ContactDB.new("mailblast.db")
+imut campaignDb = CampaignDB.new("mailblast.db")
+
+// Seed contacts
+println("[1/5] Seeding contacts...")
+contactDb.addContact("Alice Johnson", "alice@company.com", "vip,newsletter")
+contactDb.addContact("Bob Smith", "bob@startup.io", "newsletter")
+contactDb.addContact("Charlie Brown", "charlie@dev.org", "vip,developer")
+contactDb.addContact("Diana Prince", "diana@enterprise.com", "vip,newsletter")
+contactDb.addContact("Eve Wilson", "eve@tech.co", "developer,newsletter")
+contactDb.addContact("Frank Castle", "frank@bounce.invalid", "newsletter")
+contactDb.addContact("Grace Hopper", "grace@fail.invalid", "vip")
+contactDb.addContact("Hank Pym", "hank@science.org", "developer")
+contactDb.addContact("Ivy Chen", "ivy@design.studio", "newsletter")
+contactDb.addContact("Jack Ryan", "jack@gov.mil", "vip,developer")
+println("  " + contactDb.count() + " active contacts")
+println("")
+
+// Create campaign
+println("[2/5] Creating campaign...")
+imut campaignId = campaignDb.createCampaign("March Newsletter", "welcome", "newsletter")
+println("  Campaign #" + campaignId + " created")
+println("")
+
+// Load template
+println("[3/5] Loading template...")
+imut tmpl = template.createWelcomeTemplate()
+println("  Subject: " + tmpl.subject)
+println("")
+
+// Get target contacts
+println("[4/5] Resolving recipients...")
+imut contacts = contactDb.getContactsByTag("newsletter")
+mut recipientCount = 0
+for i in range(0, len(contacts)) {
+    if len(contacts[i]) > 0 {
+        imut c = contact.parseContact(contacts[i])
+        println("  -> " + c.display())
+        recipientCount += 1
+    }
+}
+println("  " + recipientCount + " recipients matched")
+println("")
+
+// Send campaign
+println("[5/5] Sending campaign with 3 workers...")
+println("  ---")
+imut startTime = System.currentTimeMillis()
+imut statsStr = sender.sendBatch(contacts, tmpl.subject, tmpl.body, 3)
+imut elapsed = System.currentTimeMillis() - startTime
+println("  ---")
+println("")
+
+// Report
+imut statsParts = split(statsStr, "|")
+imut sentCount = parseInt(statsParts[0])
+imut failCount = parseInt(statsParts[1])
+campaignDb.updateCampaignStats(campaignId, sentCount, failCount)
+
+println("========================================")
+println("  Campaign Report")
+println("========================================")
+println("  " + campaignDb.getCampaignStats(campaignId))
+println("  Duration: " + elapsed + "ms")
+println("  Throughput: ~" + recipientCount + " emails in " + elapsed + "ms")
+println("========================================")
+
+// Cleanup
+File.new("mailblast.db").delete()

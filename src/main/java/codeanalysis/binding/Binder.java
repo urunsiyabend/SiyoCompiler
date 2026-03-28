@@ -932,48 +932,99 @@ public class Binder {
 
     private void collectSpawnCaptures(BoundNode node, java.util.Set<VariableSymbol> captured,
                                        java.util.Set<VariableSymbol> mutableCaptures) {
-        // First: collect all locally declared variables in this body
-        java.util.Set<VariableSymbol> localVars = new java.util.HashSet<>();
-        collectDeclaredVars(node, localVars);
+        // First: collect all locally declared variable NAMES in this body
+        java.util.Set<String> localVarNames = new java.util.HashSet<>();
+        collectDeclaredVarNames(node, localVarNames);
 
         // Then: find referenced variables that are NOT local → these are captures
-        collectCapturedVarsFromBody(node, localVars, captured, mutableCaptures);
+        collectCapturedVarsFromBody(node, localVarNames, captured, mutableCaptures);
     }
 
-    private void collectDeclaredVars(BoundNode node, java.util.Set<VariableSymbol> locals) {
+    private void collectDeclaredVarNames(BoundNode node, java.util.Set<String> names) {
         if (node instanceof BoundVariableDeclaration decl) {
-            locals.add(decl.getVariable());
+            names.add(decl.getVariable().getName());
+            collectDeclaredVarNames(decl.getInitializer(), names);
         }
         if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectDeclaredVars(it.next(), locals);
+        // Explicit traversal matching collectCapturedVarsFromBody
+        if (node instanceof BoundBlockStatement block) {
+            for (BoundStatement stmt : block.getStatements()) { collectDeclaredVarNames(stmt, names); }
+        } else if (node instanceof BoundExpressionStatement exprStmt) {
+            collectDeclaredVarNames(exprStmt.getExpression(), names);
+        } else if (node instanceof BoundScopeExpression scopeExpr) {
+            collectDeclaredVarNames(scopeExpr.getBody(), names);
+        } else {
+            for (var it = node.getChildren(); it.hasNext(); ) { collectDeclaredVarNames(it.next(), names); }
         }
     }
 
-    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<VariableSymbol> localVars,
+    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<String> localVarNames,
                                               java.util.Set<VariableSymbol> captured,
                                               java.util.Set<VariableSymbol> mutableCaptures) {
+        // Variable reference → check if captured
         if (node instanceof BoundVariableExpression varExpr) {
             VariableSymbol var = varExpr.getVariable();
-            if (!(var instanceof ParameterSymbol) && !localVars.contains(var)) {
+            if (!localVarNames.contains(var.getName())) {
                 captured.add(var);
-                if (!var.isReadOnly() && var.getType() != SiyoChannel.class) {
+                if (!var.isReadOnly() && var.getType() != SiyoChannel.class
+                        && !var.getName().startsWith("_idx") && !var.getName().startsWith("_col")) {
                     mutableCaptures.add(var);
                 }
             }
         }
         if (node instanceof BoundAssignmentExpression assignExpr) {
             VariableSymbol var = assignExpr.getVariable();
-            if (!(var instanceof ParameterSymbol) && !localVars.contains(var)) {
+            if (!localVarNames.contains(var.getName())) {
                 captured.add(var);
-                if (!var.isReadOnly()) {
-                    mutableCaptures.add(var);
-                }
+                if (!var.isReadOnly()) { mutableCaptures.add(var); }
             }
+            collectCapturedVarsFromBody(assignExpr.getExpression(), localVarNames, captured, mutableCaptures);
         }
+        // Don't recurse into nested spawn/lambda
         if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectCapturedVarsFromBody(it.next(), localVars, captured, mutableCaptures);
+
+        // Explicit sub-expression traversal (many BoundNode.getChildren() return empty)
+        if (node instanceof BoundVariableDeclaration decl) {
+            collectCapturedVarsFromBody(decl.getInitializer(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundExpressionStatement exprStmt) {
+            collectCapturedVarsFromBody(exprStmt.getExpression(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundIndexExpression indexExpr) {
+            collectCapturedVarsFromBody(indexExpr.getTarget(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(indexExpr.getIndex(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundCallExpression callExpr) {
+            for (BoundExpression arg : callExpr.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundBinaryExpression binExpr) {
+            collectCapturedVarsFromBody(binExpr.getLeft(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(binExpr.getRight(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundUnaryExpression unaryExpr) {
+            collectCapturedVarsFromBody(unaryExpr.getOperand(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundConditionalGotoStatement condGoto) {
+            collectCapturedVarsFromBody(condGoto.getCondition(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundJavaMethodCallExpression javaCall) {
+            if (javaCall.getTarget() != null) collectCapturedVarsFromBody(javaCall.getTarget(), localVarNames, captured, mutableCaptures);
+            for (BoundExpression arg : javaCall.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundClosureCallExpression closureCall) {
+            collectCapturedVarsFromBody(closureCall.getClosure(), localVarNames, captured, mutableCaptures);
+            for (BoundExpression arg : closureCall.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundIndexAssignmentExpression idxAssign) {
+            collectCapturedVarsFromBody(idxAssign.getTarget(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(idxAssign.getIndex(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(idxAssign.getValue(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundMemberAccessExpression memberExpr) {
+            collectCapturedVarsFromBody(memberExpr.getTarget(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundScopeExpression scopeExpr) {
+            collectCapturedVarsFromBody(scopeExpr.getBody(), localVarNames, captured, mutableCaptures);
+        } else {
+            // Fallback: use getChildren() for anything not explicitly handled
+            for (var it = node.getChildren(); it.hasNext(); ) {
+                collectCapturedVarsFromBody(it.next(), localVarNames, captured, mutableCaptures);
+            }
         }
     }
 
