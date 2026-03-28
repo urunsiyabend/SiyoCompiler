@@ -553,9 +553,12 @@ public class Evaluator {
 
         Thread thread = Thread.startVirtualThread(() -> {
             try {
-                // Create isolated evaluator for this task
-                Evaluator taskEval = new Evaluator(body, _globals, funcsCopy);
-                // Inject captured variables
+                // Each spawn gets its own isolated globals copy
+                // Channel/SiyoChannel objects are shared by reference (thread-safe)
+                java.util.Map<VariableSymbol, Object> isolatedGlobals = new java.util.concurrent.ConcurrentHashMap<>(_globals);
+                Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
+
+                // Inject captured variables (immutable values + channels)
                 StackFrame frame = new StackFrame(null);
                 for (var entry : capturedSnapshot.entrySet()) {
                     frame.getLocals().put(entry.getKey(), entry.getValue());
