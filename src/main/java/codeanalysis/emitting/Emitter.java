@@ -28,6 +28,7 @@ public class Emitter {
     private int _nextLocal = 0;
     private boolean _inMainMethod = false;
     private boolean _needsScanner = false;
+    private java.util.Set<VariableSymbol> _spawnCapturedVars = null;
 
     // Lambda/closure tracking for bytecode emission
     private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
@@ -187,6 +188,7 @@ public class Emitter {
         _locals.clear();
         _labels.clear();
         _nextLocal = 0;
+        _inMainMethod = false; // user functions should not access global fields by name
 
         // Allocate parameter slots
         for (ParameterSymbol param : function.getParameters()) {
@@ -410,7 +412,27 @@ public class Emitter {
             return;
         }
         int slot = getLocal(var);
+        // Spawn captured variables are passed as Object - need ALOAD + unbox
+        if (_spawnCapturedVars != null && isCapturedVar(var)) {
+            _mv.visitVarInsn(ALOAD, slot);
+            if (var.getType() == Integer.class) emitUnboxIfNeeded(Integer.class);
+            else if (var.getType() == Double.class) emitUnboxIfNeeded(Double.class);
+            else if (var.getType() == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+            else if (var.getType() == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            else if (var.getType() == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoArray");
+            else if (var.getType() == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
+            // Other reference types stay as Object
+            return;
+        }
         emitLoad(var.getType(), slot);
+    }
+
+    private boolean isCapturedVar(VariableSymbol var) {
+        if (_spawnCapturedVars == null) return false;
+        for (VariableSymbol cv : _spawnCapturedVars) {
+            if (cv.getName().equals(var.getName())) return true;
+        }
+        return false;
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {
@@ -878,6 +900,7 @@ public class Emitter {
         _nextLocal = 0;
         boolean savedInMain = _inMainMethod;
         _inMainMethod = false;
+        _inIsolatedMethod = true;
 
         // Map captured variables to local slots
         for (VariableSymbol captured : lambda.getCapturedVariables()) {
@@ -895,6 +918,7 @@ public class Emitter {
         _mv.visitMaxs(0, 0);
         _mv.visitEnd();
         _inMainMethod = savedInMain;
+        _inIsolatedMethod = false;
     }
 
     private void emitSpawnMethod(ClassWriter cw, int index, BoundSpawnExpression spawn) {
@@ -913,15 +937,25 @@ public class Emitter {
         boolean savedInMain = _inMainMethod;
         _inMainMethod = false;
 
-        for (VariableSymbol captured : spawn.getCapturedVariables()) {
-            _locals.put(captured, _nextLocal++);
+        // Captured variables come in as Object parameters - store and unbox on use
+        java.util.Set<VariableSymbol> capturedSet = spawn.getCapturedVariables();
+        for (VariableSymbol captured : capturedSet) {
+            int slot = _nextLocal++;
+            _locals.put(captured, slot);
+            // Mark as Object for proper load instruction (ALOAD not ILOAD)
+            // Create a wrapper variable with Object type for the local slot
         }
+        _spawnCapturedVars = capturedSet;
+        _inIsolatedMethod = true;
 
         emitBlockStatement(spawn.getBody());
+        _spawnCapturedVars = null;
+        _inIsolatedMethod = false;
         _mv.visitInsn(RETURN);
         _mv.visitMaxs(0, 0);
         _mv.visitEnd();
         _inMainMethod = savedInMain;
+        _inIsolatedMethod = false;
     }
 
     private void emitClosureDispatch(ClassWriter cw) {
@@ -1224,6 +1258,9 @@ public class Emitter {
 
         if (function == BuiltinFunctions.PARSE_INT) {
             emitExpression(node.getArguments().get(0));
+            if (node.getArguments().get(0).getClassType() != String.class) {
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            }
             _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "parseInt", "(Ljava/lang/String;)I", false);
             return;
         }
@@ -1340,8 +1377,24 @@ public class Emitter {
         }
 
         // User-defined functions: push args and invoke static method
-        for (BoundExpression arg : node.getArguments()) {
+        for (int ai = 0; ai < node.getArguments().size(); ai++) {
+            BoundExpression arg = node.getArguments().get(ai);
             emitExpression(arg);
+            // Type coercion: if arg is Object but param expects String, cast
+            if (ai < function.getParameters().size()) {
+                Class<?> paramType = function.getParameters().get(ai).getType();
+                Class<?> argType = arg.getClassType();
+                if (argType != paramType && argType == Object.class) {
+                    if (paramType == Integer.class) emitUnboxIfNeeded(Integer.class);
+                    else if (paramType == Double.class) emitUnboxIfNeeded(Double.class);
+                    else if (paramType == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+                    else if (paramType == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+                    else if (paramType == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoArray");
+                    else if (paramType == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
+                    else if (paramType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
+                    else if (paramType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+                }
+            }
         }
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
@@ -1413,9 +1466,17 @@ public class Emitter {
         return slot;
     }
 
+    private boolean _inIsolatedMethod = false; // true in spawn/lambda methods
+
     private boolean isGlobalField(VariableSymbol var) {
-        for (VariableSymbol g : _globalFields) {
-            if (g.getName().equals(var.getName())) return true;
+        if (_inIsolatedMethod) return false;
+        // Use reference equality first (same VariableSymbol instance)
+        if (_globalFields.contains(var)) return true;
+        // For main method, also try name-based (lowered vars may have different instances)
+        if (_inMainMethod) {
+            for (VariableSymbol g : _globalFields) {
+                if (g.getName().equals(var.getName())) return true;
+            }
         }
         return false;
     }
