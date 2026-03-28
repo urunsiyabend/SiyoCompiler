@@ -975,6 +975,7 @@ public class Emitter {
         if (sig != null && sig.isStatic()) {
             emitJavaArgs(node.getArguments(), sig);
             _mv.visitMethodInsn(INVOKESTATIC, sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
+            emitJavaReturnConversion(sig);
             return;
         }
 
@@ -985,6 +986,7 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, sig.getOwnerInternalName());
             emitJavaArgs(node.getArguments(), sig);
             _mv.visitMethodInsn(sig.getInvokeOpcode(), sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
+            emitJavaReturnConversion(sig);
         } else {
             // Unresolved instance method - fallback with Object boxing
             for (BoundExpression arg : node.getArguments()) {
@@ -997,6 +999,15 @@ public class Emitter {
             desc.append(")Ljava/lang/Object;");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", node.getMethodName(), desc.toString(), false);
         }
+    }
+
+    /** Convert Java return types to Siyo types on the stack */
+    private void emitJavaReturnConversion(JavaMethodSignature sig) {
+        String ret = sig.getReturnDescriptor();
+        if (ret.equals("J")) _mv.visitInsn(L2I);           // long → int
+        else if (ret.equals("F")) _mv.visitInsn(F2D);      // float → double
+        else if (ret.equals("B") || ret.equals("S")) {} // byte/short already widened to int by JVM
+        else if (ret.equals("C")) _mv.visitInsn(I2C);      // keep as int (char → int)
     }
 
     private void emitJavaArgs(java.util.List<BoundExpression> arguments, JavaMethodSignature sig) {
@@ -1292,8 +1303,14 @@ public class Emitter {
         }
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
-        // For imported functions, name is "module.func" - extract just the function name
-        String methodName = function.getName().replace('.', '$');
+        String methodName;
+        if (function.getModuleName() != null && function.getName().contains(".")) {
+            // Module function: "collections.arrayToString" → "arrayToString" (in module's class)
+            methodName = function.getName().substring(function.getName().lastIndexOf('.') + 1);
+        } else {
+            // Local or impl function: "User.greet" → "User$greet"
+            methodName = function.getName().replace('.', '$');
+        }
         _mv.visitMethodInsn(INVOKESTATIC, owner, methodName, descriptor, false);
     }
 

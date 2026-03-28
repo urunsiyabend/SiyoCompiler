@@ -163,6 +163,9 @@ public class BuiltinFunctions {
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
-        return getAll().contains(function);
+        for (FunctionSymbol builtin : getAll()) {
+            if (builtin == function) return true; // reference equality, not name-based
+        }
+        return false;
     }
 }

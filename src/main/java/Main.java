@@ -21,6 +21,9 @@ public class Main {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
+        if (System.getenv("SIYO_DEBUG") != null) {
+            System.err.println("[debug] args=" + java.util.Arrays.toString(args));
+        }
         // Parse -cp flag: siyoc -cp lib.jar run file.siyo
         String classpath = null;
         java.util.List<String> remaining = new java.util.ArrayList<>();
@@ -71,7 +74,9 @@ public class Main {
 
             String fileName = java.nio.file.Paths.get(path).getFileName().toString();
             String classNameRaw = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-            final String className = Character.toUpperCase(classNameRaw.charAt(0)) + classNameRaw.substring(1);
+            String classNameBase = Character.toUpperCase(classNameRaw.charAt(0)) + classNameRaw.substring(1);
+            // Avoid collision with compiler's own Main class
+            final String className = classNameBase.equals("Main") ? "Siyo_Main" : classNameBase;
 
             byte[] bytecode = compilation.compile(className);
             if (bytecode == null) {
