@@ -33,7 +33,7 @@ public abstract class BoundTreeRewriter {
             case ReturnStatement -> rewriteReturnStatement((BoundReturnStatement) node);
             case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
             case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
-            case TryCatchStatement -> node; // pass through
+            case TryCatchStatement -> rewriteTryCatchStatement((BoundTryCatchStatement) node);
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -192,6 +192,15 @@ public abstract class BoundTreeRewriter {
      * @param node The expression statement to rewrite.
      * @return The rewritten expression statement.
      */
+    protected BoundStatement rewriteTryCatchStatement(BoundTryCatchStatement node) {
+        BoundStatement tryBody = rewriteStatement(node.getTryBody());
+        BoundStatement catchBody = rewriteStatement(node.getCatchBody());
+        if (tryBody == node.getTryBody() && catchBody == node.getCatchBody()) {
+            return node;
+        }
+        return new BoundTryCatchStatement(tryBody, node.getErrorVariable(), catchBody);
+    }
+
     protected BoundStatement rewriteExpressionStatement(BoundExpressionStatement node) {
         var expression = rewriteExpression(node.getExpression());
         if (expression == node.getExpression()) {

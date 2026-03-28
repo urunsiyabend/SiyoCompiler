@@ -27,6 +27,7 @@ public class Emitter {
     private final java.util.Set<VariableSymbol> _globalFields = new java.util.HashSet<>();
     private int _nextLocal = 0;
     private boolean _inMainMethod = false;
+    private boolean _needsScanner = false;
 
     // Lambda/closure tracking for bytecode emission
     private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
@@ -61,10 +62,13 @@ public class Emitter {
             collectLambdasAndSpawns(body);
         }
 
-        // Generate static fields for global variables
+        // Generate static fields for global variables (dedup by name)
+        java.util.Set<String> emittedFields = new java.util.HashSet<>();
         for (VariableSymbol global : _globalFields) {
-            String desc = getTypeDescriptor(global.getType());
-            cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
+            if (emittedFields.add(global.getName())) {
+                String desc = getTypeDescriptor(global.getType());
+                cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
+            }
         }
 
         // Generate default constructor
@@ -101,6 +105,21 @@ public class Emitter {
         // Emit helper methods if needed
         if (_needsRangeHelper) {
             emitRangeHelper(cw);
+        }
+
+        // Generate shared Scanner field if needed
+        if (_needsScanner) {
+            cw.visitField(ACC_STATIC, "$scanner", "Ljava/util/Scanner;", null, null).visitEnd();
+            MethodVisitor clinit = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
+            clinit.visitCode();
+            clinit.visitTypeInsn(NEW, "java/util/Scanner");
+            clinit.visitInsn(DUP);
+            clinit.visitFieldInsn(GETSTATIC, "java/lang/System", "in", "Ljava/io/InputStream;");
+            clinit.visitMethodInsn(INVOKESPECIAL, "java/util/Scanner", "<init>", "(Ljava/io/InputStream;)V", false);
+            clinit.visitFieldInsn(PUTSTATIC, className, "$scanner", "Ljava/util/Scanner;");
+            clinit.visitInsn(RETURN);
+            clinit.visitMaxs(0, 0);
+            clinit.visitEnd();
         }
 
         cw.visitEnd();
@@ -527,8 +546,17 @@ public class Emitter {
                 default -> throw new UnsupportedOperationException();
             };
             _mv.visitJumpInsn(jumpInsn, trueLabel);
+        } else if (type == String.class) {
+            // String value equality via Objects.equals
+            _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
+            if (node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
+                _mv.visitInsn(ICONST_1);
+                _mv.visitInsn(IXOR);
+            }
+            return; // Objects.equals already returns boolean
         } else {
-            // Object equality (String, null, etc.)
+            // Object reference equality
             int jumpInsn = switch (node.getOperator().getType()) {
                 case Equals -> IF_ACMPEQ;
                 case NotEquals -> IF_ACMPNE;
@@ -1103,12 +1131,10 @@ public class Emitter {
             _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
             emitExpression(node.getArguments().get(0));
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "print", "(Ljava/lang/String;)V", false);
-            // read line
-            _mv.visitTypeInsn(NEW, "java/util/Scanner");
-            _mv.visitInsn(DUP);
-            _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "in", "Ljava/io/InputStream;");
-            _mv.visitMethodInsn(INVOKESPECIAL, "java/util/Scanner", "<init>", "(Ljava/io/InputStream;)V", false);
+            // read line using shared static Scanner
+            _mv.visitFieldInsn(GETSTATIC, _className, "$scanner", "Ljava/util/Scanner;");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/util/Scanner", "nextLine", "()Ljava/lang/String;", false);
+            _needsScanner = true;
             return;
         }
         if (function == BuiltinFunctions.PRINTLN) {

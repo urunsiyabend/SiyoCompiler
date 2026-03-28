@@ -39,7 +39,11 @@ public class Main {
 
         String[] cargs = remaining.toArray(new String[0]);
         if (cargs.length >= 2 && cargs[0].equals("run")) {
-            runFile(cargs[1]);
+            compileAndRun(cargs[1]); // bytecode default (26x faster)
+            return;
+        }
+        if (cargs.length >= 2 && cargs[0].equals("interpret")) {
+            runFile(cargs[1]); // interpreter path (for debugging)
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("compile")) {
