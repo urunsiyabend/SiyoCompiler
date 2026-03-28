@@ -225,6 +225,9 @@ public class TypeResolver {
         if (type == String.class) {
             return getOrLoadJavaClass("String", "java.lang.String");
         }
+        if (type == SiyoChannel.class) {
+            return getOrLoadJavaClass("SiyoChannel", "codeanalysis.SiyoChannel");
+        }
         return null;
     }
 

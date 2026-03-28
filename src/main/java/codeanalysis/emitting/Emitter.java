@@ -28,6 +28,11 @@ public class Emitter {
     private int _nextLocal = 0;
     private boolean _inMainMethod = false;
 
+    // Lambda/closure tracking for bytecode emission
+    private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
+    private final java.util.List<BoundSpawnExpression> _spawns = new java.util.ArrayList<>();
+    private ClassWriter _classWriter; // keep reference for lambda method emission
+
     public Emitter(BoundBlockStatement statement, Map<FunctionSymbol, BoundBlockStatement> functions) {
         _statement = statement;
         _functions = functions;
@@ -46,10 +51,15 @@ public class Emitter {
     public byte[] emit(String className) {
         _className = className;
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        cw.visit(V17, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
+        _classWriter = cw;
+        cw.visit(V21, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
 
-        // First pass: collect global variables from main body
+        // First pass: collect global variables and lambdas
         collectGlobalVariables(_statement);
+        collectLambdasAndSpawns(_statement);
+        for (var body : _functions.values()) {
+            collectLambdasAndSpawns(body);
+        }
 
         // Generate static fields for global variables
         for (VariableSymbol global : _globalFields) {
@@ -65,8 +75,28 @@ public class Emitter {
             emitFunction(cw, entry.getKey(), entry.getValue(), className);
         }
 
-        // Generate main method with the top-level statements
+        // Generate main method FIRST (collects lambdas/spawns during emission)
         emitMainMethod(cw, className);
+
+        // Generate lambda methods (discovered during main emission)
+        for (int i = 0; i < _lambdas.size(); i++) {
+            emitLambdaMethod(cw, i, _lambdas.get(i));
+        }
+
+        // Generate spawn methods
+        for (int i = 0; i < _spawns.size(); i++) {
+            emitSpawnMethod(cw, i, _spawns.get(i));
+        }
+
+        // Generate closure dispatch method
+        if (!_lambdas.isEmpty()) {
+            emitClosureDispatch(cw);
+        }
+
+        // Generate spawn wrapper methods
+        if (!_spawns.isEmpty()) {
+            emitSpawnWrapperMethods(cw);
+        }
 
         // Emit helper methods if needed
         if (_needsRangeHelper) {
@@ -292,6 +322,10 @@ public class Emitter {
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> emitJavaStaticField((BoundJavaStaticFieldExpression) node);
             case CastExpression -> emitCastExpression((BoundCastExpression) node);
+            case LambdaExpression -> emitLambdaCreation((BoundLambdaExpression) node);
+            case ClosureCallExpression -> emitClosureCall((BoundClosureCallExpression) node);
+            case ScopeExpression -> emitScope((BoundScopeExpression) node);
+            case SpawnExpression -> emitSpawn((BoundSpawnExpression) node);
             default -> throw new UnsupportedOperationException("Cannot emit expression: " + node.getType());
         }
     }
@@ -314,12 +348,16 @@ public class Emitter {
     }
 
     private void emitVariableExpression(BoundVariableExpression node) {
-        if (_globalFields.contains(node.getVariable())) {
-            _mv.visitFieldInsn(GETSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(node.getVariable().getType()));
+        emitVariableLoad(node.getVariable());
+    }
+
+    private void emitVariableLoad(VariableSymbol var) {
+        if (_globalFields.contains(var)) {
+            _mv.visitFieldInsn(GETSTATIC, _className, var.getName(), getTypeDescriptor(var.getType()));
             return;
         }
-        int slot = getLocal(node.getVariable());
-        emitLoad(node.getVariable().getType(), slot);
+        int slot = getLocal(var);
+        emitLoad(var.getType(), slot);
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {
@@ -532,6 +570,354 @@ public class Emitter {
             appendDesc = "(Ljava/lang/Object;)Ljava/lang/StringBuilder;";
         }
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", appendDesc, false);
+    }
+
+    // ========== Lambda/Spawn Expression Emission ==========
+
+    private void emitLambdaCreation(BoundLambdaExpression node) {
+        int index = _lambdas.indexOf(node);
+        if (index < 0) { _lambdas.add(node); index = _lambdas.size() - 1; }
+
+        // Create Object[2] = {Integer(lambdaId), Object[]{captured}}
+        _mv.visitLdcInsn(2);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+
+        // [0] = lambdaId
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(0);
+        _mv.visitLdcInsn(index);
+        _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", false);
+        _mv.visitInsn(AASTORE);
+
+        // [1] = captured array
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(1);
+        int capturedSize = node.getCapturedVariables().size();
+        _mv.visitLdcInsn(capturedSize);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        int ci = 0;
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(ci++);
+            emitVariableLoad(var);
+            emitBoxIfNeeded(var.getType());
+            _mv.visitInsn(AASTORE);
+        }
+        _mv.visitInsn(AASTORE);
+        // Stack: Object[2] (the closure representation)
+    }
+
+    private void emitClosureCall(BoundClosureCallExpression node) {
+        // closure is Object[2] = {Integer(lambdaId), Object[]{captured}}
+        emitExpression(node.getClosure());
+        int closureLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, closureLocal);
+
+        // Extract lambdaId
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitLdcInsn(0);
+        _mv.visitInsn(AALOAD);
+        _mv.visitTypeInsn(CHECKCAST, "java/lang/Integer");
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Integer", "intValue", "()I", false);
+        int lambdaIdLocal = _nextLocal++;
+        _mv.visitVarInsn(ISTORE, lambdaIdLocal);
+
+        // Extract captured array
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitLdcInsn(1);
+        _mv.visitInsn(AALOAD);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        int capturedLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, capturedLocal);
+
+        // Build args array
+        int argCount = node.getArguments().size();
+        _mv.visitLdcInsn(argCount);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        for (int i = 0; i < argCount; i++) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(i);
+            emitExpression(node.getArguments().get(i));
+            emitBoxIfNeeded(node.getArguments().get(i).getClassType());
+            _mv.visitInsn(AASTORE);
+        }
+        int argsLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, argsLocal);
+
+        // Call dispatch: closureDispatch$(lambdaId, captured, args)
+        _mv.visitVarInsn(ILOAD, lambdaIdLocal);
+        _mv.visitVarInsn(ALOAD, capturedLocal);
+        _mv.visitVarInsn(ALOAD, argsLocal);
+        _mv.visitMethodInsn(INVOKESTATIC, _className, "closureDispatch$",
+                "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+    }
+
+    private void emitScope(BoundScopeExpression node) {
+        // Create thread list: ArrayList<Thread>
+        _mv.visitTypeInsn(NEW, "java/util/ArrayList");
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
+        int threadsLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, threadsLocal);
+
+        // Save threads list local for spawn to use
+        int savedScopeThreadsLocal = _scopeThreadsLocal;
+        _scopeThreadsLocal = threadsLocal;
+
+        // Emit body (spawns will add threads to the list)
+        emitBlockStatement(node.getBody());
+
+        // Join all threads
+        _mv.visitVarInsn(ALOAD, threadsLocal);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", true);
+        Label loopStart = new Label();
+        Label loopEnd = new Label();
+        _mv.visitLabel(loopStart);
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Iterator", "hasNext", "()Z", true);
+        _mv.visitJumpInsn(IFEQ, loopEnd);
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Iterator", "next", "()Ljava/lang/Object;", true);
+        _mv.visitTypeInsn(CHECKCAST, "java/lang/Thread");
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Thread", "join", "()V", false);
+        _mv.visitJumpInsn(GOTO, loopStart);
+        _mv.visitLabel(loopEnd);
+        _mv.visitInsn(POP); // pop iterator
+
+        _scopeThreadsLocal = savedScopeThreadsLocal;
+    }
+
+    private int _scopeThreadsLocal = -1;
+
+    private void emitSpawn(BoundSpawnExpression node) {
+        int index = _spawns.indexOf(node);
+        if (index < 0) { _spawns.add(node); index = _spawns.size() - 1; }
+        // Create Runnable that calls spawn$N with captured vars
+        // Use an Object[] to pass captured vars
+        int capturedSize = node.getCapturedVariables().size();
+
+        // Build captured array
+        _mv.visitLdcInsn(capturedSize);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        int ci = 0;
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(ci++);
+            emitVariableLoad(var);
+            emitBoxIfNeeded(var.getType());
+            _mv.visitInsn(AASTORE);
+        }
+        int capturedLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, capturedLocal);
+
+        // Use INVOKEDYNAMIC + LambdaMetafactory to create Runnable
+        // The Runnable will call spawn$N with unpacked captured vars from the array
+        // But LambdaMetafactory needs a direct method reference, not runtime dispatch.
+        // Simplest correct approach: generate a wrapper static method that takes Object[]
+        // and dispatches to the right spawn$N, then use INVOKEDYNAMIC for that.
+
+        // Actually simplest: generate spawn$dispatch$N(Object[]) for each spawn
+        // and use INVOKEDYNAMIC to wrap it as Runnable
+        _mv.visitVarInsn(ALOAD, capturedLocal);
+        // INVOKEDYNAMIC: create Runnable from spawn$wrap$N(Object[])
+        org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
+                H_INVOKESTATIC, "java/lang/invoke/LambdaMetafactory", "metafactory",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                false);
+        org.objectweb.asm.Handle implHandle = new org.objectweb.asm.Handle(
+                H_INVOKESTATIC, _className, "spawn$wrap$" + index,
+                "([Ljava/lang/Object;)V", false);
+        _mv.visitInvokeDynamicInsn("run", "([Ljava/lang/Object;)Ljava/lang/Runnable;",
+                bootstrap,
+                org.objectweb.asm.Type.getType("()V"),
+                implHandle,
+                org.objectweb.asm.Type.getType("()V"));
+        _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Thread", "startVirtualThread",
+                "(Ljava/lang/Runnable;)Ljava/lang/Thread;", false);
+
+        // Add to scope's thread list
+        if (_scopeThreadsLocal >= 0) {
+            _mv.visitInsn(DUP);
+            int threadLocal = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, threadLocal);
+            _mv.visitVarInsn(ALOAD, _scopeThreadsLocal);
+            _mv.visitVarInsn(ALOAD, threadLocal);
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
+            _mv.visitInsn(POP); // discard boolean
+        } else {
+            _mv.visitInsn(POP); // discard thread if no scope
+        }
+    }
+
+    private void emitSpawnWrapperMethods(ClassWriter cw) {
+        for (int i = 0; i < _spawns.size(); i++) {
+            BoundSpawnExpression spawn = _spawns.get(i);
+            // spawn$wrap$N(Object[] captured) -> void
+            // Unpacks captured array and calls spawn$N(captured0, captured1, ...)
+            _mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "spawn$wrap$" + i,
+                    "([Ljava/lang/Object;)V", null, null);
+            _mv.visitCode();
+
+            int ci = 0;
+            for (VariableSymbol var : spawn.getCapturedVariables()) {
+                _mv.visitVarInsn(ALOAD, 0); // captured array
+                _mv.visitLdcInsn(ci++);
+                _mv.visitInsn(AALOAD);
+            }
+
+            // Build descriptor for spawn$N
+            StringBuilder desc = new StringBuilder("(");
+            for (int c = 0; c < spawn.getCapturedVariables().size(); c++) {
+                desc.append("Ljava/lang/Object;");
+            }
+            desc.append(")V");
+
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "spawn$" + i, desc.toString(), false);
+            _mv.visitInsn(RETURN);
+            _mv.visitMaxs(0, 0);
+            _mv.visitEnd();
+        }
+    }
+
+    // ========== Lambda/Spawn Method Emission ==========
+
+    private void collectLambdasAndSpawns(BoundNode node) {
+        if (node instanceof BoundLambdaExpression lambda) {
+            if (!_lambdas.contains(lambda)) _lambdas.add(lambda);
+            collectLambdasAndSpawns(lambda.getBody());
+        }
+        if (node instanceof BoundSpawnExpression spawn) {
+            if (!_spawns.contains(spawn)) _spawns.add(spawn);
+            collectLambdasAndSpawns(spawn.getBody());
+        }
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectLambdasAndSpawns(it.next());
+        }
+    }
+
+    private void emitLambdaMethod(ClassWriter cw, int index, BoundLambdaExpression lambda) {
+        // Method signature: lambda$N(captured0, captured1, ..., param0, param1, ...) -> Object
+        StringBuilder desc = new StringBuilder("(");
+        for (VariableSymbol captured : lambda.getCapturedVariables()) {
+            desc.append("Ljava/lang/Object;");
+        }
+        for (ParameterSymbol param : lambda.getParameters()) {
+            desc.append(getTypeDescriptor(param.getType()));
+        }
+        desc.append(")");
+        desc.append(lambda.getReturnType() != null ? getTypeDescriptor(lambda.getReturnType()) : "V");
+
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "lambda$" + index, desc.toString(), null, null);
+        _mv.visitCode();
+        _locals.clear();
+        _labels.clear();
+        _nextLocal = 0;
+        boolean savedInMain = _inMainMethod;
+        _inMainMethod = false;
+
+        // Map captured variables to local slots
+        for (VariableSymbol captured : lambda.getCapturedVariables()) {
+            _locals.put(captured, _nextLocal++);
+        }
+        // Map parameters to local slots
+        for (ParameterSymbol param : lambda.getParameters()) {
+            _locals.put(param, _nextLocal);
+            _nextLocal += (param.getType() == Double.class) ? 2 : 1;
+        }
+
+        // Emit body
+        FunctionSymbol tempFunc = new FunctionSymbol("lambda$" + index, lambda.getParameters(), lambda.getReturnType());
+        emitFunctionBody(lambda.getBody(), tempFunc);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+        _inMainMethod = savedInMain;
+    }
+
+    private void emitSpawnMethod(ClassWriter cw, int index, BoundSpawnExpression spawn) {
+        // spawn$N(captured0, captured1, ...) -> void
+        StringBuilder desc = new StringBuilder("(");
+        for (VariableSymbol captured : spawn.getCapturedVariables()) {
+            desc.append("Ljava/lang/Object;");
+        }
+        desc.append(")V");
+
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "spawn$" + index, desc.toString(), null, null);
+        _mv.visitCode();
+        _locals.clear();
+        _labels.clear();
+        _nextLocal = 0;
+        boolean savedInMain = _inMainMethod;
+        _inMainMethod = false;
+
+        for (VariableSymbol captured : spawn.getCapturedVariables()) {
+            _locals.put(captured, _nextLocal++);
+        }
+
+        emitBlockStatement(spawn.getBody());
+        _mv.visitInsn(RETURN);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+        _inMainMethod = savedInMain;
+    }
+
+    private void emitClosureDispatch(ClassWriter cw) {
+        // closureDispatch(int lambdaId, Object[] captured, Object[] args) -> Object
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "closureDispatch$",
+                "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", null, null);
+        _mv.visitCode();
+
+        Label defaultLabel = new Label();
+        Label[] labels = new Label[_lambdas.size()];
+        for (int i = 0; i < labels.length; i++) labels[i] = new Label();
+
+        _mv.visitVarInsn(ILOAD, 0); // lambdaId
+        _mv.visitTableSwitchInsn(0, _lambdas.size() - 1, defaultLabel, labels);
+
+        for (int i = 0; i < _lambdas.size(); i++) {
+            _mv.visitLabel(labels[i]);
+            BoundLambdaExpression lambda = _lambdas.get(i);
+
+            // Push captured vars from array
+            int argIdx = 0;
+            for (VariableSymbol captured : lambda.getCapturedVariables()) {
+                _mv.visitVarInsn(ALOAD, 1); // captured array
+                _mv.visitLdcInsn(argIdx++);
+                _mv.visitInsn(AALOAD);
+            }
+            // Push params from args array
+            int paramIdx = 0;
+            for (ParameterSymbol param : lambda.getParameters()) {
+                _mv.visitVarInsn(ALOAD, 2); // args array
+                _mv.visitLdcInsn(paramIdx++);
+                _mv.visitInsn(AALOAD);
+                emitUnboxIfNeeded(param.getType());
+            }
+
+            // Build descriptor
+            StringBuilder desc = new StringBuilder("(");
+            for (int c = 0; c < lambda.getCapturedVariables().size(); c++) desc.append("Ljava/lang/Object;");
+            for (ParameterSymbol param : lambda.getParameters()) desc.append(getTypeDescriptor(param.getType()));
+            desc.append(")");
+            desc.append(lambda.getReturnType() != null ? getTypeDescriptor(lambda.getReturnType()) : "V");
+
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "lambda$" + i, desc.toString(), false);
+
+            if (lambda.getReturnType() != null) {
+                emitBoxIfNeeded(lambda.getReturnType());
+                _mv.visitInsn(ARETURN);
+            } else {
+                _mv.visitInsn(ACONST_NULL);
+                _mv.visitInsn(ARETURN);
+            }
+        }
+
+        _mv.visitLabel(defaultLabel);
+        _mv.visitInsn(ACONST_NULL);
+        _mv.visitInsn(ARETURN);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
     }
 
     // ========== Java Interop Emission ==========
@@ -785,6 +1171,12 @@ public class Emitter {
             emitExpression(node.getArguments().get(1)); // end
             _mv.visitMethodInsn(INVOKESTATIC, _className, "$range", "(II)Ljava/util/List;", false);
             _needsRangeHelper = true;
+            return;
+        }
+        if (function == BuiltinFunctions.CHANNEL) {
+            _mv.visitTypeInsn(NEW, "codeanalysis/SiyoChannel");
+            _mv.visitInsn(DUP);
+            _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoChannel", "<init>", "()V", false);
             return;
         }
         if (function == BuiltinFunctions.PUSH) {
