@@ -164,6 +164,7 @@ public class Parser {
             case ContinueKeyword -> parseContinueStatement();
             case StructKeyword -> parseStructDeclaration();
             case ImplKeyword -> parseImplDeclaration();
+            case ActorKeyword -> parseActorDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
             case TryKeyword -> parseTryCatchStatement();
             case ImportKeyword -> parseImportStatement();
@@ -497,6 +498,34 @@ public class Parser {
         return new LambdaExpressionSyntax(fnKeyword, openParen, parameters, closeParen, typeClause, body);
     }
 
+    private StatementSyntax parseActorDeclaration() {
+        // actor Name { fields } — same as struct but marked as actor
+        SyntaxToken actorKeyword = match(SyntaxType.ActorKeyword);
+        SyntaxToken name = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+        java.util.List<ParameterSyntax> fields = new java.util.ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
+            SyntaxToken colon = match(SyntaxType.ColonToken);
+            SyntaxToken fieldType;
+            if (current().getType() == SyntaxType.FnKeyword) {
+                SyntaxToken fnToken = nextToken();
+                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            } else {
+                fieldType = match(SyntaxType.IdentifierToken);
+            }
+            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+                nextToken(); nextToken();
+                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(), fieldType.getData() + "[]", fieldType.getValue());
+            }
+            fields.add(new ParameterSyntax(fieldName, colon, fieldType));
+            if (current().getType() == SyntaxType.CommaToken) nextToken();
+        }
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        // Reuse StructDeclarationSyntax but tag it as actor
+        return new ActorDeclarationSyntax(actorKeyword, name, openBrace, fields, closeBrace);
+    }
+
     private StatementSyntax parseImplDeclaration() {
         SyntaxToken implKeyword = match(SyntaxType.ImplKeyword);
         SyntaxToken typeName = match(SyntaxType.IdentifierToken);
@@ -671,8 +700,15 @@ public class Parser {
             }
             case SpawnKeyword -> {
                 SyntaxToken keyword = nextToken();
-                StatementSyntax body = parseBlockStatement();
-                yield new SpawnExpressionSyntax(keyword, body);
+                if (current().getType() == SyntaxType.OpenBraceToken) {
+                    // spawn { block } — structured spawn
+                    StatementSyntax body = parseBlockStatement();
+                    yield new SpawnExpressionSyntax(keyword, body);
+                } else {
+                    // spawn Expr — actor spawn (e.g., spawn Store.new())
+                    ExpressionSyntax spawnExpr = parseBinaryExpression();
+                    yield new SpawnExpressionSyntax(keyword, new ExpressionStatementSyntax(spawnExpr));
+                }
             }
             case SelfKeyword -> {
                 // self keyword used as expression → treat as identifier

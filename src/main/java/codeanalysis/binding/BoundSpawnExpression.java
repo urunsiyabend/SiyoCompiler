@@ -20,8 +20,12 @@ public class BoundSpawnExpression extends BoundExpression {
     @Override
     public BoundNodeType getType() { return BoundNodeType.SpawnExpression; }
 
-    @Override
-    public Class<?> getClassType() { return null; } // void
+    private Class<?> _returnType = null;
+    private String _actorTypeName = null;
+    public void setReturnType(Class<?> type) { _returnType = type; }
+    public void setActorTypeName(String name) { _actorTypeName = name; }
+    public String getActorTypeName() { return _actorTypeName; }
+    public Class<?> getClassType() { return _returnType; }
 
     @Override
     public Iterator<BoundNode> getChildren() { return Collections.emptyIterator(); }

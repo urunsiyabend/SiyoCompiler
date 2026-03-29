@@ -335,6 +335,15 @@ public class Evaluator {
             return evaluateBuiltinFunction(function, arguments);
         }
 
+        // Actor method interception: if first arg is SiyoActor, route through mailbox
+        if (arguments.length > 0 && arguments[0] instanceof SiyoActor actor
+                && function.getName().contains(".")) {
+            String methodName = function.getName().substring(function.getName().indexOf('.') + 1);
+            Object[] methodArgs = new Object[arguments.length - 1];
+            System.arraycopy(arguments, 1, methodArgs, 0, methodArgs.length);
+            return actor.call(methodName, methodArgs);
+        }
+
         // Get the function body
         BoundBlockStatement body = _functions.get(function);
         if (body == null) {
@@ -537,6 +546,21 @@ public class Evaluator {
     private java.util.List<Exception> _scopeErrors = null;
 
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
+        // Check if this is an actor spawn (single expression returning actor struct)
+        if (node.getBody().getStatements().size() == 1
+            && node.getBody().getStatements().get(0) instanceof BoundExpressionStatement exprStmt) {
+            // Try evaluating — if result is SiyoStruct of actor type, create actor
+            Object result = evaluateExpression(exprStmt.getExpression());
+            if (result instanceof SiyoStruct struct) {
+                // Check if this struct type is an actor
+                String actorTypeName = findActorTypeName(struct);
+                if (actorTypeName != null) {
+                    return createActor(struct, actorTypeName);
+                }
+            }
+            // Not an actor — fall through to scope spawn
+        }
+
         if (_scopeThreads == null) {
             throw new Exception("spawn must be inside a scope block");
         }
@@ -576,6 +600,99 @@ public class Evaluator {
 
         _scopeThreads.add(thread);
         return null;
+    }
+
+    private java.util.Set<String> _actorTypeNames = new java.util.HashSet<>();
+
+    public void registerActorType(String name) { _actorTypeNames.add(name); }
+
+    private String findActorTypeName(SiyoStruct struct) {
+        // Check against registered actor types by matching function name prefix
+        for (String actorName : _actorTypeNames) {
+            return actorName; // TODO: match by struct fields
+        }
+        // Fallback: check function names for TypeName.new pattern
+        for (var entry : _functions.entrySet()) {
+            String fname = entry.getKey().getName();
+            if (fname.endsWith(".new") && entry.getKey().getReturnType() == SiyoStruct.class) {
+                String typeName = fname.substring(0, fname.indexOf('.'));
+                if (_actorTypeNames.contains(typeName)) return typeName;
+            }
+        }
+        return null;
+    }
+
+    private Object createActor(SiyoStruct state, String actorTypeName) {
+        SiyoActor actor = new SiyoActor(state, actorTypeName);
+
+        // Start actor event loop on virtual thread
+        Thread actorThread = Thread.startVirtualThread(() -> {
+            while (true) {
+                try {
+                    SiyoActor.ActorMessage msg = actor.getMailbox().take();
+                    String qualifiedName = actorTypeName + "." + msg.methodName;
+
+                    // Find the function
+                    codeanalysis.binding.BoundBlockStatement body = null;
+                    FunctionSymbol func = null;
+                    for (var entry : _functions.entrySet()) {
+                        if (entry.getKey().getName().equals(qualifiedName)) {
+                            func = entry.getKey();
+                            body = entry.getValue();
+                            break;
+                        }
+                    }
+
+                    if (body == null) {
+                        if (msg.replyChannel != null) {
+                            msg.replyChannel.put(new SiyoActor.ActorError("Unknown method: " + msg.methodName));
+                        }
+                        continue;
+                    }
+
+                    // Execute method with actor state as self
+                    java.util.Map<VariableSymbol, Object> isolatedGlobals =
+                            java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
+                    Evaluator actorEval = new Evaluator(body, isolatedGlobals, _functions);
+                    StackFrame frame = new StackFrame(func);
+
+                    // Bind self (first param) to actor state
+                    frame.getLocals().put(func.getParameters().get(0), state);
+                    // Bind remaining params
+                    for (int i = 0; i < msg.args.length; i++) {
+                        frame.getLocals().put(func.getParameters().get(i + 1), msg.args[i]);
+                    }
+
+                    actorEval._callStack.push(frame);
+                    actorEval.evaluateBlock(body);
+                    actorEval._callStack.pop();
+
+                    Object result = actorEval._returnTriggered ? actorEval._returnValue : actorEval._lastValue;
+                    actorEval._returnTriggered = false;
+
+                    if (msg.replyChannel != null) {
+                        msg.replyChannel.put(result != null ? result : "");
+                    }
+
+                    // Check if actor has `run` method and this is the first message
+                } catch (Exception e) {
+                    // Don't crash the actor — continue processing messages
+                }
+            }
+        });
+
+        actor.setThread(actorThread);
+
+        // If actor has a `run(self)` method, auto-invoke it (fire-and-forget)
+        String runMethod = actorTypeName + ".run";
+        for (var entry : _functions.entrySet()) {
+            if (entry.getKey().getName().equals(runMethod)) {
+                actor.send("run", new Object[]{});
+                break;
+            }
+        }
+
+        return actor;
     }
 
     private Object evaluateLambdaExpression(BoundLambdaExpression node) {

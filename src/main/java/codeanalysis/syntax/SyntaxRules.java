@@ -35,6 +35,7 @@ public class SyntaxRules {
             case "self" -> SyntaxType.SelfKeyword;
             case "scope" -> SyntaxType.ScopeKeyword;
             case "spawn" -> SyntaxType.SpawnKeyword;
+            case "actor" -> SyntaxType.ActorKeyword;
             case "break" -> SyntaxType.BreakKeyword;
             case "continue" -> SyntaxType.ContinueKeyword;
             case "struct" -> SyntaxType.StructKeyword;
@@ -99,6 +100,7 @@ public class SyntaxRules {
             case SelfKeyword -> "self";
             case ScopeKeyword -> "scope";
             case SpawnKeyword -> "spawn";
+            case ActorKeyword -> "actor";
             case ColonToken -> ":";
             case CommaToken -> ",";
             case ArrowToken -> "->";

@@ -82,7 +82,9 @@ public class Binder {
         Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
         Iterable<VariableSymbol> variables = binder._scope.getDeclaredVariables();
         DiagnosticBox diagnostics = binder._diagnostics;
-        return new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
+        BoundGlobalScope scope = new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
+        scope.setStructTypes(binder._structTypes);
+        return scope;
     }
 
     static BoundScope createParentScopes(BoundGlobalScope previous) {
@@ -130,6 +132,7 @@ public class Binder {
             case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
+            case ActorDeclaration -> bindActorDeclaration((ActorDeclarationSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
@@ -159,6 +162,22 @@ public class Binder {
                 _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
                 _moduleHandler.registerEnumDeclaration(enumSyntax);
+            } else if (statementSyntax instanceof ActorDeclarationSyntax actorSyntax) {
+                // Actor = struct with isActor flag
+                String name = actorSyntax.getIdentifier().getData();
+                java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
+                for (ParameterSyntax field : actorSyntax.getFields()) {
+                    String fn = field.getIdentifier().getData();
+                    String tn = field.getTypeToken().getData();
+                    Class<?> ft = _typeResolver.lookupType(tn);
+                    if (ft == null) ft = Object.class;
+                    fields.put(fn, ft);
+                    fieldTypeNames.put(fn, tn);
+                }
+                StructSymbol symbol = new StructSymbol(name, fields, fieldTypeNames);
+                symbol.setActor(true);
+                _structTypes.put(name, symbol);
             } else if (statementSyntax instanceof ImplDeclarationSyntax implSyntax) {
                 _moduleHandler.registerImplDeclaration(implSyntax);
             }
@@ -217,6 +236,12 @@ public class Binder {
             // Track struct type from function return
             StructSymbol st = _typeResolver.resolveStructType(initializer);
             if (st != null) _typeResolver.trackStructType(variableSymbol, st);
+        } else if (initializer instanceof BoundSpawnExpression spawnExpr && spawnExpr.getClassType() == SiyoStruct.class) {
+            // Track actor/struct type from spawn expression
+            if (spawnExpr.getActorTypeName() != null) {
+                StructSymbol st = _structTypes.get(spawnExpr.getActorTypeName());
+                if (st != null) _typeResolver.trackStructType(variableSymbol, st);
+            }
         } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
             // Track element type for built-in functions that return arrays
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
@@ -833,6 +858,19 @@ public class Binder {
         // Resolve struct type from variable to get field type
         Class<?> memberType = Object.class;
         StructSymbol structType = _typeResolver.resolveStructType(target);
+
+        // Actor field access rejection — actor state is private (except from self inside impl methods)
+        if (structType != null && structType.isActor()) {
+            // Allow self.field inside impl methods (target is "self" variable)
+            boolean isSelfAccess = (target instanceof BoundVariableExpression varExpr
+                    && varExpr.getVariable().getName().equals("self"));
+            if (!isSelfAccess) {
+                _diagnostics.reportUndefinedName(syntax.getMember().getSpan(),
+                    structType.getName() + "." + memberName + " — actor state is private, use a method");
+                return new BoundLiteralExpression(0);
+            }
+        }
+
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
         }
@@ -901,7 +939,26 @@ public class Binder {
     }
 
     private BoundExpression bindSpawnExpression(SpawnExpressionSyntax syntax) {
-        // spawn must be inside scope
+        // Actor spawn: spawn Expr (not block) — doesn't need scope
+        if (syntax.getBody() instanceof ExpressionStatementSyntax) {
+            BoundStatement body = bindStatement(syntax.getBody());
+            BoundBlockStatement block = new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+            BoundSpawnExpression spawnExpr = new BoundSpawnExpression(block, java.util.Set.of());
+
+            // If body is a struct constructor call, set return type for actor tracking
+            if (body instanceof BoundExpressionStatement exprStmt) {
+                Class<?> retType = exprStmt.getExpression().getClassType();
+                if (retType == SiyoStruct.class) {
+                    spawnExpr.setReturnType(SiyoStruct.class);
+                    // Store actor struct name for type tracking
+                    spawnExpr.setActorTypeName(_typeResolver.resolveStructType(exprStmt.getExpression()) != null
+                            ? _typeResolver.resolveStructType(exprStmt.getExpression()).getName() : null);
+                }
+            }
+            return spawnExpr;
+        }
+
+        // Block spawn must be inside scope
         if (!_insideScope) {
             _diagnostics.reportSpawnOutsideScope(syntax.getSpawnKeyword().getSpan());
             return new BoundLiteralExpression(0);
@@ -1222,6 +1279,11 @@ public class Binder {
         }
 
         return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
+    }
+
+    private BoundStatement bindActorDeclaration(ActorDeclarationSyntax syntax) {
+        // No-op at bind time — actor is registered in first pass
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
     private BoundStatement bindImplDeclaration(ImplDeclarationSyntax syntax) {

@@ -195,6 +195,8 @@ public enum SyntaxType {
     SpawnKeyword,
     ScopeExpression,
     SpawnExpression,
+    ActorKeyword,
+    ActorDeclaration,
 
     /* Represents a parameter in function declaration. */
     Parameter,
