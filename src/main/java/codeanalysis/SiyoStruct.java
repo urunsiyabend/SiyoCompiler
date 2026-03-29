@@ -15,6 +15,12 @@ public class SiyoStruct {
         _fields = new LinkedHashMap<>(fields);
     }
 
+    /** Constructor from LinkedHashMap (bytecode path, no StructSymbol) */
+    public SiyoStruct(LinkedHashMap<String, Object> fields) {
+        _type = null;
+        _fields = fields;
+    }
+
     public StructSymbol getStructType() {
         return _type;
     }
@@ -23,13 +29,15 @@ public class SiyoStruct {
         return _fields.get(name);
     }
 
+    public Map<String, Object> getFieldsMap() { return _fields; }
+
     public void setField(String name, Object value) {
         _fields.put(name, value);
     }
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder(_type.getName());
+        StringBuilder sb = new StringBuilder(_type != null ? _type.getName() : "struct");
         sb.append(" { ");
         boolean first = true;
         for (Map.Entry<String, Object> entry : _fields.entrySet()) {

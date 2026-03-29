@@ -132,6 +132,11 @@ public class Compilation {
         BoundBlockStatement statement = getStatement();
         Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
         codeanalysis.emitting.Emitter emitter = new codeanalysis.emitting.Emitter(statement, functions);
+        for (var entry : getGlobalScope().getStructTypes().entrySet()) {
+            if (entry.getValue().isActor()) {
+                emitter.registerActorType(entry.getKey());
+            }
+        }
         return emitter.emit(className);
     }
 

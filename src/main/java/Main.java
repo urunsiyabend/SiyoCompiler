@@ -113,6 +113,7 @@ public class Main {
                 }
             };
 
+            Thread.currentThread().setContextClassLoader(loader);
             Class<?> cls = loader.loadClass(className);
             cls.getMethod("main", String[].class).invoke(null, (Object) new String[]{});
         } catch (java.lang.reflect.InvocationTargetException e) {

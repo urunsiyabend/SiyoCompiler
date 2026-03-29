@@ -115,6 +115,11 @@ public class Emitter {
             emitSpawnWrapperMethods(cw);
         }
 
+        // Generate actor event loop helper
+        if (_needsActorStart) {
+            emitActorStartMethod(cw);
+        }
+
         // Emit helper methods if needed
         if (_needsRangeHelper) {
             emitRangeHelper(cw);
@@ -803,6 +808,12 @@ public class Emitter {
     private int _scopeThreadsLocal = -1;
 
     private void emitSpawn(BoundSpawnExpression node) {
+        // Actor spawn: spawn Actor.new() → create SiyoActor
+        if (node.getActorTypeName() != null) {
+            emitActorSpawn(node);
+            return;
+        }
+
         int index = _spawns.indexOf(node);
         if (index < 0) { _spawns.add(node); index = _spawns.size() - 1; }
         // Create Runnable that calls spawn$N with captured vars
@@ -860,6 +871,54 @@ public class Emitter {
         } else {
             _mv.visitInsn(POP); // discard thread if no scope
         }
+    }
+
+    private void emitActorSpawn(BoundSpawnExpression node) {
+        // Evaluate the constructor expression (body is a single ExprStmt)
+        BoundStatement bodyStmt = node.getBody().getStatements().get(0);
+        if (bodyStmt instanceof BoundExpressionStatement exprStmt) {
+            emitExpression(exprStmt.getExpression()); // SiyoStruct on stack
+        }
+        // Stack: SiyoStruct (actor state)
+        // Create SiyoActor: new SiyoActor(state, actorTypeName)
+        int stateSlot = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, stateSlot);
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoActor");
+        _mv.visitInsn(DUP);
+        _mv.visitVarInsn(ALOAD, stateSlot);
+        _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
+        _mv.visitLdcInsn(node.getActorTypeName());
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoActor", "<init>",
+                "(Ljava/util/LinkedHashMap;Ljava/lang/String;)V", false);
+        // Stack: SiyoActor
+        // Start event loop: Actor$startEventLoop(actor, className)
+        // We need a static helper method that starts the virtual thread
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(_className);
+        _mv.visitMethodInsn(INVOKESTATIC, _className, "$actorStart",
+                "(Lcodeanalysis/SiyoActor;Ljava/lang/String;)V", false);
+        _needsActorStart = true;
+        // SiyoActor remains on stack
+    }
+
+    private boolean _needsActorStart = false;
+    private final java.util.Set<String> _actorTypeNames = new java.util.HashSet<>();
+
+    public void registerActorType(String name) { _actorTypeNames.add(name); }
+
+    private void emitActorStartMethod(ClassWriter cw) {
+        // $actorStart(SiyoActor, String className) → void
+        // Delegates to SiyoActor.startEventLoop(actor, className)
+        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "$actorStart",
+                "(Lcodeanalysis/SiyoActor;Ljava/lang/String;)V", null, null);
+        mv.visitCode();
+        mv.visitVarInsn(ALOAD, 0); // actor
+        mv.visitVarInsn(ALOAD, 1); // className
+        mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoActor", "startEventLoop",
+                "(Lcodeanalysis/SiyoActor;Ljava/lang/String;)V", false);
+        mv.visitInsn(RETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
     }
 
     private void emitSpawnWrapperMethods(ClassWriter cw) {
@@ -1427,6 +1486,40 @@ public class Emitter {
             _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
             _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
             return;
+        }
+
+        // Actor method interception: TypeName.method(self, args) → self.call("method", args)
+        if (function.getName().contains(".")
+                && function.getParameters().size() > 0
+                && function.getParameters().get(0).getName().equals("self")) {
+            String typeName = function.getName().substring(0, function.getName().indexOf('.'));
+            if (_actorTypeNames.contains(typeName)) {
+                String methodName = function.getName().substring(function.getName().indexOf('.') + 1);
+                // Emit: firstArg.call(methodName, [otherArgs])
+                emitExpression(node.getArguments().get(0)); // actor handle (SiyoActor on stack)
+                _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoActor");
+                _mv.visitLdcInsn(methodName);
+                // Build args array (without self)
+                int argCount = node.getArguments().size() - 1;
+                _mv.visitLdcInsn(argCount);
+                _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+                for (int ai = 0; ai < argCount; ai++) {
+                    _mv.visitInsn(DUP);
+                    _mv.visitLdcInsn(ai);
+                    emitExpression(node.getArguments().get(ai + 1));
+                    emitBoxIfNeeded(node.getArguments().get(ai + 1).getClassType());
+                    _mv.visitInsn(AASTORE);
+                }
+                _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoActor", "call",
+                        "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+                // Result is Object — unbox if needed
+                Class<?> retType = function.getReturnType();
+                if (retType == Integer.class) emitUnboxIfNeeded(Integer.class);
+                else if (retType == Double.class) emitUnboxIfNeeded(Double.class);
+                else if (retType == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+                else if (retType == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+                return;
+            }
         }
 
         // User-defined functions: push args and invoke static method
