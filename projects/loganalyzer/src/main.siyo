@@ -1,0 +1,229 @@
+// CLI Log Analyzer - Parses Apache access logs and produces reports
+// Pain points documented inline
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+import java "java.lang.System"
+
+// === Data Model ===
+
+struct LogEntry {
+    ip: string,
+    method: string,
+    path: string,
+    status: int,
+    size: int
+}
+
+impl LogEntry {
+    fn parse(line: string) -> LogEntry {
+        // Apache format: IP - - [timestamp] "METHOD PATH HTTP/1.1" STATUS SIZE
+        // PAIN POINT #4: No regex. Parsing by hand is tedious.
+        imut parts = split(line, " ")
+        if len(parts) < 10 {
+            return LogEntry { ip: "", method: "", path: "", status: 0, size: 0 }
+        }
+        imut ip = parts[0]
+        // parts[3] = [timestamp, parts[4] = +0000]
+        // parts[5] = "METHOD, parts[6] = PATH, parts[7] = HTTP/1.1"
+        // parts[8] = STATUS, parts[9] = SIZE
+        mut method = parts[5]
+        if startsWith(method, "\"") { method = substring(method, 1, len(method)) }
+        imut path = parts[6]
+        imut status = parseInt(parts[8])
+        imut size = parseInt(parts[9])
+        LogEntry { ip: ip, method: method, path: path, status: status, size: size }
+    }
+}
+
+// === Counter (parallel array map since no HashMap) ===
+// PAIN POINT #3: No HashMap/dictionary type. Building manual counting structure.
+
+struct Counter {
+    keys: string[],
+    values: int[],
+    count: int
+}
+
+impl Counter {
+    fn new() -> Counter {
+        Counter { keys: [""], values: [0], count: 0 }
+    }
+
+    fn increment(self, key: string) {
+        // Linear search - O(n) per lookup. HashMap would be O(1).
+        // PAIN POINT #5: This is O(n²) for n unique keys. Unusable at scale.
+        for i in range(0, self.count) {
+            if self.keys[i] == key {
+                self.values[i] += 1
+                return
+            }
+        }
+        // New key
+        if self.count == 0 {
+            self.keys[0] = key
+            self.values[0] = 1
+        } else {
+            push(self.keys, key)
+            push(self.values, 1)
+        }
+        self.count += 1
+    }
+
+    fn get(self, key: string) -> int {
+        for i in range(0, self.count) {
+            if self.keys[i] == key { return self.values[i] }
+        }
+        0
+    }
+
+    fn topN(self, n: int) {
+        // Bubble sort top N - PAIN POINT #6: No sort function, no comparator/closure sort
+        // Have to write manual O(n*k) selection
+        mut used = [false]
+        for i in range(1, self.count) { push(used, false) }
+
+        mut printed = 0
+        while printed < n {
+            if printed >= self.count { break }
+            mut maxVal = -1
+            mut maxIdx = -1
+            for i in range(0, self.count) {
+                // PAIN POINT #7: Can't do `!used[i]` - bool array element is Object
+                // Have to use toString comparison
+                if toString(used[i]) == "false" {
+                    if self.values[i] > maxVal {
+                        maxVal = self.values[i]
+                        maxIdx = i
+                    }
+                }
+            }
+            if maxIdx < 0 { break }
+            used[maxIdx] = true
+            println("    " + self.keys[maxIdx] + ": " + maxVal)
+            printed += 1
+        }
+    }
+}
+
+// === Report ===
+
+struct Report {
+    totalRequests: int,
+    status2xx: int,
+    status3xx: int,
+    status4xx: int,
+    status5xx: int,
+    totalSize: int
+}
+
+impl Report {
+    fn new() -> Report {
+        Report {
+            totalRequests: 0,
+            status2xx: 0, status3xx: 0, status4xx: 0, status5xx: 0,
+            totalSize: 0
+        }
+    }
+
+    fn addEntry(self, ip: string, path: string, status: int, size: int) {
+        self.totalRequests += 1
+        self.totalSize += size
+
+        if status >= 200 {
+            if status < 300 { self.status2xx += 1 }
+            else if status < 400 { self.status3xx += 1 }
+            else if status < 500 { self.status4xx += 1 }
+            else { self.status5xx += 1 }
+        }
+    }
+
+    fn printStats(self) {
+        println("========================================")
+        println("  Access Log Report")
+        println("========================================")
+        println("")
+        println("  Total Requests:  " + self.totalRequests)
+        println("  Total Size:      " + self.totalSize + " bytes")
+        println("")
+        println("  Status Codes:")
+        println("    2xx (Success):     " + self.status2xx)
+        println("    3xx (Redirect):    " + self.status3xx)
+        println("    4xx (Client Err):  " + self.status4xx)
+        println("    5xx (Server Err):  " + self.status5xx)
+        println("")
+        imut errors = self.status4xx + self.status5xx
+        imut errorRate = toFloat(errors * 100) / toFloat(self.totalRequests)
+        println("  Error Rate:      " + errorRate + "%")
+    }
+}
+
+// === Main ===
+
+imut filename = "access.log"
+imut f = File.new(filename)
+if !f.exists() {
+    println("Error: " + filename + " not found. Run generate.siyo first.")
+    error("file not found")
+}
+
+println("Analyzing " + filename + "...")
+imut t0 = System.currentTimeMillis()
+
+// Read all lines
+// PAIN POINT #10: No way to get file size or line count upfront.
+// Have to read into array first, then process.
+mut reader = BufferedReader.new(FileReader.new(filename))
+mut lines = [""]
+mut lineCount = 0
+mut line = reader.readLine()
+while line != null {
+    if lineCount == 0 { lines[0] = toString(line) }
+    else { push(lines, toString(line)) }
+    lineCount += 1
+    line = reader.readLine()
+}
+reader.close()
+
+imut readTime = System.currentTimeMillis() - t0
+println("Read " + lineCount + " lines in " + readTime + "ms")
+
+// Parse and analyze
+// PAIN POINT #11: Can't use spawn here for parallel parsing because Report struct
+// has mutable state. The compiler correctly rejects `mut report` in spawn.
+// Would need concurrent counters or per-chunk reports merged at end.
+// For now, sequential.
+
+imut t1 = System.currentTimeMillis()
+mut report = Report.new()
+mut ipCounter = Counter.new()
+mut pathCounter = Counter.new()
+
+for i in range(0, lineCount) {
+    imut entry = LogEntry.parse(lines[i])
+    if len(entry.ip) > 0 {
+        report.addEntry(entry.ip, entry.path, entry.status, entry.size)
+        ipCounter.increment(entry.ip)
+        pathCounter.increment(entry.path)
+    }
+}
+
+imut parseTime = System.currentTimeMillis() - t1
+println("Parsed in " + parseTime + "ms")
+println("")
+
+report.printStats()
+println("")
+println("  Top 10 IPs:")
+ipCounter.topN(10)
+println("")
+println("  Top 10 Paths:")
+pathCounter.topN(10)
+println("")
+println("========================================")
+
+imut totalTime = System.currentTimeMillis() - t0
+println("Total time: " + totalTime + "ms")
+
+// Cleanup
+File.new("access.log").delete()
