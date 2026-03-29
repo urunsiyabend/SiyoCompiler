@@ -1,0 +1,52 @@
+// Chat Server Test
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+
+println("=== Chat Test ===")
+
+mut s1 = Socket.new("localhost", 7778)
+mut r1 = BufferedReader.new(InputStreamReader.new(s1.getInputStream()))
+mut w1 = PrintWriter.new(s1.getOutputStream(), true)
+println("C1: " + r1.readLine())
+
+mut s2 = Socket.new("localhost", 7778)
+mut r2 = BufferedReader.new(InputStreamReader.new(s2.getInputStream()))
+mut w2 = PrintWriter.new(s2.getOutputStream(), true)
+println("C2: " + r2.readLine())
+
+w1.println("/nick Alice")
+println("C1: " + r1.readLine())
+w2.println("/nick Bob")
+println("C2: " + r2.readLine())
+
+w1.println("/join general")
+println("C1: " + r1.readLine())
+w2.println("/join general")
+println("C2: " + r2.readLine())
+// Bob should get "Alice joined" broadcast? No — Alice joined first, Bob joins later
+// Bob gets join confirmation. Alice gets broadcast "* Bob joined"
+Thread.sleep(100)
+
+w1.println("/rooms")
+println("Rooms: " + r1.readLine())
+
+w1.println("/msg Hello everyone!")
+Thread.sleep(100)
+// C2 should receive broadcast
+// But readLine on C2 would block if no message...
+// For now just test C1 gets echo
+
+w2.println("/msg Hi from Bob!")
+Thread.sleep(100)
+
+w1.println("/quit")
+println("C1: " + r1.readLine())
+w2.println("/quit")
+println("C2: " + r2.readLine())
+
+s1.close()
+s2.close()
+println("Test done!")

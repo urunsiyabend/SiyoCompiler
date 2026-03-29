@@ -259,6 +259,7 @@ public class TypeResolver {
     public JavaClassInfo resolveJavaClassFromDescriptor(String descriptor) {
         if (descriptor == null || descriptor.length() <= 1) return null; // primitives/void
         if (descriptor.equals("Ljava/lang/String;")) return null; // String is native Siyo type
+        if (descriptor.equals("Ljava/lang/Object;")) return null; // Object too generic — dynamic dispatch
         if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
             String fullName = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
             // Check if already imported

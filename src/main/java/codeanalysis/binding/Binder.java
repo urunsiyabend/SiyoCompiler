@@ -612,7 +612,9 @@ public class Binder {
             // Non-void function
             if (expression == null) {
                 _diagnostics.reportMissingReturnValue(syntax.getReturnKeyword().getSpan(), _currentFunction.getReturnType());
-            } else if (expression.getClassType() != _currentFunction.getReturnType()) {
+            } else if (expression.getClassType() != _currentFunction.getReturnType()
+                    && _currentFunction.getReturnType() != Object.class
+                    && expression.getClassType() != Object.class) {
                 _diagnostics.reportReturnTypeMismatch(syntax.getExpression().getSpan(), expression.getClassType(), _currentFunction.getReturnType());
             }
         }
@@ -1167,6 +1169,12 @@ public class Binder {
             targetClass = _typeResolver.resolveJavaClassForSiyoTypeName(targetTypeName);
         }
         if (targetClass == null) {
+            // Check if casting to a struct/actor type — just passthrough for type tracking
+            StructSymbol structType = _structTypes.get(targetTypeName);
+            if (structType != null) {
+                // Cast to struct/actor — no-op at runtime, enables type tracking
+                return expr; // TODO: create typed cast expression for struct tracking
+            }
             _diagnostics.reportUndefinedName(syntax.getTypeName().getSpan(), targetTypeName);
             return expr;
         }
@@ -1270,9 +1278,14 @@ public class Binder {
         if (targetClassInfo != null) {
             resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(), getArgTypes(boundArgs));
             if (resolved == null) {
-                _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
-                        targetClassInfo.getSimpleName() + "." + methodName);
-                return new BoundLiteralExpression(0);
+                if (targetClassInfo.getFullName().equals("java.lang.Object")) {
+                    // Object class — method not found, fall through to dynamic dispatch
+                    targetClassInfo = null;
+                } else {
+                    _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
+                            targetClassInfo.getSimpleName() + "." + methodName);
+                    return new BoundLiteralExpression(0);
+                }
             }
             // Resolve generic return type using owner's type bindings
             resolvedReturnType = _typeResolver.resolveMethodReturnType(resolved, targetResolvedType);
