@@ -20,6 +20,7 @@ public class BoundUnaryOperator {
 
     private static final BoundUnaryOperator[] _operators = {
             new BoundUnaryOperator(SyntaxType.BangToken, BoundUnaryOperatorType.LogicalNegation, Boolean.class),
+            new BoundUnaryOperator(SyntaxType.BangToken, BoundUnaryOperatorType.LogicalNegation, Object.class, Boolean.class),
             new BoundUnaryOperator(SyntaxType.PlusToken, BoundUnaryOperatorType.Identity, Integer.class),
             new BoundUnaryOperator(SyntaxType.MinusToken, BoundUnaryOperatorType.Negation, Integer.class),
             new BoundUnaryOperator(SyntaxType.TildeToken, BoundUnaryOperatorType.OnesComplement, Integer.class),

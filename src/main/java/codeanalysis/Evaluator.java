@@ -736,6 +736,33 @@ public class Evaluator {
             System.out.println(arguments[0]);
             return null;
         }
+        if (function == BuiltinFunctions.SORT) {
+            SiyoArray arr = (SiyoArray) arguments[0];
+            SiyoClosure comparator = (SiyoClosure) arguments[1];
+            // Sort using closure as comparator
+            arr.sort((a, b) -> {
+                try {
+                    // Call closure with (a, b) → int
+                    StackFrame frame = new StackFrame(null);
+                    for (var entry : comparator.getCapturedVars().entrySet()) {
+                        frame.getLocals().put(entry.getKey(), entry.getValue());
+                    }
+                    frame.getLocals().put(comparator.getParameters().get(0), a);
+                    frame.getLocals().put(comparator.getParameters().get(1), b);
+                    _callStack.push(frame);
+                    evaluateBlock(comparator.getBody());
+                    _callStack.pop();
+                    Object result = _lastValue;
+                    return (result instanceof Integer i) ? i : 0;
+                } catch (Exception e) {
+                    return 0;
+                }
+            });
+            return null;
+        }
+        if (function == BuiltinFunctions.NEW_MAP) {
+            return new SiyoMap();
+        }
         if (function == BuiltinFunctions.CHANNEL) {
             return new SiyoChannel();
         }
