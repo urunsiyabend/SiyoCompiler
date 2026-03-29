@@ -1,0 +1,34 @@
+// SiyoDB Test Client
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+
+fn sendCmd(writer: fn, reader: fn, cmd: string) -> string {
+    // PAIN POINT #8: Can't pass PrintWriter/BufferedReader as typed params.
+    // `fn` type is wrong — these are Java objects, not closures.
+    // Would need `PrintWriter` as param type but that requires import in this context.
+    ""
+}
+
+// Direct approach since we can't abstract well
+mut socket = Socket.new("localhost", 7777)
+mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+mut writer = PrintWriter.new(socket.getOutputStream(), true)
+
+// Read welcome
+println("< " + reader.readLine())
+
+// Send commands
+mut commands = ["PING", "SET name siyo", "SET version 0.1", "SET lang jvm",
+                "GET name", "GET version", "KEYS", "DEL lang", "KEYS", "GET lang", "QUIT"]
+
+for cmd in commands {
+    println("> " + cmd)
+    writer.println(cmd)
+    imut response = reader.readLine()
+    println("< " + response)
+}
+
+socket.close()
+println("Disconnected.")
