@@ -335,9 +335,11 @@ public class Evaluator {
             return evaluateBuiltinFunction(function, arguments);
         }
 
-        // Actor method interception: if first arg is SiyoActor, route through mailbox
+        // Actor method interception: if first arg is SiyoActor AND this is an instance method (first param is "self")
         if (arguments.length > 0 && arguments[0] instanceof SiyoActor actor
-                && function.getName().contains(".")) {
+                && function.getName().contains(".")
+                && function.getParameters().size() > 0
+                && function.getParameters().get(0).getName().equals("self")) {
             String methodName = function.getName().substring(function.getName().indexOf('.') + 1);
             Object[] methodArgs = new Object[arguments.length - 1];
             System.arraycopy(arguments, 1, methodArgs, 0, methodArgs.length);
@@ -549,12 +551,21 @@ public class Evaluator {
         // Check if this is an actor spawn (single expression returning actor struct)
         if (node.getBody().getStatements().size() == 1
             && node.getBody().getStatements().get(0) instanceof BoundExpressionStatement exprStmt) {
-            // Try evaluating — if result is SiyoStruct of actor type, create actor
-            Object result = evaluateExpression(exprStmt.getExpression());
-            if (result instanceof SiyoStruct struct) {
-                // Check if this struct type is an actor
-                String actorTypeName = findActorTypeName(struct);
-                if (actorTypeName != null) {
+            // Determine actor type from the expression
+            String actorTypeName = null;
+            if (exprStmt.getExpression() instanceof BoundCallExpression callExpr) {
+                String funcName = callExpr.getFunction().getName();
+                if (funcName.contains(".")) {
+                    String typeName = funcName.substring(0, funcName.indexOf('.'));
+                    if (_actorTypeNames.contains(typeName)) {
+                        actorTypeName = typeName;
+                    }
+                }
+            }
+
+            if (actorTypeName != null) {
+                Object result = evaluateExpression(exprStmt.getExpression());
+                if (result instanceof SiyoStruct struct) {
                     return createActor(struct, actorTypeName);
                 }
             }
@@ -606,21 +617,7 @@ public class Evaluator {
 
     public void registerActorType(String name) { _actorTypeNames.add(name); }
 
-    private String findActorTypeName(SiyoStruct struct) {
-        // Check against registered actor types by matching function name prefix
-        for (String actorName : _actorTypeNames) {
-            return actorName; // TODO: match by struct fields
-        }
-        // Fallback: check function names for TypeName.new pattern
-        for (var entry : _functions.entrySet()) {
-            String fname = entry.getKey().getName();
-            if (fname.endsWith(".new") && entry.getKey().getReturnType() == SiyoStruct.class) {
-                String typeName = fname.substring(0, fname.indexOf('.'));
-                if (_actorTypeNames.contains(typeName)) return typeName;
-            }
-        }
-        return null;
-    }
+    // Actor type detection is now done in evaluateSpawnExpression via call expression name
 
     private Object createActor(SiyoStruct state, String actorTypeName) {
         SiyoActor actor = new SiyoActor(state, actorTypeName);
@@ -664,6 +661,7 @@ public class Evaluator {
                     }
 
                     actorEval._callStack.push(frame);
+                    actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
                     actorEval.evaluateBlock(body);
                     actorEval._callStack.pop();
 
