@@ -191,6 +191,12 @@ public enum SyntaxType {
     SelfKeyword,
     ImplDeclaration,
     LambdaExpression,
+    ScopeKeyword,
+    SpawnKeyword,
+    ScopeExpression,
+    SpawnExpression,
+    ActorKeyword,
+    ActorDeclaration,
 
     /* Represents a parameter in function declaration. */
     Parameter,

@@ -1,0 +1,96 @@
+// Concurrent Web Crawler
+// Spawns multiple workers to fetch URLs in parallel
+// Demonstrates: scope, spawn, channels, closures, Java interop
+import java "java.net.URL"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.lang.System"
+
+fn fetch(url: string) -> string {
+    try {
+        mut u = URL.new(url)
+        mut conn = u.openConnection()
+        mut reader = BufferedReader.new(InputStreamReader.new(conn.getInputStream()))
+        mut lineCount = 0
+        mut totalBytes = 0
+        mut line = reader.readLine()
+        while line != null {
+            lineCount += 1
+            totalBytes += len(toString(line))
+            line = reader.readLine()
+        }
+        reader.close()
+        return "" + lineCount + " lines, " + totalBytes + " bytes"
+    } catch e {
+        return "error: " + toString(e)
+    }
+}
+
+// URLs to crawl
+imut urls = [
+    "http://example.com",
+    "http://example.org",
+    "http://example.net",
+    "http://info.cern.ch",
+    "http://neverssl.com"
+]
+
+imut jobs = channel()
+imut results = channel()
+// Note: channels have capacity 1 (rendezvous), so producer blocks until worker takes
+imut startTime = System.currentTimeMillis()
+
+println("=== Concurrent Web Crawler ===")
+println("Fetching " + len(urls) + " URLs with 3 workers...")
+println("")
+
+scope {
+    // Producer: sends URLs to job channel
+    spawn {
+        for i in range(0, len(urls)) {
+            jobs.send(urls[i])
+        }
+        // Send poison pills for 3 workers
+        jobs.send("DONE")
+        jobs.send("DONE")
+        jobs.send("DONE")
+    }
+
+    // Worker 1
+    spawn {
+        mut url = toString(jobs.receive())
+        while url != "DONE" {
+            results.send(url + " => " + fetch(url))
+            url = toString(jobs.receive())
+        }
+    }
+
+    // Worker 2
+    spawn {
+        mut url = toString(jobs.receive())
+        while url != "DONE" {
+            results.send(url + " => " + fetch(url))
+            url = toString(jobs.receive())
+        }
+    }
+
+    // Worker 3
+    spawn {
+        mut url = toString(jobs.receive())
+        while url != "DONE" {
+            results.send(url + " => " + fetch(url))
+            url = toString(jobs.receive())
+        }
+    }
+
+    // Collector
+    spawn {
+        for i in range(0, len(urls)) {
+            println("  " + results.receive())
+        }
+    }
+}
+
+imut elapsed = System.currentTimeMillis() - startTime
+println("")
+println("Completed in " + elapsed + "ms")

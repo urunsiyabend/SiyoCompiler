@@ -144,6 +144,24 @@ public class BuiltinFunctions {
             Object.class
     );
 
+    public static final FunctionSymbol NEW_MAP = new FunctionSymbol(
+            "map",
+            List.of(),
+            SiyoMap.class
+    );
+
+    public static final FunctionSymbol CHANNEL = new FunctionSymbol(
+            "channel",
+            List.of(),
+            SiyoChannel.class
+    );
+
+    public static final FunctionSymbol SORT = new FunctionSymbol(
+            "sort",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("comparator", SiyoClosure.class)),
+            null
+    );
+
     public static final FunctionSymbol SPLIT = new FunctionSymbol(
             "split",
             List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("delimiter", String.class)),
@@ -152,11 +170,14 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, SUBSTRING, CONTAINS, INPUT, ERROR,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, SORT, CHANNEL, SUBSTRING, CONTAINS, INPUT, ERROR,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
-        return getAll().contains(function);
+        for (FunctionSymbol builtin : getAll()) {
+            if (builtin == function) return true; // reference equality, not name-based
+        }
+        return false;
     }
 }

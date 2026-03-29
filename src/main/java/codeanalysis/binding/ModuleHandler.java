@@ -121,6 +121,7 @@ public class ModuleHandler {
         String className = Character.toUpperCase(shortName.charAt(0)) + shortName.substring(1);
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
+            // Register with qualified name: module.func
             String qualifiedName = shortName + "." + func.getName();
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
@@ -129,6 +130,8 @@ public class ModuleHandler {
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
                 _functionBodies.put(importedFunc, body);
+                // Also register with original unqualified name for internal cross-references
+                _functionBodies.put(func, body);
             }
         }
 

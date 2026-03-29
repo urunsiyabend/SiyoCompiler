@@ -8,6 +8,7 @@ import codeanalysis.FunctionSymbol;
 import codeanalysis.LabelSymbol;
 import codeanalysis.ParameterSymbol;
 import codeanalysis.SiyoArray;
+import codeanalysis.SiyoChannel;
 import codeanalysis.SiyoClosure;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
@@ -33,6 +34,8 @@ public class Binder {
     DiagnosticBox _diagnostics = new DiagnosticBox();
     private BoundScope _scope;
     private FunctionSymbol _currentFunction = null;
+    private boolean _insideScope = false;
+    private boolean _insideSpawn = false;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
@@ -79,7 +82,9 @@ public class Binder {
         Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
         Iterable<VariableSymbol> variables = binder._scope.getDeclaredVariables();
         DiagnosticBox diagnostics = binder._diagnostics;
-        return new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
+        BoundGlobalScope scope = new BoundGlobalScope(previous, diagnostics, functions, functionBodies, variables, statement);
+        scope.setStructTypes(binder._structTypes);
+        return scope;
     }
 
     static BoundScope createParentScopes(BoundGlobalScope previous) {
@@ -127,6 +132,7 @@ public class Binder {
             case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
+            case ActorDeclaration -> bindActorDeclaration((ActorDeclarationSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
@@ -156,6 +162,22 @@ public class Binder {
                 _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
                 _moduleHandler.registerEnumDeclaration(enumSyntax);
+            } else if (statementSyntax instanceof ActorDeclarationSyntax actorSyntax) {
+                // Actor = struct with isActor flag
+                String name = actorSyntax.getIdentifier().getData();
+                java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
+                for (ParameterSyntax field : actorSyntax.getFields()) {
+                    String fn = field.getIdentifier().getData();
+                    String tn = field.getTypeToken().getData();
+                    Class<?> ft = _typeResolver.lookupType(tn);
+                    if (ft == null) ft = Object.class;
+                    fields.put(fn, ft);
+                    fieldTypeNames.put(fn, tn);
+                }
+                StructSymbol symbol = new StructSymbol(name, fields, fieldTypeNames);
+                symbol.setActor(true);
+                _structTypes.put(name, symbol);
             } else if (statementSyntax instanceof ImplDeclarationSyntax implSyntax) {
                 _moduleHandler.registerImplDeclaration(implSyntax);
             }
@@ -214,6 +236,12 @@ public class Binder {
             // Track struct type from function return
             StructSymbol st = _typeResolver.resolveStructType(initializer);
             if (st != null) _typeResolver.trackStructType(variableSymbol, st);
+        } else if (initializer instanceof BoundSpawnExpression spawnExpr && spawnExpr.getClassType() == SiyoStruct.class) {
+            // Track actor/struct type from spawn expression
+            if (spawnExpr.getActorTypeName() != null) {
+                StructSymbol st = _structTypes.get(spawnExpr.getActorTypeName());
+                if (st != null) _typeResolver.trackStructType(variableSymbol, st);
+            }
         } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
             // Track element type for built-in functions that return arrays
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
@@ -317,6 +345,8 @@ public class Binder {
             case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
             case CastExpression -> bindCastExpression((CastExpressionSyntax) syntax);
             case LambdaExpression -> bindLambdaExpression((LambdaExpressionSyntax) syntax);
+            case ScopeExpression -> bindScopeExpression((ScopeExpressionSyntax) syntax);
+            case SpawnExpression -> bindSpawnExpression((SpawnExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -828,6 +858,19 @@ public class Binder {
         // Resolve struct type from variable to get field type
         Class<?> memberType = Object.class;
         StructSymbol structType = _typeResolver.resolveStructType(target);
+
+        // Actor field access rejection — actor state is private (except from self inside impl methods)
+        if (structType != null && structType.isActor()) {
+            // Allow self.field inside impl methods (target is "self" variable)
+            boolean isSelfAccess = (target instanceof BoundVariableExpression varExpr
+                    && varExpr.getVariable().getName().equals("self"));
+            if (!isSelfAccess) {
+                _diagnostics.reportUndefinedName(syntax.getMember().getSpan(),
+                    structType.getName() + "." + memberName + " — actor state is private, use a method");
+                return new BoundLiteralExpression(0);
+            }
+        }
+
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
         }
@@ -882,6 +925,166 @@ public class Binder {
 
     private BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
         return _moduleHandler.bindJavaImportStatement(syntax);
+    }
+
+    private BoundExpression bindScopeExpression(ScopeExpressionSyntax syntax) {
+        boolean wasInScope = _insideScope;
+        _insideScope = true;
+        BoundStatement body = bindStatement(syntax.getBody());
+        _insideScope = wasInScope;
+
+        BoundBlockStatement block = body instanceof BoundBlockStatement b
+                ? b : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+        return new BoundScopeExpression(block);
+    }
+
+    private BoundExpression bindSpawnExpression(SpawnExpressionSyntax syntax) {
+        // Actor spawn: spawn Expr (not block) — doesn't need scope
+        if (syntax.getBody() instanceof ExpressionStatementSyntax) {
+            BoundStatement body = bindStatement(syntax.getBody());
+            BoundBlockStatement block = new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+            BoundSpawnExpression spawnExpr = new BoundSpawnExpression(block, java.util.Set.of());
+
+            // If body is a struct constructor call, set return type for actor tracking
+            if (body instanceof BoundExpressionStatement exprStmt) {
+                Class<?> retType = exprStmt.getExpression().getClassType();
+                if (retType == SiyoStruct.class) {
+                    spawnExpr.setReturnType(SiyoStruct.class);
+                    // Store actor struct name for type tracking
+                    spawnExpr.setActorTypeName(_typeResolver.resolveStructType(exprStmt.getExpression()) != null
+                            ? _typeResolver.resolveStructType(exprStmt.getExpression()).getName() : null);
+                }
+            }
+            return spawnExpr;
+        }
+
+        // Block spawn must be inside scope
+        if (!_insideScope) {
+            _diagnostics.reportSpawnOutsideScope(syntax.getSpawnKeyword().getSpan());
+            return new BoundLiteralExpression(0);
+        }
+
+        boolean wasInSpawn = _insideSpawn;
+        _insideSpawn = true;
+
+        BoundStatement body = bindStatement(syntax.getBody());
+        BoundBlockStatement block = body instanceof BoundBlockStatement b
+                ? b : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
+
+        // Detect captured variables and CHECK for mutable captures
+        java.util.Set<VariableSymbol> captured = new java.util.LinkedHashSet<>();
+        java.util.Set<VariableSymbol> mutableCaptures = new java.util.LinkedHashSet<>();
+        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(block);
+
+        // Compute captures on the LOWERED (flattened) body so synthetic vars are properly detected as locals
+        collectSpawnCaptures(loweredBody, captured, mutableCaptures);
+
+        // Report mutable capture errors with helpful messages
+        for (VariableSymbol var : mutableCaptures) {
+            _diagnostics.reportMutableCaptureInSpawn(syntax.getSpawnKeyword().getSpan(), var.getName());
+        }
+
+        _insideSpawn = wasInSpawn;
+
+        return new BoundSpawnExpression(loweredBody, captured);
+    }
+
+    private void collectSpawnCaptures(BoundNode node, java.util.Set<VariableSymbol> captured,
+                                       java.util.Set<VariableSymbol> mutableCaptures) {
+        // First: collect all locally declared variable NAMES in this body
+        java.util.Set<String> localVarNames = new java.util.HashSet<>();
+        collectDeclaredVarNames(node, localVarNames);
+
+        // Then: find referenced variables that are NOT local → these are captures
+        collectCapturedVarsFromBody(node, localVarNames, captured, mutableCaptures);
+    }
+
+    private void collectDeclaredVarNames(BoundNode node, java.util.Set<String> names) {
+        if (node instanceof BoundVariableDeclaration decl) {
+            names.add(decl.getVariable().getName());
+            collectDeclaredVarNames(decl.getInitializer(), names);
+        }
+        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
+        // Explicit traversal matching collectCapturedVarsFromBody
+        if (node instanceof BoundBlockStatement block) {
+            for (BoundStatement stmt : block.getStatements()) { collectDeclaredVarNames(stmt, names); }
+        } else if (node instanceof BoundExpressionStatement exprStmt) {
+            collectDeclaredVarNames(exprStmt.getExpression(), names);
+        } else if (node instanceof BoundScopeExpression scopeExpr) {
+            collectDeclaredVarNames(scopeExpr.getBody(), names);
+        } else {
+            for (var it = node.getChildren(); it.hasNext(); ) { collectDeclaredVarNames(it.next(), names); }
+        }
+    }
+
+    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<String> localVarNames,
+                                              java.util.Set<VariableSymbol> captured,
+                                              java.util.Set<VariableSymbol> mutableCaptures) {
+        // Variable reference → check if captured
+        if (node instanceof BoundVariableExpression varExpr) {
+            VariableSymbol var = varExpr.getVariable();
+            if (!localVarNames.contains(var.getName())) {
+                captured.add(var);
+                if (!var.isReadOnly() && var.getType() != SiyoChannel.class
+                        && !var.getName().startsWith("_idx") && !var.getName().startsWith("_col")) {
+                    mutableCaptures.add(var);
+                }
+            }
+        }
+        if (node instanceof BoundAssignmentExpression assignExpr) {
+            VariableSymbol var = assignExpr.getVariable();
+            if (!localVarNames.contains(var.getName())) {
+                captured.add(var);
+                if (!var.isReadOnly()) { mutableCaptures.add(var); }
+            }
+            collectCapturedVarsFromBody(assignExpr.getExpression(), localVarNames, captured, mutableCaptures);
+        }
+        // Don't recurse into nested spawn/lambda
+        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
+
+        // Explicit sub-expression traversal (many BoundNode.getChildren() return empty)
+        if (node instanceof BoundVariableDeclaration decl) {
+            collectCapturedVarsFromBody(decl.getInitializer(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundExpressionStatement exprStmt) {
+            collectCapturedVarsFromBody(exprStmt.getExpression(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundIndexExpression indexExpr) {
+            collectCapturedVarsFromBody(indexExpr.getTarget(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(indexExpr.getIndex(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundCallExpression callExpr) {
+            for (BoundExpression arg : callExpr.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundBinaryExpression binExpr) {
+            collectCapturedVarsFromBody(binExpr.getLeft(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(binExpr.getRight(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundUnaryExpression unaryExpr) {
+            collectCapturedVarsFromBody(unaryExpr.getOperand(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundConditionalGotoStatement condGoto) {
+            collectCapturedVarsFromBody(condGoto.getCondition(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundJavaMethodCallExpression javaCall) {
+            if (javaCall.getTarget() != null) collectCapturedVarsFromBody(javaCall.getTarget(), localVarNames, captured, mutableCaptures);
+            for (BoundExpression arg : javaCall.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundClosureCallExpression closureCall) {
+            collectCapturedVarsFromBody(closureCall.getClosure(), localVarNames, captured, mutableCaptures);
+            for (BoundExpression arg : closureCall.getArguments()) {
+                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures);
+            }
+        } else if (node instanceof BoundIndexAssignmentExpression idxAssign) {
+            collectCapturedVarsFromBody(idxAssign.getTarget(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(idxAssign.getIndex(), localVarNames, captured, mutableCaptures);
+            collectCapturedVarsFromBody(idxAssign.getValue(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundMemberAccessExpression memberExpr) {
+            collectCapturedVarsFromBody(memberExpr.getTarget(), localVarNames, captured, mutableCaptures);
+        } else if (node instanceof BoundScopeExpression scopeExpr) {
+            collectCapturedVarsFromBody(scopeExpr.getBody(), localVarNames, captured, mutableCaptures);
+        } else {
+            // Fallback: use getChildren() for anything not explicitly handled
+            for (var it = node.getChildren(); it.hasNext(); ) {
+                collectCapturedVarsFromBody(it.next(), localVarNames, captured, mutableCaptures);
+            }
+        }
     }
 
     private BoundExpression bindLambdaExpression(LambdaExpressionSyntax syntax) {
@@ -1076,6 +1279,11 @@ public class Binder {
         }
 
         return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
+    }
+
+    private BoundStatement bindActorDeclaration(ActorDeclarationSyntax syntax) {
+        // No-op at bind time — actor is registered in first pass
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
     private BoundStatement bindImplDeclaration(ImplDeclarationSyntax syntax) {

@@ -11,6 +11,7 @@ public class StructSymbol {
     private final String _name;
     private final LinkedHashMap<String, Class<?>> _fields;
     private final LinkedHashMap<String, String> _fieldTypeNames;
+    private boolean _isActor = false;
 
     public StructSymbol(String name, LinkedHashMap<String, Class<?>> fields) {
         this(name, fields, new LinkedHashMap<>());
@@ -21,6 +22,9 @@ public class StructSymbol {
         _fields = fields;
         _fieldTypeNames = fieldTypeNames;
     }
+
+    public boolean isActor() { return _isActor; }
+    public void setActor(boolean isActor) { _isActor = isActor; }
 
     public String getFieldTypeName(String fieldName) {
         return _fieldTypeNames.get(fieldName);

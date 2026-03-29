@@ -101,6 +101,17 @@ public class TypeResolver {
         if (target instanceof BoundStructLiteralExpression structLit) {
             return structLit.getStructType();
         }
+        // Member access on struct: report.ipCounter → resolve nested struct type from field type name
+        if (target instanceof BoundMemberAccessExpression memberExpr && memberExpr.getClassType() == SiyoStruct.class) {
+            StructSymbol ownerStruct = resolveStructType(memberExpr.getTarget());
+            if (ownerStruct != null) {
+                String fieldTypeName = ownerStruct.getFieldTypeName(memberExpr.getMemberName());
+                if (fieldTypeName != null) {
+                    StructSymbol fieldStruct = _structTypes.get(fieldTypeName);
+                    if (fieldStruct != null) return fieldStruct;
+                }
+            }
+        }
         // Index expression on struct array: todos[i] → resolve element struct type
         if (target instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
             return resolveStructTypeFromCollection(indexExpr.getTarget());
@@ -225,6 +236,12 @@ public class TypeResolver {
         if (type == String.class) {
             return getOrLoadJavaClass("String", "java.lang.String");
         }
+        if (type == SiyoChannel.class) {
+            return getOrLoadJavaClass("SiyoChannel", "codeanalysis.SiyoChannel");
+        }
+        if (type == SiyoMap.class) {
+            return getOrLoadJavaClass("SiyoMap", "codeanalysis.SiyoMap");
+        }
         return null;
     }
 
@@ -281,6 +298,8 @@ public class TypeResolver {
             case "float" -> Double.class;
             case "string" -> String.class;
             case "fn", "func", "function" -> SiyoClosure.class;
+            case "channel" -> SiyoChannel.class;
+            case "map" -> SiyoMap.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
     }

@@ -1,0 +1,132 @@
+// SiyoDB v2 - Multi-client concurrent TCP Key-Value Store
+// Architecture: Store actor (owns data) + ClientHandler actors (one per connection)
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.System"
+
+// === Store Actor ===
+
+actor Store {
+    data: map
+}
+
+impl Store {
+    fn new() -> Store { Store { data: map() } }
+
+    fn set(self, key: string, value: string) -> string {
+        self.data.set(key, value)
+        "OK"
+    }
+
+    fn get(self, key: string) -> string {
+        if self.data.has(key) { toString(self.data.get(key)) }
+        else { "(nil)" }
+    }
+
+    fn del(self, key: string) -> string {
+        if self.data.has(key) {
+            self.data.remove(key)
+            "(deleted)"
+        } else { "(nil)" }
+    }
+
+    fn keys(self) -> string {
+        imut k = self.data.keys()
+        mut result = ""
+        for i in range(0, len(k)) {
+            if i > 0 { result += "," }
+            result += toString(k[i])
+        }
+        if len(result) == 0 { "(empty)" }
+        else { result }
+    }
+
+    fn size(self) -> int { self.data.size() }
+}
+
+// === Client Handler Actor ===
+// Each client gets its own actor. run(self) auto-invokes on spawn.
+
+actor ClientHandler {
+    store: Store,
+    socket: fn,
+    clientId: int
+}
+
+impl ClientHandler {
+    fn new(store: Store, socket: fn, clientId: int) -> ClientHandler {
+        ClientHandler { store: store, socket: socket, clientId: clientId }
+    }
+
+    fn run(self) {
+        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
+        mut writer = PrintWriter.new(self.socket.getOutputStream(), true)
+        writer.println("WELCOME to SiyoDB v2 (multi-client, actor-backed)")
+
+        println("[client " + self.clientId + "] connected")
+
+        mut connected = true
+        while connected {
+            imut line = reader.readLine()
+            if line == null {
+                connected = false
+            } else {
+                imut cmd = trim(line)
+                if len(cmd) == 0 {
+                    // skip
+                } else if cmd == "PING" {
+                    writer.println("PONG")
+                } else if cmd == "QUIT" {
+                    writer.println("BYE")
+                    connected = false
+                } else if cmd == "KEYS" {
+                    writer.println(self.store.keys())
+                } else if startsWith(cmd, "GET ") {
+                    writer.println(self.store.get(substring(cmd, 4, len(cmd))))
+                } else if startsWith(cmd, "SET ") {
+                    imut rest = substring(cmd, 4, len(cmd))
+                    imut sp = indexOf(rest, " ")
+                    if sp < 0 {
+                        writer.println("ERR: SET key value")
+                    } else {
+                        writer.println(self.store.set(
+                            substring(rest, 0, sp),
+                            substring(rest, sp + 1, len(rest))
+                        ))
+                    }
+                } else if startsWith(cmd, "DEL ") {
+                    writer.println(self.store.del(substring(cmd, 4, len(cmd))))
+                } else {
+                    writer.println("ERR: unknown command")
+                }
+            }
+        }
+
+        self.socket.close()
+        println("[client " + self.clientId + "] disconnected. Store: " + self.store.size() + " keys")
+    }
+}
+
+// === Main - Accept Loop ===
+
+imut PORT = 7777
+mut store = spawn Store.new()
+mut server = ServerSocket.new(PORT)
+mut clientCount = 0
+
+println("=== SiyoDB v2 ===")
+println("Multi-client concurrent TCP key-value store")
+println("Listening on port " + PORT)
+println("Architecture: Store actor + ClientHandler actors")
+println("")
+
+while true {
+    mut socket = server.accept()
+    clientCount += 1
+    // Spawn a ClientHandler actor for each connection
+    // run(self) auto-invokes — handles client loop on its own virtual thread
+    // store actor handle shared — all data access serialized
+    spawn ClientHandler.new(store, socket, clientCount)
+}

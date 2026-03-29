@@ -21,6 +21,9 @@ public class Main {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
+        if (System.getenv("SIYO_DEBUG") != null) {
+            System.err.println("[debug] args=" + java.util.Arrays.toString(args));
+        }
         // Parse -cp flag: siyoc -cp lib.jar run file.siyo
         String classpath = null;
         java.util.List<String> remaining = new java.util.ArrayList<>();
@@ -39,7 +42,11 @@ public class Main {
 
         String[] cargs = remaining.toArray(new String[0]);
         if (cargs.length >= 2 && cargs[0].equals("run")) {
-            runFile(cargs[1]);
+            compileAndRun(cargs[1]); // bytecode default (26x faster)
+            return;
+        }
+        if (cargs.length >= 2 && cargs[0].equals("interpret")) {
+            runFile(cargs[1]); // interpreter path (for debugging)
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("compile")) {
@@ -67,7 +74,9 @@ public class Main {
 
             String fileName = java.nio.file.Paths.get(path).getFileName().toString();
             String classNameRaw = fileName.contains(".") ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
-            final String className = Character.toUpperCase(classNameRaw.charAt(0)) + classNameRaw.substring(1);
+            String classNameBase = Character.toUpperCase(classNameRaw.charAt(0)) + classNameRaw.substring(1);
+            // Avoid collision with compiler's own Main class
+            final String className = classNameBase.equals("Main") ? "Siyo_Main" : classNameBase;
 
             byte[] bytecode = compilation.compile(className);
             if (bytecode == null) {
@@ -108,11 +117,13 @@ public class Main {
             cls.getMethod("main", String[].class).invoke(null, (Object) new String[]{});
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
-                System.err.println("Error: " + e.getCause().getMessage());
+                e.getCause().printStackTrace(System.err);
+                System.err.flush();
             }
             System.exit(1);
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace(System.err);
+            System.err.flush();
             System.exit(1);
         }
     }
@@ -192,7 +203,8 @@ public class Main {
                 System.out.println(result.getValue());
             }
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace(System.err);
+            System.err.flush();
             System.exit(1);
         }
     }

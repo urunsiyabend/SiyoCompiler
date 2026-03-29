@@ -22,6 +22,7 @@ public class BoundGlobalScope {
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies;
     private final Iterable<VariableSymbol> _variableSymbols;
     private final BoundStatement _boundStatement;
+    private Map<String, codeanalysis.StructSymbol> _structTypes;
 
     /**
      * Initializes a new instance of the BoundGlobalScope class with the specified previous bound global scope, diagnostic box, variable symbols and bound expression.
@@ -96,4 +97,6 @@ public class BoundGlobalScope {
         return _previous;
     }
 
+    public void setStructTypes(Map<String, codeanalysis.StructSymbol> types) { _structTypes = types; }
+    public Map<String, codeanalysis.StructSymbol> getStructTypes() { return _structTypes != null ? _structTypes : Map.of(); }
 }

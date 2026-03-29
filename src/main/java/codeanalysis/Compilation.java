@@ -102,6 +102,11 @@ public class Compilation {
         BoundBlockStatement statement = getStatement();
         Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
         Evaluator evaluator = new Evaluator(statement, variables, functions);
+        for (var entry : getGlobalScope().getStructTypes().entrySet()) {
+            if (entry.getValue().isActor()) {
+                evaluator.registerActorType(entry.getKey());
+            }
+        }
         Object value = evaluator.evaluate();
         return new EvaluationResult(new DiagnosticBox(), value);
     }

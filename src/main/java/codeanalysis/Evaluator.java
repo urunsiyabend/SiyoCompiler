@@ -200,6 +200,8 @@ public class Evaluator {
             case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression());
             case LambdaExpression -> evaluateLambdaExpression((BoundLambdaExpression) node);
             case ClosureCallExpression -> evaluateClosureCall((BoundClosureCallExpression) node);
+            case ScopeExpression -> evaluateScopeExpression((BoundScopeExpression) node);
+            case SpawnExpression -> evaluateSpawnExpression((BoundSpawnExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -331,6 +333,17 @@ public class Evaluator {
         // Handle built-in functions
         if (BuiltinFunctions.isBuiltin(function)) {
             return evaluateBuiltinFunction(function, arguments);
+        }
+
+        // Actor method interception: if first arg is SiyoActor AND this is an instance method (first param is "self")
+        if (arguments.length > 0 && arguments[0] instanceof SiyoActor actor
+                && function.getName().contains(".")
+                && function.getParameters().size() > 0
+                && function.getParameters().get(0).getName().equals("self")) {
+            String methodName = function.getName().substring(function.getName().indexOf('.') + 1);
+            Object[] methodArgs = new Object[arguments.length - 1];
+            System.arraycopy(arguments, 1, methodArgs, 0, methodArgs.length);
+            return actor.call(methodName, methodArgs);
         }
 
         // Get the function body
@@ -509,6 +522,177 @@ public class Evaluator {
         return result;
     }
 
+    private Object evaluateScopeExpression(BoundScopeExpression node) throws Exception {
+        // Collect spawn tasks during body evaluation
+        java.util.List<Thread> threads = new java.util.ArrayList<>();
+        java.util.List<Exception> errors = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        _scopeThreads = threads;
+        _scopeErrors = errors;
+
+        evaluateBlock(node.getBody());
+
+        // Wait for all spawned tasks to complete (structured concurrency)
+        for (Thread t : threads) {
+            try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+        _scopeThreads = null;
+        _scopeErrors = null;
+
+        if (!errors.isEmpty()) {
+            throw errors.get(0);
+        }
+        return null;
+    }
+
+    private java.util.List<Thread> _scopeThreads = null;
+    private java.util.List<Exception> _scopeErrors = null;
+
+    private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
+        // Check if this is an actor spawn (single expression returning actor struct)
+        if (node.getBody().getStatements().size() == 1
+            && node.getBody().getStatements().get(0) instanceof BoundExpressionStatement exprStmt) {
+            // Determine actor type from the expression
+            String actorTypeName = null;
+            if (exprStmt.getExpression() instanceof BoundCallExpression callExpr) {
+                String funcName = callExpr.getFunction().getName();
+                if (funcName.contains(".")) {
+                    String typeName = funcName.substring(0, funcName.indexOf('.'));
+                    if (_actorTypeNames.contains(typeName)) {
+                        actorTypeName = typeName;
+                    }
+                }
+            }
+
+            if (actorTypeName != null) {
+                Object result = evaluateExpression(exprStmt.getExpression());
+                if (result instanceof SiyoStruct struct) {
+                    return createActor(struct, actorTypeName);
+                }
+            }
+            // Not an actor — fall through to scope spawn
+        }
+
+        if (_scopeThreads == null) {
+            throw new Exception("spawn must be inside a scope block");
+        }
+
+        // Capture current variable values for the spawn body
+        java.util.Map<VariableSymbol, Object> capturedSnapshot = new java.util.HashMap<>();
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            Object val = lookupVariable(var);
+            capturedSnapshot.put(var, val);
+        }
+
+        // Copy current function table reference
+        java.util.Map<FunctionSymbol, codeanalysis.binding.BoundBlockStatement> funcsCopy = _functions;
+        BoundBlockStatement body = node.getBody();
+
+        Thread thread = Thread.startVirtualThread(() -> {
+            try {
+                // Each spawn gets its own isolated globals copy
+                // Channel/SiyoChannel objects are shared by reference (thread-safe)
+                // Use synchronized HashMap (not ConcurrentHashMap which rejects null values)
+                java.util.Map<VariableSymbol, Object> isolatedGlobals =
+                        java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
+                Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
+
+                // Inject captured variables (immutable values + channels)
+                StackFrame frame = new StackFrame(null);
+                for (var entry : capturedSnapshot.entrySet()) {
+                    frame.getLocals().put(entry.getKey(), entry.getValue());
+                }
+                taskEval._callStack.push(frame);
+                taskEval.evaluateBlock(body);
+                taskEval._callStack.pop();
+            } catch (Exception e) {
+                _scopeErrors.add(e);
+            }
+        });
+
+        _scopeThreads.add(thread);
+        return null;
+    }
+
+    private java.util.Set<String> _actorTypeNames = new java.util.HashSet<>();
+
+    public void registerActorType(String name) { _actorTypeNames.add(name); }
+
+    // Actor type detection is now done in evaluateSpawnExpression via call expression name
+
+    private Object createActor(SiyoStruct state, String actorTypeName) {
+        SiyoActor actor = new SiyoActor(state, actorTypeName);
+
+        // Start actor event loop on virtual thread
+        Thread actorThread = Thread.startVirtualThread(() -> {
+            while (true) {
+                try {
+                    SiyoActor.ActorMessage msg = actor.getMailbox().take();
+                    String qualifiedName = actorTypeName + "." + msg.methodName;
+
+                    // Find the function
+                    codeanalysis.binding.BoundBlockStatement body = null;
+                    FunctionSymbol func = null;
+                    for (var entry : _functions.entrySet()) {
+                        if (entry.getKey().getName().equals(qualifiedName)) {
+                            func = entry.getKey();
+                            body = entry.getValue();
+                            break;
+                        }
+                    }
+
+                    if (body == null) {
+                        if (msg.replyChannel != null) {
+                            msg.replyChannel.put(new SiyoActor.ActorError("Unknown method: " + msg.methodName));
+                        }
+                        continue;
+                    }
+
+                    // Execute method with actor state as self
+                    java.util.Map<VariableSymbol, Object> isolatedGlobals =
+                            java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
+                    Evaluator actorEval = new Evaluator(body, isolatedGlobals, _functions);
+                    StackFrame frame = new StackFrame(func);
+
+                    // Bind self (first param) to actor state
+                    frame.getLocals().put(func.getParameters().get(0), state);
+                    // Bind remaining params
+                    for (int i = 0; i < msg.args.length; i++) {
+                        frame.getLocals().put(func.getParameters().get(i + 1), msg.args[i]);
+                    }
+
+                    actorEval._callStack.push(frame);
+                    actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
+                    actorEval.evaluateBlock(body);
+                    actorEval._callStack.pop();
+
+                    Object result = actorEval._returnTriggered ? actorEval._returnValue : actorEval._lastValue;
+                    actorEval._returnTriggered = false;
+
+                    if (msg.replyChannel != null) {
+                        msg.replyChannel.put(result != null ? result : "");
+                    }
+
+                    // Check if actor has `run` method and this is the first message
+                } catch (Exception e) {
+                    // Don't crash the actor — continue processing messages
+                }
+            }
+        });
+
+        actor.setThread(actorThread);
+
+        // If actor has a `run(self)` method, auto-invoke it (fire-and-forget)
+        String runMethod = actorTypeName + ".run";
+        for (var entry : _functions.entrySet()) {
+            if (entry.getKey().getName().equals(runMethod)) {
+                actor.send("run", new Object[]{});
+                break;
+            }
+        }
+
+        return actor;
+    }
+
     private Object evaluateLambdaExpression(BoundLambdaExpression node) {
         // Capture current variable values from the active scope
         java.util.Map<VariableSymbol, Object> capturedVars = new java.util.HashMap<>();
@@ -666,6 +850,36 @@ public class Evaluator {
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
             return null;
+        }
+        if (function == BuiltinFunctions.SORT) {
+            SiyoArray arr = (SiyoArray) arguments[0];
+            SiyoClosure comparator = (SiyoClosure) arguments[1];
+            // Sort using closure as comparator
+            arr.sort((a, b) -> {
+                try {
+                    // Call closure with (a, b) → int
+                    StackFrame frame = new StackFrame(null);
+                    for (var entry : comparator.getCapturedVars().entrySet()) {
+                        frame.getLocals().put(entry.getKey(), entry.getValue());
+                    }
+                    frame.getLocals().put(comparator.getParameters().get(0), a);
+                    frame.getLocals().put(comparator.getParameters().get(1), b);
+                    _callStack.push(frame);
+                    evaluateBlock(comparator.getBody());
+                    _callStack.pop();
+                    Object result = _lastValue;
+                    return (result instanceof Integer i) ? i : 0;
+                } catch (Exception e) {
+                    return 0;
+                }
+            });
+            return null;
+        }
+        if (function == BuiltinFunctions.NEW_MAP) {
+            return new SiyoMap();
+        }
+        if (function == BuiltinFunctions.CHANNEL) {
+            return new SiyoChannel();
         }
         if (function == BuiltinFunctions.CHR) {
             int code = (arguments[0] instanceof Byte b) ? (int) b : (int) arguments[0];

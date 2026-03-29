@@ -257,6 +257,20 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         report(span, message);
     }
 
+    public void reportMutableCaptureInSpawn(TextSpan span, String varName) {
+        String message = String.format(
+            "Mutable variable '%s' cannot be captured by spawn block\n\n" +
+            "  help: consider one of these alternatives:\n" +
+            "    - use a channel to communicate the value\n" +
+            "    - use 'let' instead of 'mut' if the variable doesn't need to change\n" +
+            "    - transfer ownership with a channel: ch.send(%s)", varName, varName);
+        report(span, message);
+    }
+
+    public void reportSpawnOutsideScope(TextSpan span) {
+        report(span, "spawn must be inside a scope block\n\n  help: wrap your spawn in a scope { } block");
+    }
+
     /**
      * Reports a wrong argument count diagnostic.
      *

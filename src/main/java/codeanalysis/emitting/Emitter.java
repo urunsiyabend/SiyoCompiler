@@ -27,6 +27,15 @@ public class Emitter {
     private final java.util.Set<VariableSymbol> _globalFields = new java.util.HashSet<>();
     private int _nextLocal = 0;
     private boolean _inMainMethod = false;
+    private boolean _needsScanner = false;
+    private boolean _tryCatchImplicitReturn = false;
+    private Class<?> _tryCatchReturnType = null;
+    private java.util.Set<VariableSymbol> _spawnCapturedVars = null;
+
+    // Lambda/closure tracking for bytecode emission
+    private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
+    private final java.util.List<BoundSpawnExpression> _spawns = new java.util.ArrayList<>();
+    private ClassWriter _classWriter; // keep reference for lambda method emission
 
     public Emitter(BoundBlockStatement statement, Map<FunctionSymbol, BoundBlockStatement> functions) {
         _statement = statement;
@@ -45,16 +54,34 @@ public class Emitter {
      */
     public byte[] emit(String className) {
         _className = className;
-        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        cw.visit(V17, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
+        ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                // Safe fallback for frame computation - avoids class loading issues
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (Exception | LinkageError e) {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        _classWriter = cw;
+        cw.visit(V21, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
 
-        // First pass: collect global variables from main body
+        // First pass: collect global variables and lambdas
         collectGlobalVariables(_statement);
+        collectLambdasAndSpawns(_statement);
+        for (var body : _functions.values()) {
+            collectLambdasAndSpawns(body);
+        }
 
-        // Generate static fields for global variables
+        // Generate static fields for global variables (dedup by name)
+        java.util.Set<String> emittedFields = new java.util.HashSet<>();
         for (VariableSymbol global : _globalFields) {
-            String desc = getTypeDescriptor(global.getType());
-            cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
+            if (emittedFields.add(global.getName())) {
+                String desc = getTypeDescriptor(global.getType());
+                cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
+            }
         }
 
         // Generate default constructor
@@ -65,12 +92,47 @@ public class Emitter {
             emitFunction(cw, entry.getKey(), entry.getValue(), className);
         }
 
-        // Generate main method with the top-level statements
+        // Generate main method FIRST (collects lambdas/spawns during emission)
         emitMainMethod(cw, className);
+
+        // Generate lambda methods (discovered during main emission)
+        for (int i = 0; i < _lambdas.size(); i++) {
+            emitLambdaMethod(cw, i, _lambdas.get(i));
+        }
+
+        // Generate spawn methods
+        for (int i = 0; i < _spawns.size(); i++) {
+            emitSpawnMethod(cw, i, _spawns.get(i));
+        }
+
+        // Generate closure dispatch method
+        if (!_lambdas.isEmpty()) {
+            emitClosureDispatch(cw);
+        }
+
+        // Generate spawn wrapper methods
+        if (!_spawns.isEmpty()) {
+            emitSpawnWrapperMethods(cw);
+        }
 
         // Emit helper methods if needed
         if (_needsRangeHelper) {
             emitRangeHelper(cw);
+        }
+
+        // Generate shared Scanner field if needed
+        if (_needsScanner) {
+            cw.visitField(ACC_STATIC, "$scanner", "Ljava/util/Scanner;", null, null).visitEnd();
+            MethodVisitor clinit = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
+            clinit.visitCode();
+            clinit.visitTypeInsn(NEW, "java/util/Scanner");
+            clinit.visitInsn(DUP);
+            clinit.visitFieldInsn(GETSTATIC, "java/lang/System", "in", "Ljava/io/InputStream;");
+            clinit.visitMethodInsn(INVOKESPECIAL, "java/util/Scanner", "<init>", "(Ljava/io/InputStream;)V", false);
+            clinit.visitFieldInsn(PUTSTATIC, className, "$scanner", "Ljava/util/Scanner;");
+            clinit.visitInsn(RETURN);
+            clinit.visitMaxs(0, 0);
+            clinit.visitEnd();
         }
 
         cw.visitEnd();
@@ -119,14 +181,16 @@ public class Emitter {
 
     private void emitFunction(ClassWriter cw, FunctionSymbol function, BoundBlockStatement body, String className) {
         if (BuiltinFunctions.isBuiltin(function)) return;
-        if (function.getModuleName() != null) return; // imported functions compiled in their own class
+        if (function.getModuleName() != null) return;
 
+        String methodName = function.getName().replace('.', '$');
         String descriptor = getFunctionDescriptor(function);
-        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, function.getName().replace('.', '$'), descriptor, null, null);
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, methodName, descriptor, null, null);
         _mv.visitCode();
         _locals.clear();
         _labels.clear();
         _nextLocal = 0;
+        _inMainMethod = false; // user functions should not access global fields by name
 
         // Allocate parameter slots
         for (ParameterSymbol param : function.getParameters()) {
@@ -138,7 +202,12 @@ public class Emitter {
         // Emit function body, handling implicit return for the last expression
         emitFunctionBody(body, function);
 
-        _mv.visitMaxs(0, 0);
+        try {
+            _mv.visitMaxs(0, 0);
+        } catch (Exception e) {
+            System.err.println("[ASM ERROR] Function " + function.getName() + ": " + e.getMessage());
+            throw e;
+        }
         _mv.visitEnd();
     }
 
@@ -156,12 +225,31 @@ public class Emitter {
                 return;
             }
 
+            // For try/catch as last statement in non-void function, enable implicit return in bodies
+            if (isLast && function.getReturnType() != null && stmt instanceof BoundTryCatchStatement) {
+                _tryCatchImplicitReturn = true;
+                _tryCatchReturnType = function.getReturnType();
+            }
+
             emitStatement(stmt);
+            _tryCatchImplicitReturn = false;
         }
 
-        // Add default return if no explicit return was emitted
+        // Add default return for all functions (safety net for try/catch paths)
         if (function.getReturnType() == null) {
             _mv.visitInsn(RETURN);
+        } else {
+            // Push default value and return (unreachable if all paths return, but needed for frame computation)
+            if (function.getReturnType() == Integer.class || function.getReturnType() == Boolean.class) {
+                _mv.visitInsn(ICONST_0);
+                _mv.visitInsn(IRETURN);
+            } else if (function.getReturnType() == Double.class) {
+                _mv.visitInsn(DCONST_0);
+                _mv.visitInsn(DRETURN);
+            } else {
+                _mv.visitInsn(ACONST_NULL);
+                _mv.visitInsn(ARETURN);
+            }
         }
     }
 
@@ -178,6 +266,20 @@ public class Emitter {
             case ReturnStatement -> emitReturnStatement((BoundReturnStatement) node);
             case TryCatchStatement -> emitTryCatchStatement((BoundTryCatchStatement) node);
             default -> throw new UnsupportedOperationException("Cannot emit statement: " + node.getType());
+        }
+    }
+
+    private void emitBlockWithImplicitReturn(BoundBlockStatement block, Class<?> returnType) {
+        var stmts = block.getStatements();
+        for (int i = 0; i < stmts.size(); i++) {
+            BoundStatement stmt = stmts.get(i);
+            boolean isLast = (i == stmts.size() - 1);
+            if (isLast && returnType != null && stmt instanceof BoundExpressionStatement exprStmt) {
+                emitExpression(exprStmt.getExpression());
+                _mv.visitInsn(getReturnInsn(returnType));
+                return;
+            }
+            emitStatement(stmt);
         }
     }
 
@@ -210,7 +312,7 @@ public class Emitter {
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
-        if (_globalFields.contains(node.getVariable())) {
+        if (isGlobalField(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = declareLocal(node.getVariable());
@@ -244,22 +346,32 @@ public class Emitter {
         Label catchStart = new Label();
         Label catchEnd = new Label();
 
-        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Exception");
+        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
 
         // Try body
         _mv.visitLabel(tryStart);
-        emitStatement(node.getTryBody());
+        if (_tryCatchImplicitReturn && node.getTryBody() instanceof BoundBlockStatement tryBlock) {
+            emitBlockWithImplicitReturn(tryBlock, _tryCatchReturnType);
+        } else if (node.getTryBody() instanceof BoundBlockStatement tryBlock) {
+            emitBlockStatement(tryBlock);
+        } else {
+            emitStatement(node.getTryBody());
+        }
         _mv.visitLabel(tryEnd);
         _mv.visitJumpInsn(GOTO, catchEnd);
 
-        // Catch body
+        // Catch body - exception on stack
         _mv.visitLabel(catchStart);
-        // Exception is on stack, get message
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Exception", "getMessage", "()Ljava/lang/String;", false);
-        // Store in error variable
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Throwable", "getMessage", "()Ljava/lang/String;", false);
         int errorSlot = declareLocal(node.getErrorVariable());
         _mv.visitVarInsn(ASTORE, errorSlot);
-        emitStatement(node.getCatchBody());
+        if (_tryCatchImplicitReturn && node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
+            emitBlockWithImplicitReturn(catchBlock, _tryCatchReturnType);
+        } else if (node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
+            emitBlockStatement(catchBlock);
+        } else {
+            emitStatement(node.getCatchBody());
+        }
         _mv.visitLabel(catchEnd);
     }
 
@@ -292,6 +404,10 @@ public class Emitter {
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> emitJavaStaticField((BoundJavaStaticFieldExpression) node);
             case CastExpression -> emitCastExpression((BoundCastExpression) node);
+            case LambdaExpression -> emitLambdaCreation((BoundLambdaExpression) node);
+            case ClosureCallExpression -> emitClosureCall((BoundClosureCallExpression) node);
+            case ScopeExpression -> emitScope((BoundScopeExpression) node);
+            case SpawnExpression -> emitSpawn((BoundSpawnExpression) node);
             default -> throw new UnsupportedOperationException("Cannot emit expression: " + node.getType());
         }
     }
@@ -314,12 +430,36 @@ public class Emitter {
     }
 
     private void emitVariableExpression(BoundVariableExpression node) {
-        if (_globalFields.contains(node.getVariable())) {
-            _mv.visitFieldInsn(GETSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(node.getVariable().getType()));
+        emitVariableLoad(node.getVariable());
+    }
+
+    private void emitVariableLoad(VariableSymbol var) {
+        if (isGlobalField(var)) {
+            _mv.visitFieldInsn(GETSTATIC, _className, var.getName(), getTypeDescriptor(var.getType()));
             return;
         }
-        int slot = getLocal(node.getVariable());
-        emitLoad(node.getVariable().getType(), slot);
+        int slot = getLocal(var);
+        // Spawn captured variables are passed as Object - need ALOAD + unbox
+        if (_spawnCapturedVars != null && isCapturedVar(var)) {
+            _mv.visitVarInsn(ALOAD, slot);
+            if (var.getType() == Integer.class) emitUnboxIfNeeded(Integer.class);
+            else if (var.getType() == Double.class) emitUnboxIfNeeded(Double.class);
+            else if (var.getType() == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+            else if (var.getType() == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            else if (var.getType() == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoArray");
+            else if (var.getType() == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
+            // Other reference types stay as Object
+            return;
+        }
+        emitLoad(var.getType(), slot);
+    }
+
+    private boolean isCapturedVar(VariableSymbol var) {
+        if (_spawnCapturedVars == null) return false;
+        for (VariableSymbol cv : _spawnCapturedVars) {
+            if (cv.getName().equals(var.getName())) return true;
+        }
+        return false;
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {
@@ -335,7 +475,7 @@ public class Emitter {
         } else {
             _mv.visitInsn(DUP);
         }
-        if (_globalFields.contains(node.getVariable())) {
+        if (isGlobalField(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = getLocal(node.getVariable());
@@ -489,8 +629,17 @@ public class Emitter {
                 default -> throw new UnsupportedOperationException();
             };
             _mv.visitJumpInsn(jumpInsn, trueLabel);
+        } else if (type == String.class) {
+            // String value equality via Objects.equals
+            _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
+            if (node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
+                _mv.visitInsn(ICONST_1);
+                _mv.visitInsn(IXOR);
+            }
+            return; // Objects.equals already returns boolean
         } else {
-            // Object equality (String, null, etc.)
+            // Object reference equality
             int jumpInsn = switch (node.getOperator().getType()) {
                 case Equals -> IF_ACMPEQ;
                 case NotEquals -> IF_ACMPNE;
@@ -534,6 +683,366 @@ public class Emitter {
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append", appendDesc, false);
     }
 
+    // ========== Lambda/Spawn Expression Emission ==========
+
+    private void emitLambdaCreation(BoundLambdaExpression node) {
+        int index = _lambdas.indexOf(node);
+        if (index < 0) { _lambdas.add(node); index = _lambdas.size() - 1; }
+
+        // Create Object[2] = {Integer(lambdaId), Object[]{captured}}
+        _mv.visitLdcInsn(2);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+
+        // [0] = lambdaId
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(0);
+        _mv.visitLdcInsn(index);
+        _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", false);
+        _mv.visitInsn(AASTORE);
+
+        // [1] = captured array
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(1);
+        int capturedSize = node.getCapturedVariables().size();
+        _mv.visitLdcInsn(capturedSize);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        int ci = 0;
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(ci++);
+            emitVariableLoad(var);
+            emitBoxIfNeeded(var.getType());
+            _mv.visitInsn(AASTORE);
+        }
+        _mv.visitInsn(AASTORE);
+        // Stack: Object[2] (the closure representation)
+    }
+
+    private void emitClosureCall(BoundClosureCallExpression node) {
+        // closure is Object[2] = {Integer(lambdaId), Object[]{captured}}
+        emitExpression(node.getClosure());
+        int closureLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, closureLocal);
+
+        // Extract lambdaId
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitLdcInsn(0);
+        _mv.visitInsn(AALOAD);
+        _mv.visitTypeInsn(CHECKCAST, "java/lang/Integer");
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Integer", "intValue", "()I", false);
+        int lambdaIdLocal = _nextLocal++;
+        _mv.visitVarInsn(ISTORE, lambdaIdLocal);
+
+        // Extract captured array
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitLdcInsn(1);
+        _mv.visitInsn(AALOAD);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        int capturedLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, capturedLocal);
+
+        // Build args array
+        int argCount = node.getArguments().size();
+        _mv.visitLdcInsn(argCount);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        for (int i = 0; i < argCount; i++) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(i);
+            emitExpression(node.getArguments().get(i));
+            emitBoxIfNeeded(node.getArguments().get(i).getClassType());
+            _mv.visitInsn(AASTORE);
+        }
+        int argsLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, argsLocal);
+
+        // Call dispatch: closureDispatch$(lambdaId, captured, args)
+        _mv.visitVarInsn(ILOAD, lambdaIdLocal);
+        _mv.visitVarInsn(ALOAD, capturedLocal);
+        _mv.visitVarInsn(ALOAD, argsLocal);
+        _mv.visitMethodInsn(INVOKESTATIC, _className, "closureDispatch$",
+                "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+    }
+
+    private void emitScope(BoundScopeExpression node) {
+        // Create thread list: ArrayList<Thread>
+        _mv.visitTypeInsn(NEW, "java/util/ArrayList");
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
+        int threadsLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, threadsLocal);
+
+        // Save threads list local for spawn to use
+        int savedScopeThreadsLocal = _scopeThreadsLocal;
+        _scopeThreadsLocal = threadsLocal;
+
+        // Emit body (spawns will add threads to the list)
+        emitBlockStatement(node.getBody());
+
+        // Join all threads
+        _mv.visitVarInsn(ALOAD, threadsLocal);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", true);
+        Label loopStart = new Label();
+        Label loopEnd = new Label();
+        _mv.visitLabel(loopStart);
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Iterator", "hasNext", "()Z", true);
+        _mv.visitJumpInsn(IFEQ, loopEnd);
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Iterator", "next", "()Ljava/lang/Object;", true);
+        _mv.visitTypeInsn(CHECKCAST, "java/lang/Thread");
+        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Thread", "join", "()V", false);
+        _mv.visitJumpInsn(GOTO, loopStart);
+        _mv.visitLabel(loopEnd);
+        _mv.visitInsn(POP); // pop iterator
+
+        _scopeThreadsLocal = savedScopeThreadsLocal;
+    }
+
+    private int _scopeThreadsLocal = -1;
+
+    private void emitSpawn(BoundSpawnExpression node) {
+        int index = _spawns.indexOf(node);
+        if (index < 0) { _spawns.add(node); index = _spawns.size() - 1; }
+        // Create Runnable that calls spawn$N with captured vars
+        // Use an Object[] to pass captured vars
+        int capturedSize = node.getCapturedVariables().size();
+
+        // Build captured array
+        _mv.visitLdcInsn(capturedSize);
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        int ci = 0;
+        for (VariableSymbol var : node.getCapturedVariables()) {
+            _mv.visitInsn(DUP);
+            _mv.visitLdcInsn(ci++);
+            emitVariableLoad(var);
+            emitBoxIfNeeded(var.getType());
+            _mv.visitInsn(AASTORE);
+        }
+        int capturedLocal = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, capturedLocal);
+
+        // Use INVOKEDYNAMIC + LambdaMetafactory to create Runnable
+        // The Runnable will call spawn$N with unpacked captured vars from the array
+        // But LambdaMetafactory needs a direct method reference, not runtime dispatch.
+        // Simplest correct approach: generate a wrapper static method that takes Object[]
+        // and dispatches to the right spawn$N, then use INVOKEDYNAMIC for that.
+
+        // Actually simplest: generate spawn$dispatch$N(Object[]) for each spawn
+        // and use INVOKEDYNAMIC to wrap it as Runnable
+        _mv.visitVarInsn(ALOAD, capturedLocal);
+        // INVOKEDYNAMIC: create Runnable from spawn$wrap$N(Object[])
+        org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
+                H_INVOKESTATIC, "java/lang/invoke/LambdaMetafactory", "metafactory",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                false);
+        org.objectweb.asm.Handle implHandle = new org.objectweb.asm.Handle(
+                H_INVOKESTATIC, _className, "spawn$wrap$" + index,
+                "([Ljava/lang/Object;)V", false);
+        _mv.visitInvokeDynamicInsn("run", "([Ljava/lang/Object;)Ljava/lang/Runnable;",
+                bootstrap,
+                org.objectweb.asm.Type.getType("()V"),
+                implHandle,
+                org.objectweb.asm.Type.getType("()V"));
+        _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Thread", "startVirtualThread",
+                "(Ljava/lang/Runnable;)Ljava/lang/Thread;", false);
+
+        // Add to scope's thread list
+        if (_scopeThreadsLocal >= 0) {
+            _mv.visitInsn(DUP);
+            int threadLocal = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, threadLocal);
+            _mv.visitVarInsn(ALOAD, _scopeThreadsLocal);
+            _mv.visitVarInsn(ALOAD, threadLocal);
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
+            _mv.visitInsn(POP); // discard boolean
+        } else {
+            _mv.visitInsn(POP); // discard thread if no scope
+        }
+    }
+
+    private void emitSpawnWrapperMethods(ClassWriter cw) {
+        for (int i = 0; i < _spawns.size(); i++) {
+            BoundSpawnExpression spawn = _spawns.get(i);
+            // spawn$wrap$N(Object[] captured) -> void
+            // Unpacks captured array and calls spawn$N(captured0, captured1, ...)
+            _mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "spawn$wrap$" + i,
+                    "([Ljava/lang/Object;)V", null, null);
+            _mv.visitCode();
+
+            int ci = 0;
+            for (VariableSymbol var : spawn.getCapturedVariables()) {
+                _mv.visitVarInsn(ALOAD, 0); // captured array
+                _mv.visitLdcInsn(ci++);
+                _mv.visitInsn(AALOAD);
+            }
+
+            // Build descriptor for spawn$N
+            StringBuilder desc = new StringBuilder("(");
+            for (int c = 0; c < spawn.getCapturedVariables().size(); c++) {
+                desc.append("Ljava/lang/Object;");
+            }
+            desc.append(")V");
+
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "spawn$" + i, desc.toString(), false);
+            _mv.visitInsn(RETURN);
+            _mv.visitMaxs(0, 0);
+            _mv.visitEnd();
+        }
+    }
+
+    // ========== Lambda/Spawn Method Emission ==========
+
+    private void collectLambdasAndSpawns(BoundNode node) {
+        if (node instanceof BoundLambdaExpression lambda) {
+            if (!_lambdas.contains(lambda)) _lambdas.add(lambda);
+            collectLambdasAndSpawns(lambda.getBody());
+        }
+        if (node instanceof BoundSpawnExpression spawn) {
+            if (!_spawns.contains(spawn)) _spawns.add(spawn);
+            collectLambdasAndSpawns(spawn.getBody());
+        }
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectLambdasAndSpawns(it.next());
+        }
+    }
+
+    private void emitLambdaMethod(ClassWriter cw, int index, BoundLambdaExpression lambda) {
+        // Method signature: lambda$N(captured0, captured1, ..., param0, param1, ...) -> Object
+        StringBuilder desc = new StringBuilder("(");
+        for (VariableSymbol captured : lambda.getCapturedVariables()) {
+            desc.append("Ljava/lang/Object;");
+        }
+        for (ParameterSymbol param : lambda.getParameters()) {
+            desc.append(getTypeDescriptor(param.getType()));
+        }
+        desc.append(")");
+        desc.append(lambda.getReturnType() != null ? getTypeDescriptor(lambda.getReturnType()) : "V");
+
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "lambda$" + index, desc.toString(), null, null);
+        _mv.visitCode();
+        _locals.clear();
+        _labels.clear();
+        _nextLocal = 0;
+        boolean savedInMain = _inMainMethod;
+        _inMainMethod = false;
+        _inIsolatedMethod = true;
+
+        // Map captured variables to local slots
+        for (VariableSymbol captured : lambda.getCapturedVariables()) {
+            _locals.put(captured, _nextLocal++);
+        }
+        // Map parameters to local slots
+        for (ParameterSymbol param : lambda.getParameters()) {
+            _locals.put(param, _nextLocal);
+            _nextLocal += (param.getType() == Double.class) ? 2 : 1;
+        }
+
+        // Emit body
+        FunctionSymbol tempFunc = new FunctionSymbol("lambda$" + index, lambda.getParameters(), lambda.getReturnType());
+        emitFunctionBody(lambda.getBody(), tempFunc);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+        _inMainMethod = savedInMain;
+        _inIsolatedMethod = false;
+    }
+
+    private void emitSpawnMethod(ClassWriter cw, int index, BoundSpawnExpression spawn) {
+        // spawn$N(captured0, captured1, ...) -> void
+        StringBuilder desc = new StringBuilder("(");
+        for (VariableSymbol captured : spawn.getCapturedVariables()) {
+            desc.append("Ljava/lang/Object;");
+        }
+        desc.append(")V");
+
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "spawn$" + index, desc.toString(), null, null);
+        _mv.visitCode();
+        _locals.clear();
+        _labels.clear();
+        _nextLocal = 0;
+        boolean savedInMain = _inMainMethod;
+        _inMainMethod = false;
+
+        // Captured variables come in as Object parameters - store and unbox on use
+        java.util.Set<VariableSymbol> capturedSet = spawn.getCapturedVariables();
+        for (VariableSymbol captured : capturedSet) {
+            int slot = _nextLocal++;
+            _locals.put(captured, slot);
+            // Mark as Object for proper load instruction (ALOAD not ILOAD)
+            // Create a wrapper variable with Object type for the local slot
+        }
+        _spawnCapturedVars = capturedSet;
+        _inIsolatedMethod = true;
+
+        emitBlockStatement(spawn.getBody());
+        _spawnCapturedVars = null;
+        _inIsolatedMethod = false;
+        _mv.visitInsn(RETURN);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+        _inMainMethod = savedInMain;
+        _inIsolatedMethod = false;
+    }
+
+    private void emitClosureDispatch(ClassWriter cw) {
+        // closureDispatch(int lambdaId, Object[] captured, Object[] args) -> Object
+        _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "closureDispatch$",
+                "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", null, null);
+        _mv.visitCode();
+
+        Label defaultLabel = new Label();
+        Label[] labels = new Label[_lambdas.size()];
+        for (int i = 0; i < labels.length; i++) labels[i] = new Label();
+
+        _mv.visitVarInsn(ILOAD, 0); // lambdaId
+        _mv.visitTableSwitchInsn(0, _lambdas.size() - 1, defaultLabel, labels);
+
+        for (int i = 0; i < _lambdas.size(); i++) {
+            _mv.visitLabel(labels[i]);
+            BoundLambdaExpression lambda = _lambdas.get(i);
+
+            // Push captured vars from array
+            int argIdx = 0;
+            for (VariableSymbol captured : lambda.getCapturedVariables()) {
+                _mv.visitVarInsn(ALOAD, 1); // captured array
+                _mv.visitLdcInsn(argIdx++);
+                _mv.visitInsn(AALOAD);
+            }
+            // Push params from args array
+            int paramIdx = 0;
+            for (ParameterSymbol param : lambda.getParameters()) {
+                _mv.visitVarInsn(ALOAD, 2); // args array
+                _mv.visitLdcInsn(paramIdx++);
+                _mv.visitInsn(AALOAD);
+                emitUnboxIfNeeded(param.getType());
+            }
+
+            // Build descriptor
+            StringBuilder desc = new StringBuilder("(");
+            for (int c = 0; c < lambda.getCapturedVariables().size(); c++) desc.append("Ljava/lang/Object;");
+            for (ParameterSymbol param : lambda.getParameters()) desc.append(getTypeDescriptor(param.getType()));
+            desc.append(")");
+            desc.append(lambda.getReturnType() != null ? getTypeDescriptor(lambda.getReturnType()) : "V");
+
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "lambda$" + i, desc.toString(), false);
+
+            if (lambda.getReturnType() != null) {
+                emitBoxIfNeeded(lambda.getReturnType());
+                _mv.visitInsn(ARETURN);
+            } else {
+                _mv.visitInsn(ACONST_NULL);
+                _mv.visitInsn(ARETURN);
+            }
+        }
+
+        _mv.visitLabel(defaultLabel);
+        _mv.visitInsn(ACONST_NULL);
+        _mv.visitInsn(ARETURN);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+    }
+
     // ========== Java Interop Emission ==========
 
     private void emitCastExpression(BoundCastExpression node) {
@@ -561,6 +1070,7 @@ public class Emitter {
         if (sig != null && sig.isStatic()) {
             emitJavaArgs(node.getArguments(), sig);
             _mv.visitMethodInsn(INVOKESTATIC, sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
+            emitJavaReturnConversion(sig);
             return;
         }
 
@@ -571,6 +1081,7 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, sig.getOwnerInternalName());
             emitJavaArgs(node.getArguments(), sig);
             _mv.visitMethodInsn(sig.getInvokeOpcode(), sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
+            emitJavaReturnConversion(sig);
         } else {
             // Unresolved instance method - fallback with Object boxing
             for (BoundExpression arg : node.getArguments()) {
@@ -585,6 +1096,15 @@ public class Emitter {
         }
     }
 
+    /** Convert Java return types to Siyo types on the stack */
+    private void emitJavaReturnConversion(JavaMethodSignature sig) {
+        String ret = sig.getReturnDescriptor();
+        if (ret.equals("J")) _mv.visitInsn(L2I);           // long → int
+        else if (ret.equals("F")) _mv.visitInsn(F2D);      // float → double
+        else if (ret.equals("B") || ret.equals("S")) {} // byte/short already widened to int by JVM
+        else if (ret.equals("C")) _mv.visitInsn(I2C);      // keep as int (char → int)
+    }
+
     private void emitJavaArgs(java.util.List<BoundExpression> arguments, JavaMethodSignature sig) {
         String[] paramDescs = sig.getParamDescriptors();
         for (int i = 0; i < arguments.size(); i++) {
@@ -593,11 +1113,19 @@ public class Emitter {
             String paramDesc = i < paramDescs.length ? paramDescs[i] : "Ljava/lang/Object;";
 
             if (argType == Integer.class && paramDesc.equals("I")) {
-                // int → int, no conversion needed
+                // int → int
+            } else if (argType == Integer.class && paramDesc.equals("J")) {
+                _mv.visitInsn(I2L); // int → long
+            } else if (argType == Integer.class && paramDesc.equals("D")) {
+                _mv.visitInsn(I2D); // int → double
+            } else if (argType == Integer.class && paramDesc.equals("F")) {
+                _mv.visitInsn(I2F); // int → float
             } else if (argType == Boolean.class && paramDesc.equals("Z")) {
                 // bool → bool
             } else if (argType == Double.class && paramDesc.equals("D")) {
                 // double → double
+            } else if (argType == Double.class && paramDesc.equals("F")) {
+                _mv.visitInsn(D2F); // double → float
             } else if (paramDesc.startsWith("L") || paramDesc.startsWith("[")) {
                 // Reference type parameter
                 if (argType == Integer.class || argType == Boolean.class || argType == Double.class) {
@@ -615,20 +1143,28 @@ public class Emitter {
     // ========== Composite Type Emission ==========
 
     private void emitArrayLiteralExpression(BoundArrayLiteralExpression node) {
-        // Create ArrayList
+        // Create temp ArrayList with elements
         _mv.visitTypeInsn(NEW, "java/util/ArrayList");
         _mv.visitInsn(DUP);
         _mv.visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
 
-        // Add each element
         for (BoundExpression element : node.getElements()) {
-            _mv.visitInsn(DUP); // keep list ref on stack
+            _mv.visitInsn(DUP);
             emitExpression(element);
             emitBoxIfNeeded(element.getClassType());
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
-            _mv.visitInsn(POP); // discard boolean return of add()
+            _mv.visitInsn(POP);
         }
-        // ArrayList remains on stack
+
+        // Wrap in SiyoArray for type consistency
+        int tempListSlot = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, tempListSlot);
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoArray");
+        _mv.visitInsn(DUP);
+        _mv.visitVarInsn(ALOAD, tempListSlot);
+        _mv.visitLdcInsn(org.objectweb.asm.Type.getType(Object.class));
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
+        // SiyoArray on stack
     }
 
     private void emitIndexExpression(BoundIndexExpression node) {
@@ -717,12 +1253,10 @@ public class Emitter {
             _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
             emitExpression(node.getArguments().get(0));
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "print", "(Ljava/lang/String;)V", false);
-            // read line
-            _mv.visitTypeInsn(NEW, "java/util/Scanner");
-            _mv.visitInsn(DUP);
-            _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "in", "Ljava/io/InputStream;");
-            _mv.visitMethodInsn(INVOKESPECIAL, "java/util/Scanner", "<init>", "(Ljava/io/InputStream;)V", false);
+            // read line using shared static Scanner
+            _mv.visitFieldInsn(GETSTATIC, _className, "$scanner", "Ljava/util/Scanner;");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/util/Scanner", "nextLine", "()Ljava/lang/String;", false);
+            _needsScanner = true;
             return;
         }
         if (function == BuiltinFunctions.PRINTLN) {
@@ -748,17 +1282,38 @@ public class Emitter {
         if (function == BuiltinFunctions.LEN) {
             BoundExpression arg = node.getArguments().get(0);
             emitExpression(arg);
-            if (arg.getClassType() == String.class) {
+            Class<?> argType = arg.getClassType();
+            if (argType == String.class) {
                 _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
-            } else {
-                // ArrayList.size()
+            } else if (argType == SiyoArray.class) {
                 _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+            } else {
+                // Object type - runtime dispatch: check if String or List
+                int tempSlot = _nextLocal++;
+                _mv.visitVarInsn(ASTORE, tempSlot);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(INSTANCEOF, "java/lang/String");
+                Label notString = new Label();
+                Label done = new Label();
+                _mv.visitJumpInsn(IFEQ, notString);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+                _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
+                _mv.visitJumpInsn(GOTO, done);
+                _mv.visitLabel(notString);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(CHECKCAST, "java/util/List");
+                _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+                _mv.visitLabel(done);
             }
             return;
         }
 
         if (function == BuiltinFunctions.PARSE_INT) {
             emitExpression(node.getArguments().get(0));
+            if (node.getArguments().get(0).getClassType() != String.class) {
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            }
             _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "parseInt", "(Ljava/lang/String;)I", false);
             return;
         }
@@ -785,6 +1340,12 @@ public class Emitter {
             emitExpression(node.getArguments().get(1)); // end
             _mv.visitMethodInsn(INVOKESTATIC, _className, "$range", "(II)Ljava/util/List;", false);
             _needsRangeHelper = true;
+            return;
+        }
+        if (function == BuiltinFunctions.CHANNEL) {
+            _mv.visitTypeInsn(NEW, "codeanalysis/SiyoChannel");
+            _mv.visitInsn(DUP);
+            _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoChannel", "<init>", "()V", false);
             return;
         }
         if (function == BuiltinFunctions.PUSH) {
@@ -853,29 +1414,51 @@ public class Emitter {
         if (function == BuiltinFunctions.SPLIT) {
             emitExpression(node.getArguments().get(0));
             emitExpression(node.getArguments().get(1));
-            // Pattern.quote the delimiter, then split
             _mv.visitMethodInsn(INVOKESTATIC, "java/util/regex/Pattern", "quote", "(Ljava/lang/String;)Ljava/lang/String;", false);
             _mv.visitInsn(ICONST_M1);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "split", "(Ljava/lang/String;I)[Ljava/lang/String;", false);
-            // Convert String[] to SiyoArray
+            // String[] → List → SiyoArray
             _mv.visitMethodInsn(INVOKESTATIC, "java/util/Arrays", "asList", "([Ljava/lang/Object;)Ljava/util/List;", false);
-            _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
+            int listSlot = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, listSlot);
             _mv.visitTypeInsn(NEW, "codeanalysis/SiyoArray");
-            _mv.visitInsn(DUP_X2);
-            _mv.visitInsn(DUP_X2);
-            _mv.visitInsn(POP);
+            _mv.visitInsn(DUP);
+            _mv.visitVarInsn(ALOAD, listSlot);
+            _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
             _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
             return;
         }
 
         // User-defined functions: push args and invoke static method
-        for (BoundExpression arg : node.getArguments()) {
+        for (int ai = 0; ai < node.getArguments().size(); ai++) {
+            BoundExpression arg = node.getArguments().get(ai);
             emitExpression(arg);
+            // Type coercion: if arg is Object but param expects String, cast
+            if (ai < function.getParameters().size()) {
+                Class<?> paramType = function.getParameters().get(ai).getType();
+                Class<?> argType = arg.getClassType();
+                if (argType != paramType && argType == Object.class) {
+                    if (paramType == Integer.class) emitUnboxIfNeeded(Integer.class);
+                    else if (paramType == Double.class) emitUnboxIfNeeded(Double.class);
+                    else if (paramType == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+                    else if (paramType == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+                    else if (paramType == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoArray");
+                    else if (paramType == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
+                    else if (paramType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
+                    else if (paramType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+                }
+            }
         }
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
-        // For imported functions, name is "module.func" - extract just the function name
-        String methodName = function.getName().replace('.', '$');
+        String methodName;
+        if (function.getModuleName() != null && function.getName().contains(".")) {
+            // Module function: "collections.arrayToString" → "arrayToString" (in module's class)
+            methodName = function.getName().substring(function.getName().lastIndexOf('.') + 1);
+        } else {
+            // Local or impl function: "User.greet" → "User$greet"
+            methodName = function.getName().replace('.', '$');
+        }
         _mv.visitMethodInsn(INVOKESTATIC, owner, methodName, descriptor, false);
     }
 
@@ -936,9 +1519,30 @@ public class Emitter {
         return slot;
     }
 
+    private boolean _inIsolatedMethod = false; // true in spawn/lambda methods
+
+    private boolean isGlobalField(VariableSymbol var) {
+        if (_inIsolatedMethod) return false;
+        // Use reference equality first (same VariableSymbol instance)
+        if (_globalFields.contains(var)) return true;
+        // For main method, also try name-based (lowered vars may have different instances)
+        if (_inMainMethod) {
+            for (VariableSymbol g : _globalFields) {
+                if (g.getName().equals(var.getName())) return true;
+            }
+        }
+        return false;
+    }
+
     private int getLocal(VariableSymbol variable) {
         Integer slot = _locals.get(variable);
         if (slot == null) {
+            // Try name-based lookup as fallback (different VariableSymbol instances with same name)
+            for (var entry : _locals.entrySet()) {
+                if (entry.getKey().getName().equals(variable.getName())) {
+                    return entry.getValue();
+                }
+            }
             throw new IllegalStateException("Variable not declared: " + variable.getName());
         }
         return slot;
@@ -961,7 +1565,11 @@ public class Emitter {
     private void collectGlobalVariables(BoundBlockStatement block) {
         for (BoundStatement stmt : block.getStatements()) {
             if (stmt instanceof BoundVariableDeclaration varDecl) {
-                _globalFields.add(varDecl.getVariable());
+                String name = varDecl.getVariable().getName();
+                // Don't treat synthetic lowered variables as globals
+                if (!name.startsWith("_idx") && !name.startsWith("_col")) {
+                    _globalFields.add(varDecl.getVariable());
+                }
             }
         }
     }

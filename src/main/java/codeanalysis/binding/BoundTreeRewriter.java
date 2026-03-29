@@ -33,7 +33,7 @@ public abstract class BoundTreeRewriter {
             case ReturnStatement -> rewriteReturnStatement((BoundReturnStatement) node);
             case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
             case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
-            case TryCatchStatement -> node; // pass through
+            case TryCatchStatement -> rewriteTryCatchStatement((BoundTryCatchStatement) node);
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -192,6 +192,18 @@ public abstract class BoundTreeRewriter {
      * @param node The expression statement to rewrite.
      * @return The rewritten expression statement.
      */
+    protected BoundStatement rewriteTryCatchStatement(BoundTryCatchStatement node) {
+        // Lower while/for inside try/catch bodies, but DON'T lower return statements
+        // inside try body - they must remain as actual returns, not gotos,
+        // because goto jumping out of try block breaks ASM's frame computation
+        BoundStatement tryBody = rewriteStatement(node.getTryBody());
+        BoundStatement catchBody = rewriteStatement(node.getCatchBody());
+        if (tryBody == node.getTryBody() && catchBody == node.getCatchBody()) {
+            return node;
+        }
+        return new BoundTryCatchStatement(tryBody, node.getErrorVariable(), catchBody);
+    }
+
     protected BoundStatement rewriteExpressionStatement(BoundExpressionStatement node) {
         var expression = rewriteExpression(node.getExpression());
         if (expression == node.getExpression()) {
@@ -233,6 +245,8 @@ public abstract class BoundTreeRewriter {
             case CastExpression -> node;
             case LambdaExpression -> node;
             case ClosureCallExpression -> node;
+            case ScopeExpression -> node;
+            case SpawnExpression -> node;
             case MemberAssignmentExpression -> node;
             default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };

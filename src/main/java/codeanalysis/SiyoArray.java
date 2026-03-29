@@ -1,13 +1,15 @@
 package codeanalysis;
 
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Represents an array value in the Siyo language runtime.
+ * Implements List<Object> for JVM interop compatibility.
  */
-public class SiyoArray {
-    private final List<Object> _elements;
+public class SiyoArray extends AbstractList<Object> implements List<Object> {
+    private final ArrayList<Object> _elements;
     private final Class<?> _elementType;
 
     public SiyoArray(List<Object> elements, Class<?> elementType) {
@@ -15,28 +17,41 @@ public class SiyoArray {
         _elementType = elementType;
     }
 
+    @Override
     public Object get(int index) {
         return _elements.get(index);
     }
 
-    public void set(int index, Object value) {
-        _elements.set(index, value);
+    @Override
+    public Object set(int index, Object value) {
+        return _elements.set(index, value);
+    }
+
+    @Override
+    public int size() {
+        return _elements.size();
+    }
+
+    @Override
+    public void add(int index, Object element) {
+        _elements.add(index, element);
+    }
+
+    @Override
+    public Object remove(int index) {
+        return _elements.remove(index);
     }
 
     public int length() {
         return _elements.size();
     }
 
+    public boolean add(Object value) {
+        return _elements.add(value);
+    }
+
     public Class<?> getElementType() {
         return _elementType;
-    }
-
-    public void add(Object value) {
-        _elements.add(value);
-    }
-
-    public Object remove(int index) {
-        return _elements.remove(index);
     }
 
     public List<Object> getElements() {

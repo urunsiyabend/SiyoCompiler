@@ -171,7 +171,7 @@ public class JavaClassMetadata {
     private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
         if (siyoType == null) return true;
         // Any reference type is compatible with Object parameter
-        if (jvmDesc.equals("Ljava/lang/Object;")) return siyoType != Integer.class && siyoType != Boolean.class && siyoType != Double.class;
+        if (jvmDesc.equals("Ljava/lang/Object;")) return true; // any Siyo type compatible with Object param (boxed if needed)
         if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
         if (siyoType == Boolean.class) return jvmDesc.equals("Z");
         if (siyoType == Double.class) return jvmDesc.equals("D") || jvmDesc.equals("F");
