@@ -1145,16 +1145,24 @@ public class Emitter {
             _mv.visitMethodInsn(sig.getInvokeOpcode(), sig.getOwnerInternalName(), sig.getName(), sig.getDescriptor(), sig.isInterface());
             emitJavaReturnConversion(sig);
         } else {
-            // Unresolved instance method - fallback with Object boxing
+            // Unresolved instance method → invokedynamic dispatch
+            // Target object already on stack, push args
             for (BoundExpression arg : node.getArguments()) {
                 emitExpression(arg);
                 emitBoxIfNeeded(arg.getClassType());
             }
-            // Build descriptor from argument count (all Object)
-            StringBuilder desc = new StringBuilder("(");
-            for (int i = 0; i < node.getArguments().size(); i++) desc.append("Ljava/lang/Object;");
+            // invokedynamic: SiyoDynamic.bootstrap resolves at runtime
+            // CallSite type: (Object target, Object... args) → Object
+            StringBuilder desc = new StringBuilder("(Ljava/lang/Object;"); // target
+            for (int i = 0; i < node.getArguments().size(); i++) {
+                desc.append("Ljava/lang/Object;");
+            }
             desc.append(")Ljava/lang/Object;");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", node.getMethodName(), desc.toString(), false);
+            org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
+                    H_INVOKESTATIC, "codeanalysis/SiyoDynamic", "bootstrap",
+                    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                    false);
+            _mv.visitInvokeDynamicInsn(node.getMethodName(), desc.toString(), bootstrap);
         }
     }
 

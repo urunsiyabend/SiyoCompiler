@@ -1,6 +1,7 @@
 // SiyoDB v2 - Multi-client concurrent TCP Key-Value Store
 // Architecture: Store actor (owns data) + ClientHandler actors (one per connection)
 import java "java.net.ServerSocket"
+import java "java.net.Socket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
 import java "java.io.PrintWriter"
@@ -21,15 +22,16 @@ impl Store {
     }
 
     fn get(self, key: string) -> string {
-        if self.data.has(key) { toString(self.data.get(key)) }
-        else { "(nil)" }
+        if self.data.has(key) { return toString(self.data.get(key)) }
+        return "(nil)"
     }
 
     fn del(self, key: string) -> string {
         if self.data.has(key) {
             self.data.remove(key)
-            "(deleted)"
-        } else { "(nil)" }
+            return "(deleted)"
+        }
+        return "(nil)"
     }
 
     fn keys(self) -> string {
@@ -39,8 +41,8 @@ impl Store {
             if i > 0 { result += "," }
             result += toString(k[i])
         }
-        if len(result) == 0 { "(empty)" }
-        else { result }
+        if len(result) == 0 { return "(empty)" }
+        return result
     }
 
     fn size(self) -> int { self.data.size() }

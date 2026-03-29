@@ -181,12 +181,33 @@ public class JavaClassMetadata {
     }
 
     public JavaMethodSignature resolveConstructor(int argCount) {
+        return resolveConstructor(argCount, null);
+    }
+
+    public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes) {
+        JavaMethodSignature fallback = null;
         for (JavaMethodSignature sig : _constructors) {
-            if (sig.getParamCount() == argCount) {
-                return sig;
+            if (sig.getParamCount() != argCount) continue;
+
+            if (argTypes == null) return sig;
+
+            boolean match = true;
+            boolean hasObjectArg = false;
+            String[] paramDescs = sig.getParamDescriptors();
+            for (int i = 0; i < argCount; i++) {
+                if (argTypes[i] == Object.class) hasObjectArg = true;
+                if (!isTypeCompatible(argTypes[i], paramDescs[i])) {
+                    match = false;
+                    break;
+                }
             }
+            if (match) {
+                if (!hasObjectArg) return sig; // exact match — prefer
+                fallback = sig; // Object arg — keep searching for better match
+            }
+            if (argTypes == null && fallback == null) fallback = sig;
         }
-        return null;
+        return fallback;
     }
 
     public List<JavaMethodSignature> getMethods() { return _methods; }

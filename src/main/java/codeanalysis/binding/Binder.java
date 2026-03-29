@@ -1220,7 +1220,7 @@ public class Binder {
 
                 // Compile-time method resolution
                 codeanalysis.JavaMethodSignature resolved = isConstructor
-                        ? javaClass.resolveConstructor(boundArgs.size())
+                        ? javaClass.resolveConstructor(boundArgs.size(), getArgTypes(boundArgs))
                         : javaClass.resolveMethod(funcName, boundArgs.size(), getArgTypes(boundArgs));
 
                 if (resolved == null) {

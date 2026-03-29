@@ -33,4 +33,8 @@ public class JavaClassInfo {
     public JavaMethodSignature resolveConstructor(int argCount) {
         return _metadata.resolveConstructor(argCount);
     }
+
+    public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes) {
+        return _metadata.resolveConstructor(argCount, argTypes);
+    }
 }
