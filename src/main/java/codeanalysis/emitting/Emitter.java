@@ -100,8 +100,9 @@ public class Emitter {
             emitLambdaMethod(cw, i, _lambdas.get(i));
         }
 
-        // Generate spawn methods
+        // Generate spawn methods (skip actor spawns — they use event loop, not spawn methods)
         for (int i = 0; i < _spawns.size(); i++) {
+            if (_spawns.get(i).getActorTypeName() != null) continue;
             emitSpawnMethod(cw, i, _spawns.get(i));
         }
 
@@ -921,9 +922,11 @@ public class Emitter {
         mv.visitEnd();
     }
 
+    @SuppressWarnings("unused")
     private void emitSpawnWrapperMethods(ClassWriter cw) {
         for (int i = 0; i < _spawns.size(); i++) {
             BoundSpawnExpression spawn = _spawns.get(i);
+            if (spawn.getActorTypeName() != null) continue;
             // spawn$wrap$N(Object[] captured) -> void
             // Unpacks captured array and calls spawn$N(captured0, captured1, ...)
             _mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "spawn$wrap$" + i,
@@ -1399,6 +1402,12 @@ public class Emitter {
             emitExpression(node.getArguments().get(1)); // end
             _mv.visitMethodInsn(INVOKESTATIC, _className, "$range", "(II)Ljava/util/List;", false);
             _needsRangeHelper = true;
+            return;
+        }
+        if (function == BuiltinFunctions.NEW_MAP) {
+            _mv.visitTypeInsn(NEW, "codeanalysis/SiyoMap");
+            _mv.visitInsn(DUP);
+            _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoMap", "<init>", "()V", false);
             return;
         }
         if (function == BuiltinFunctions.CHANNEL) {

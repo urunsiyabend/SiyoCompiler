@@ -51,12 +51,12 @@ impl Store {
 
 actor ClientHandler {
     store: Store,
-    socket: fn,
+    socket: object,
     clientId: int
 }
 
 impl ClientHandler {
-    fn new(store: Store, socket: fn, clientId: int) -> ClientHandler {
+    fn new(store: Store, socket: object, clientId: int) -> ClientHandler {
         ClientHandler { store: store, socket: socket, clientId: clientId }
     }
 

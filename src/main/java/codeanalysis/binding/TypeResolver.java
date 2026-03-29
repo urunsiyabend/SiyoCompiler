@@ -300,6 +300,7 @@ public class TypeResolver {
             case "fn", "func", "function" -> SiyoClosure.class;
             case "channel" -> SiyoChannel.class;
             case "map" -> SiyoMap.class;
+            case "object", "any" -> Object.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
     }

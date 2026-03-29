@@ -112,7 +112,8 @@ public class SiyoActor {
                         msg.replyChannel.put(result != null ? result : "");
                     }
                 } catch (Exception e) {
-                    // Don't crash the actor — continue processing
+                    System.err.println("[actor-err] " + actor.getActorTypeName() + ": " + e);
+                    if (e.getCause() != null) e.getCause().printStackTrace(System.err);
                 }
             }
         });
