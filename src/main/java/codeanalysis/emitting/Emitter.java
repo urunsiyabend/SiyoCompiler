@@ -28,6 +28,8 @@ public class Emitter {
     private int _nextLocal = 0;
     private boolean _inMainMethod = false;
     private boolean _needsScanner = false;
+    private boolean _tryCatchImplicitReturn = false;
+    private Class<?> _tryCatchReturnType = null;
     private java.util.Set<VariableSymbol> _spawnCapturedVars = null;
 
     // Lambda/closure tracking for bytecode emission
@@ -223,7 +225,14 @@ public class Emitter {
                 return;
             }
 
+            // For try/catch as last statement in non-void function, enable implicit return in bodies
+            if (isLast && function.getReturnType() != null && stmt instanceof BoundTryCatchStatement) {
+                _tryCatchImplicitReturn = true;
+                _tryCatchReturnType = function.getReturnType();
+            }
+
             emitStatement(stmt);
+            _tryCatchImplicitReturn = false;
         }
 
         // Add default return for all functions (safety net for try/catch paths)
@@ -257,6 +266,20 @@ public class Emitter {
             case ReturnStatement -> emitReturnStatement((BoundReturnStatement) node);
             case TryCatchStatement -> emitTryCatchStatement((BoundTryCatchStatement) node);
             default -> throw new UnsupportedOperationException("Cannot emit statement: " + node.getType());
+        }
+    }
+
+    private void emitBlockWithImplicitReturn(BoundBlockStatement block, Class<?> returnType) {
+        var stmts = block.getStatements();
+        for (int i = 0; i < stmts.size(); i++) {
+            BoundStatement stmt = stmts.get(i);
+            boolean isLast = (i == stmts.size() - 1);
+            if (isLast && returnType != null && stmt instanceof BoundExpressionStatement exprStmt) {
+                emitExpression(exprStmt.getExpression());
+                _mv.visitInsn(getReturnInsn(returnType));
+                return;
+            }
+            emitStatement(stmt);
         }
     }
 
@@ -327,7 +350,9 @@ public class Emitter {
 
         // Try body
         _mv.visitLabel(tryStart);
-        if (node.getTryBody() instanceof BoundBlockStatement tryBlock) {
+        if (_tryCatchImplicitReturn && node.getTryBody() instanceof BoundBlockStatement tryBlock) {
+            emitBlockWithImplicitReturn(tryBlock, _tryCatchReturnType);
+        } else if (node.getTryBody() instanceof BoundBlockStatement tryBlock) {
             emitBlockStatement(tryBlock);
         } else {
             emitStatement(node.getTryBody());
@@ -340,7 +365,9 @@ public class Emitter {
         _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Throwable", "getMessage", "()Ljava/lang/String;", false);
         int errorSlot = declareLocal(node.getErrorVariable());
         _mv.visitVarInsn(ASTORE, errorSlot);
-        if (node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
+        if (_tryCatchImplicitReturn && node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
+            emitBlockWithImplicitReturn(catchBlock, _tryCatchReturnType);
+        } else if (node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
             emitBlockStatement(catchBlock);
         } else {
             emitStatement(node.getCatchBody());
@@ -1116,20 +1143,28 @@ public class Emitter {
     // ========== Composite Type Emission ==========
 
     private void emitArrayLiteralExpression(BoundArrayLiteralExpression node) {
-        // Create ArrayList
+        // Create temp ArrayList with elements
         _mv.visitTypeInsn(NEW, "java/util/ArrayList");
         _mv.visitInsn(DUP);
         _mv.visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
 
-        // Add each element
         for (BoundExpression element : node.getElements()) {
-            _mv.visitInsn(DUP); // keep list ref on stack
+            _mv.visitInsn(DUP);
             emitExpression(element);
             emitBoxIfNeeded(element.getClassType());
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
-            _mv.visitInsn(POP); // discard boolean return of add()
+            _mv.visitInsn(POP);
         }
-        // ArrayList remains on stack
+
+        // Wrap in SiyoArray for type consistency
+        int tempListSlot = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, tempListSlot);
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoArray");
+        _mv.visitInsn(DUP);
+        _mv.visitVarInsn(ALOAD, tempListSlot);
+        _mv.visitLdcInsn(org.objectweb.asm.Type.getType(Object.class));
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
+        // SiyoArray on stack
     }
 
     private void emitIndexExpression(BoundIndexExpression node) {
@@ -1247,11 +1282,29 @@ public class Emitter {
         if (function == BuiltinFunctions.LEN) {
             BoundExpression arg = node.getArguments().get(0);
             emitExpression(arg);
-            if (arg.getClassType() == String.class) {
+            Class<?> argType = arg.getClassType();
+            if (argType == String.class) {
                 _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
-            } else {
-                // ArrayList.size()
+            } else if (argType == SiyoArray.class) {
                 _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+            } else {
+                // Object type - runtime dispatch: check if String or List
+                int tempSlot = _nextLocal++;
+                _mv.visitVarInsn(ASTORE, tempSlot);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(INSTANCEOF, "java/lang/String");
+                Label notString = new Label();
+                Label done = new Label();
+                _mv.visitJumpInsn(IFEQ, notString);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+                _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
+                _mv.visitJumpInsn(GOTO, done);
+                _mv.visitLabel(notString);
+                _mv.visitVarInsn(ALOAD, tempSlot);
+                _mv.visitTypeInsn(CHECKCAST, "java/util/List");
+                _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+                _mv.visitLabel(done);
             }
             return;
         }
@@ -1361,17 +1414,17 @@ public class Emitter {
         if (function == BuiltinFunctions.SPLIT) {
             emitExpression(node.getArguments().get(0));
             emitExpression(node.getArguments().get(1));
-            // Pattern.quote the delimiter, then split
             _mv.visitMethodInsn(INVOKESTATIC, "java/util/regex/Pattern", "quote", "(Ljava/lang/String;)Ljava/lang/String;", false);
             _mv.visitInsn(ICONST_M1);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "split", "(Ljava/lang/String;I)[Ljava/lang/String;", false);
-            // Convert String[] to SiyoArray
+            // String[] → List → SiyoArray
             _mv.visitMethodInsn(INVOKESTATIC, "java/util/Arrays", "asList", "([Ljava/lang/Object;)Ljava/util/List;", false);
-            _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
+            int listSlot = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, listSlot);
             _mv.visitTypeInsn(NEW, "codeanalysis/SiyoArray");
-            _mv.visitInsn(DUP_X2);
-            _mv.visitInsn(DUP_X2);
-            _mv.visitInsn(POP);
+            _mv.visitInsn(DUP);
+            _mv.visitVarInsn(ALOAD, listSlot);
+            _mv.visitLdcInsn(org.objectweb.asm.Type.getType(String.class));
             _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoArray", "<init>", "(Ljava/util/List;Ljava/lang/Class;)V", false);
             return;
         }
