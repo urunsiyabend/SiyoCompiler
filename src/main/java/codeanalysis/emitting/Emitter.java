@@ -799,7 +799,12 @@ public class Emitter {
         // Fallback: just emit as a regular expression statement (non-actor call)
         emitExpression(expr);
         if (expr.getClassType() != null && expr.getClassType() != void.class) {
-            _mv.visitInsn(POP); // discard return value
+            // Long and Double take 2 stack slots
+            if (expr.getClassType() == Long.class || expr.getClassType() == Double.class) {
+                _mv.visitInsn(POP2);
+            } else {
+                _mv.visitInsn(POP);
+            }
         }
     }
 
