@@ -54,7 +54,7 @@ public class SiyoActor {
     public Object call(String methodName, Object[] args) {
         LinkedBlockingQueue<Object> replyChannel = new LinkedBlockingQueue<>(1);
         try {
-            _mailbox.put(new ActorMessage(methodName, args, replyChannel));
+            _mailbox.put(new ActorMessage(methodName, deepCopyArgs(args), replyChannel));
             Object result = replyChannel.take();
             if (result instanceof ActorError err) {
                 throw new RuntimeException(err.getMessage());
@@ -71,10 +71,92 @@ public class SiyoActor {
      */
     public void send(String methodName, Object[] args) {
         try {
-            _mailbox.put(new ActorMessage(methodName, args, null));
+            _mailbox.put(new ActorMessage(methodName, deepCopyArgs(args), null));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Deep-copy non-primitive args before passing to actor mailbox.
+     * Primitives (int, long, bool, float, string) are immutable — pass through.
+     * Structs (LinkedHashMap), arrays (SiyoArray/List), maps (SiyoMap), sets (SiyoSet)
+     * are mutable — deep-copy to prevent shared state.
+     */
+    private static Object[] deepCopyArgs(Object[] args) {
+        if (args == null || args.length == 0) return args;
+        Object[] copied = new Object[args.length];
+        for (int i = 0; i < args.length; i++) {
+            copied[i] = deepCopyValue(args[i]);
+        }
+        return copied;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object deepCopyValue(Object val) {
+        if (val == null) return null;
+        // Primitives and strings are immutable — pass through
+        if (val instanceof Integer || val instanceof Long || val instanceof Double
+                || val instanceof Boolean || val instanceof String) {
+            return val;
+        }
+        // SiyoActor handles — pass through (actors are meant to be shared by reference)
+        if (val instanceof SiyoActor) return val;
+        // SiyoChannel — pass through (channels are shared communication primitives)
+        if (val instanceof SiyoChannel) return val;
+        // SiyoStruct (LinkedHashMap) — deep copy all fields
+        if (val instanceof SiyoStruct struct) {
+            java.util.LinkedHashMap<String, Object> copy = new java.util.LinkedHashMap<>();
+            for (var entry : struct.getFieldsMap().entrySet()) {
+                if (entry.getKey().equals("__handle__")) {
+                    copy.put(entry.getKey(), entry.getValue()); // don't copy actor handle ref
+                } else {
+                    copy.put(entry.getKey(), deepCopyValue(entry.getValue()));
+                }
+            }
+            return new SiyoStruct(copy);
+        }
+        // LinkedHashMap (bytecode struct representation) — deep copy
+        if (val instanceof java.util.LinkedHashMap<?,?> map) {
+            java.util.LinkedHashMap<Object, Object> copy = new java.util.LinkedHashMap<>();
+            for (var entry : map.entrySet()) {
+                if ("__handle__".equals(entry.getKey())) {
+                    copy.put(entry.getKey(), entry.getValue());
+                } else {
+                    copy.put(entry.getKey(), deepCopyValue(entry.getValue()));
+                }
+            }
+            return copy;
+        }
+        // SiyoArray — deep copy elements
+        if (val instanceof SiyoArray arr) {
+            java.util.List<Object> elements = new java.util.ArrayList<>();
+            for (int i = 0; i < arr.size(); i++) {
+                elements.add(deepCopyValue(arr.get(i)));
+            }
+            return new SiyoArray(elements, Object.class);
+        }
+        // SiyoMap — deep copy entries
+        if (val instanceof SiyoMap map) {
+            SiyoMap copy = new SiyoMap();
+            SiyoArray keys = map.keys();
+            for (int i = 0; i < keys.size(); i++) {
+                Object key = keys.get(i);
+                copy.set(key, deepCopyValue(map.get(key)));
+            }
+            return copy;
+        }
+        // SiyoSet — deep copy elements
+        if (val instanceof SiyoSet set) {
+            SiyoSet copy = new SiyoSet();
+            SiyoArray vals = set.values();
+            for (int i = 0; i < vals.size(); i++) {
+                copy.add(deepCopyValue(vals.get(i)));
+            }
+            return copy;
+        }
+        // Other Java objects — pass through (can't deep-copy arbitrary Java objects)
+        return val;
     }
 
     /**

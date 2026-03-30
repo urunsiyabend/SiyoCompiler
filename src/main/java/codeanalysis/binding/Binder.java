@@ -1584,6 +1584,27 @@ public class Binder {
 
     private BoundStatement bindSendStatement(SendStatementSyntax syntax) {
         BoundExpression expr = bindExpression(syntax.getExpression());
+        // Validate: send must target an actor method call
+        boolean isActorCall = false;
+        if (expr instanceof BoundCallExpression callExpr) {
+            FunctionSymbol func = callExpr.getFunction();
+            if (func.getName().contains(".")
+                    && func.getParameters().size() > 0
+                    && func.getParameters().get(0).getName().equals("self")) {
+                String typeName = func.getName().substring(0, func.getName().indexOf('.'));
+                if (_structTypes.containsKey(typeName) && _structTypes.get(typeName).isActor()) {
+                    isActorCall = true;
+                }
+            }
+        }
+        // Object-typed actor refs go through BoundJavaMethodCallExpression — allow those too
+        if (expr instanceof BoundJavaMethodCallExpression javaCall && javaCall.getTarget() != null
+                && javaCall.getResolvedSignature() == null) {
+            isActorCall = true; // dynamic dispatch — could be actor at runtime
+        }
+        if (!isActorCall) {
+            _diagnostics.reportSendOnNonActor(syntax.getKeyword().getSpan());
+        }
         return new BoundSendStatement(expr);
     }
 
