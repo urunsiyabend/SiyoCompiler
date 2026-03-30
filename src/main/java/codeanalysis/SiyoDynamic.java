@@ -46,6 +46,23 @@ public class SiyoDynamic {
             throw new RuntimeException("Cannot call method '" + methodName + "' on null");
         }
 
+        // Actor dispatch: if target is SiyoActor, check for direct methods first (stop, isStopped),
+        // then route user-defined methods through actor.call()
+        if (target instanceof SiyoActor actor) {
+            // Check if method exists directly on SiyoActor (lifecycle methods)
+            for (var m : SiyoActor.class.getDeclaredMethods()) {
+                if (m.getName().equals(methodName) && m.getParameterCount() == args.length - 1) {
+                    Object[] methodArgs = new Object[args.length - 1];
+                    System.arraycopy(args, 1, methodArgs, 0, methodArgs.length);
+                    return m.invoke(actor, methodArgs);
+                }
+            }
+            // User-defined actor method → route through mailbox
+            Object[] methodArgs = new Object[args.length - 1];
+            System.arraycopy(args, 1, methodArgs, 0, methodArgs.length);
+            return actor.call(methodName, methodArgs);
+        }
+
         Class<?> targetClass = target.getClass();
         Object[] methodArgs = new Object[args.length - 1];
         System.arraycopy(args, 1, methodArgs, 0, methodArgs.length);
@@ -62,10 +79,22 @@ public class SiyoDynamic {
                         }
                     }
 
-                    Object result = method.invoke(target, methodArgs);
+                    Object result;
+                    try {
+                        result = method.invoke(target, methodArgs);
+                    } catch (IllegalAccessException iae) {
+                        // Module-private class (e.g. SocketOutputStream) — find on public superclass/interface
+                        java.lang.reflect.Method accessible = findAccessibleMethod(targetClass, methodName, paramTypes);
+                        if (accessible != null) {
+                            result = accessible.invoke(target, methodArgs);
+                        } else {
+                            method.setAccessible(true);
+                            result = method.invoke(target, methodArgs);
+                        }
+                    }
 
                     // Convert Java return types to Siyo types
-                    if (result instanceof Long l) return l.intValue();
+                    if (result instanceof Long) return result; // preserve as Long
                     if (result instanceof Short s) return (int) s;
                     if (result instanceof Byte b) return (int) b;
                     if (result instanceof Float f) return f.doubleValue();
@@ -89,6 +118,29 @@ public class SiyoDynamic {
 
         throw new RuntimeException("No matching method: " + targetClass.getName() + "." + methodName
                 + " with " + methodArgs.length + " args");
+    }
+
+    /**
+     * Find a method on a public superclass or interface when the declaring class is module-private.
+     */
+    private static java.lang.reflect.Method findAccessibleMethod(Class<?> clazz, String name, Class<?>[] paramTypes) {
+        // Search public interfaces
+        for (Class<?> iface : clazz.getInterfaces()) {
+            try {
+                return iface.getMethod(name, paramTypes);
+            } catch (NoSuchMethodException ignored) {}
+        }
+        // Search public superclasses
+        Class<?> sup = clazz.getSuperclass();
+        while (sup != null && sup != Object.class) {
+            if (java.lang.reflect.Modifier.isPublic(sup.getModifiers())) {
+                try {
+                    return sup.getMethod(name, paramTypes);
+                } catch (NoSuchMethodException ignored) {}
+            }
+            sup = sup.getSuperclass();
+        }
+        return null;
     }
 
     private static Object siyoArrayToJavaArray(SiyoArray arr, Class<?> componentType) {

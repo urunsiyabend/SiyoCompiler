@@ -44,4 +44,7 @@ public enum BoundNodeType {
     ClosureCallExpression,
     ScopeExpression,
     SpawnExpression,
+    MatchExpression,
+    TryExpression,
+    SendStatement,
 }

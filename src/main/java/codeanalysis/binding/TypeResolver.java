@@ -242,6 +242,9 @@ public class TypeResolver {
         if (type == SiyoMap.class) {
             return getOrLoadJavaClass("SiyoMap", "codeanalysis.SiyoMap");
         }
+        if (type == SiyoSet.class) {
+            return getOrLoadJavaClass("SiyoSet", "codeanalysis.SiyoSet");
+        }
         return null;
     }
 
@@ -295,12 +298,14 @@ public class TypeResolver {
         }
         return switch (name) {
             case "int" -> Integer.class;
+            case "long" -> Long.class;
             case "bool" -> Boolean.class;
             case "float" -> Double.class;
             case "string" -> String.class;
             case "fn", "func", "function" -> SiyoClosure.class;
             case "channel" -> SiyoChannel.class;
             case "map" -> SiyoMap.class;
+            case "set" -> SiyoSet.class;
             case "object", "any" -> Object.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };

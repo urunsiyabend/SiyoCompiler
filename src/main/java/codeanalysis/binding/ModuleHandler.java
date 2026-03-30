@@ -24,6 +24,7 @@ public class ModuleHandler {
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
     private ModuleRegistry _registry;
     private String _filePath;
+    private String _currentModuleName; // set when compiling a module (e.g., "db")
 
     private final Map<String, StructSymbol> _structTypes;
     private final TypeResolver _typeResolver;
@@ -56,6 +57,14 @@ public class ModuleHandler {
 
     public void setFilePath(String filePath) {
         _filePath = filePath;
+    }
+
+    public void setCurrentModuleName(String moduleName) {
+        _currentModuleName = moduleName;
+    }
+
+    public String getCurrentModuleName() {
+        return _currentModuleName;
     }
 
     public ModuleRegistry getRegistry() {
@@ -226,6 +235,13 @@ public class ModuleHandler {
             Binder moduleBinder = new Binder(parentScope);
             moduleBinder.getModuleHandler().setRegistry(_registry);
             moduleBinder.getModuleHandler().setFilePath(filePath);
+            // Derive short module name for self-reference resolution
+            String shortName = moduleName.contains("/")
+                    ? moduleName.substring(moduleName.lastIndexOf('/') + 1)
+                    : moduleName.contains(".")
+                    ? moduleName.substring(moduleName.lastIndexOf('.') + 1)
+                    : moduleName;
+            moduleBinder.getModuleHandler().setCurrentModuleName(shortName);
             BoundStatement statement = moduleBinder.bindStatement(tree.getRoot().getStatement());
 
             if (moduleBinder._diagnostics.size() > 0) {
@@ -256,12 +272,6 @@ public class ModuleHandler {
 
     public void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
-
-        // Only skip if already declared in current scope (not parent)
-        // This allows shadowing built-in functions
-        if (_scope.hasDeclaredFunction(name)) {
-            return;
-        }
 
         List<ParameterSymbol> parameters = new ArrayList<>();
         for (ParameterSyntax parameterSyntax : syntax.getParameters()) {

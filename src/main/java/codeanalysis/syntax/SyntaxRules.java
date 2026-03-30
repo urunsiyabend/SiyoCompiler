@@ -47,6 +47,8 @@ public class SyntaxRules {
             case "catch" -> SyntaxType.CatchKeyword;
             case "in" -> SyntaxType.InKeyword;
             case "null" -> SyntaxType.NullKeyword;
+            case "match" -> SyntaxType.MatchKeyword;
+            case "send" -> SyntaxType.SendKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -112,6 +114,8 @@ public class SyntaxRules {
             case CatchKeyword -> "catch";
             case InKeyword -> "in";
             case NullKeyword -> "null";
+            case MatchKeyword -> "match";
+            case SendKeyword -> "send";
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";

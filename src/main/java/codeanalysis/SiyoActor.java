@@ -12,16 +12,20 @@ public class SiyoActor {
     private final String _actorTypeName;
     private final LinkedBlockingQueue<ActorMessage> _mailbox = new LinkedBlockingQueue<>();
     private Thread _thread;
+    private volatile boolean _stopped = false;
 
     public SiyoActor(SiyoStruct state, String actorTypeName) {
         _state = state;
         _actorTypeName = actorTypeName;
+        // Store self-reference so actor methods can pass "self" as actor handle
+        _state.getFieldsMap().put("__handle__", this);
     }
 
     /** Constructor accepting LinkedHashMap (from bytecode struct literals) */
     public SiyoActor(java.util.LinkedHashMap<String, Object> stateMap, String actorTypeName) {
         _state = new SiyoStruct(stateMap);
         _actorTypeName = actorTypeName;
+        stateMap.put("__handle__", this);
     }
 
     public SiyoStruct getState() { return _state; }
@@ -30,6 +34,19 @@ public class SiyoActor {
 
     public void setThread(Thread thread) { _thread = thread; }
     public Thread getThread() { return _thread; }
+    public boolean isStopped() { return _stopped; }
+
+    /**
+     * Gracefully stop the actor. The event loop will drain the current message and exit.
+     * Returns "stopped" for Siyo callers.
+     */
+    public String stop() {
+        _stopped = true;
+        // Send a poison pill to unblock the take()
+        try { _mailbox.put(new ActorMessage("__stop__", new Object[0], null)); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        return "stopped";
+    }
 
     /**
      * Send a message and wait for reply (synchronous).
@@ -73,9 +90,10 @@ public class SiyoActor {
         final ClassLoader cl = callerClassLoader;
 
         Thread thread = Thread.startVirtualThread(() -> {
-            while (true) {
+            while (!actor._stopped) {
                 try {
                     ActorMessage msg = actor.getMailbox().take();
+                    if (actor._stopped || msg.methodName.equals("__stop__")) break;
                     String methodName = actor.getActorTypeName() + "$" + msg.methodName;
 
                     Class<?> hostClass = cl.loadClass(hostClassName);

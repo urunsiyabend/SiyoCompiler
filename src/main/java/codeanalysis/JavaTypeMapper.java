@@ -19,10 +19,11 @@ public class JavaTypeMapper {
             case "Z" -> Boolean.class;
             case "D" -> Double.class;
             case "F" -> Double.class;  // float → double in Siyo
-            case "J" -> Integer.class; // long → int in Siyo (lossy but practical)
+            case "J" -> Long.class;
             case "B", "S", "C" -> Integer.class; // byte/short/char → int
             case "Ljava/lang/String;" -> String.class;
-            case "Ljava/lang/Integer;", "Ljava/lang/Long;", "Ljava/lang/Short;", "Ljava/lang/Byte;" -> Integer.class;
+            case "Ljava/lang/Integer;", "Ljava/lang/Short;", "Ljava/lang/Byte;" -> Integer.class;
+            case "Ljava/lang/Long;" -> Long.class;
             case "Ljava/lang/Boolean;" -> Boolean.class;
             case "Ljava/lang/Double;", "Ljava/lang/Float;" -> Double.class;
             default -> Object.class; // all other Java types → Object in Siyo
@@ -35,6 +36,7 @@ public class JavaTypeMapper {
     public static String siyoTypeToDescriptor(Class<?> type) {
         if (type == null) return "V";
         if (type == Integer.class) return "I";
+        if (type == Long.class) return "J";
         if (type == Boolean.class) return "Z";
         if (type == Double.class) return "D";
         if (type == String.class) return "Ljava/lang/String;";

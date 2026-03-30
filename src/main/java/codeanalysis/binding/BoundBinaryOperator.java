@@ -38,6 +38,36 @@ public class BoundBinaryOperator {
             new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, Integer.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, Integer.class, Boolean.class),
 
+            // Long operators
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Long.class),
+            new BoundBinaryOperator(SyntaxType.MinusToken, BoundBinaryOperatorType.Subtraction, Long.class),
+            new BoundBinaryOperator(SyntaxType.AsteriskToken, BoundBinaryOperatorType.Multiplication, Long.class),
+            new BoundBinaryOperator(SyntaxType.SlashToken, BoundBinaryOperatorType.Division, Long.class),
+            new BoundBinaryOperator(SyntaxType.PercentToken, BoundBinaryOperatorType.Modulo, Long.class),
+            new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessToken, BoundBinaryOperatorType.LessThan, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessOrEqualsToken, BoundBinaryOperatorType.LessOrEqualsThan, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, Long.class, Boolean.class),
+            // Long + String and String + Long
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Long.class, String.class, String.class),
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, String.class, Long.class, String.class),
+            // Int + Long → Long, Long + Int → Long (mixed arithmetic)
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Integer.class, Long.class, Long.class),
+            new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Long.class, Integer.class, Long.class),
+            new BoundBinaryOperator(SyntaxType.MinusToken, BoundBinaryOperatorType.Subtraction, Long.class, Integer.class, Long.class),
+            new BoundBinaryOperator(SyntaxType.MinusToken, BoundBinaryOperatorType.Subtraction, Integer.class, Long.class, Long.class),
+            // Mixed Long/Int comparisons
+            new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Long.class, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Integer.class, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Long.class, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Integer.class, Long.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessToken, BoundBinaryOperatorType.LessThan, Long.class, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessOrEqualsToken, BoundBinaryOperatorType.LessOrEqualsThan, Long.class, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, Long.class, Integer.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, Long.class, Integer.class, Boolean.class),
+
             new BoundBinaryOperator(SyntaxType.AmpersandToken, BoundBinaryOperatorType.BitwiseAnd, Boolean.class),
             new BoundBinaryOperator(SyntaxType.PipeToken, BoundBinaryOperatorType.BitwiseOr, Boolean.class),
             new BoundBinaryOperator(SyntaxType.CaretToken, BoundBinaryOperatorType.BitwiseXor, Boolean.class),

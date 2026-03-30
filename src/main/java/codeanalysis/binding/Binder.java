@@ -133,6 +133,7 @@ public class Binder {
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
             case ActorDeclaration -> bindActorDeclaration((ActorDeclarationSyntax)syntax);
+            case SendStatement -> bindSendStatement((SendStatementSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
             case JavaImportStatement -> bindJavaImportStatement((JavaImportStatementSyntax)syntax);
             default -> throw new RuntimeException("Unexpected syntax type " + syntax.getType());
@@ -347,6 +348,8 @@ public class Binder {
             case LambdaExpression -> bindLambdaExpression((LambdaExpressionSyntax) syntax);
             case ScopeExpression -> bindScopeExpression((ScopeExpressionSyntax) syntax);
             case SpawnExpression -> bindSpawnExpression((SpawnExpressionSyntax) syntax);
+            case MatchExpression -> bindMatchExpression((MatchExpressionSyntax) syntax);
+            case TryExpression -> bindTryExpression((TryExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
                 yield new BoundLiteralExpression(0);
@@ -377,7 +380,199 @@ public class Binder {
         if (value == null) {
             value = 0;
         }
+        // String interpolation: "hello {name}, {count} items" → "hello " + toString(name) + ", " + toString(count) + " items"
+        if (value instanceof String str && str.contains("{")) {
+            BoundExpression result = desugarStringInterpolation(str, syntax);
+            if (result != null) return result;
+        }
+        // Clean escaped braces in non-interpolated strings
+        if (value instanceof String str && str.contains("\\")) {
+            String cleaned = str.replace("\\{", "{").replace("\\}", "}");
+            if (!cleaned.equals(str)) return new BoundLiteralExpression(cleaned);
+        }
         return new BoundLiteralExpression(value);
+    }
+
+    private BoundExpression desugarStringInterpolation(String template, LiteralExpressionSyntax syntax) {
+        // Check if there are any real interpolation braces (not escaped \{)
+        boolean hasInterpolation = false;
+        for (int ci = 0; ci < template.length(); ci++) {
+            if (template.charAt(ci) == '{' && (ci == 0 || template.charAt(ci - 1) != '\\')) {
+                hasInterpolation = true;
+                break;
+            }
+        }
+        if (!hasInterpolation) {
+            // Replace escaped braces with literal braces and return plain string
+            String cleaned = template.replace("\\{", "{").replace("\\}", "}");
+            return new BoundLiteralExpression(cleaned);
+        }
+        List<BoundExpression> parts = new ArrayList<>();
+        int i = 0;
+        while (i < template.length()) {
+            if (template.charAt(i) == '{' && (i == 0 || template.charAt(i - 1) != '\\')) {
+                // Find matching closing brace
+                int depth = 1;
+                int start = i + 1;
+                int j = start;
+                while (j < template.length() && depth > 0) {
+                    if (template.charAt(j) == '{') depth++;
+                    else if (template.charAt(j) == '}') depth--;
+                    if (depth > 0) j++;
+                }
+                if (depth != 0) return null; // unmatched brace — treat as plain string
+                String exprSource = template.substring(start, j);
+                // Parse and bind the embedded expression
+                BoundExpression bound = bindInterpolationExpr(exprSource);
+                parts.add(bound);
+                i = j + 1;
+            } else {
+                // Text segment: collect until next unescaped { or end
+                int start = i;
+                while (i < template.length()) {
+                    if (template.charAt(i) == '{' && (i == 0 || template.charAt(i - 1) != '\\')) break;
+                    i++;
+                }
+                String textSeg = template.substring(start, i).replace("\\{", "{").replace("\\}", "}");
+                parts.add(new BoundLiteralExpression(textSeg));
+            }
+        }
+        if (parts.isEmpty()) return null;
+        // Build chain of string concatenation
+        BoundExpression result = parts.get(0);
+        if (result.getClassType() != String.class) {
+            // Wrap in toString via String + conversion
+            result = makeStringConcat(new BoundLiteralExpression(""), result);
+        }
+        for (int k = 1; k < parts.size(); k++) {
+            result = makeStringConcat(result, parts.get(k));
+        }
+        return result;
+    }
+
+    private BoundExpression bindTryExpression(TryExpressionSyntax syntax) {
+        BoundStatement tryBody = bindStatement(syntax.getTryBody());
+        String errorName = syntax.getErrorVariable().getData();
+        VariableSymbol errorVar = new VariableSymbol(errorName, true, String.class);
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
+        _scope.tryDeclare(errorVar);
+        BoundStatement catchBody = bindStatement(syntax.getCatchBody());
+        _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
+        // Determine result type from last expression in try body, fallback to catch body
+        Class<?> resultType = lastExprType(tryBody);
+        if (resultType == null) resultType = lastExprType(catchBody);
+        if (resultType == null) resultType = Object.class;
+        return new BoundTryExpression(tryBody, errorVar, catchBody, resultType);
+    }
+
+    private Class<?> lastExprType(BoundStatement body) {
+        if (body instanceof BoundBlockStatement block && !block.getStatements().isEmpty()) {
+            var last = block.getStatements().get(block.getStatements().size() - 1);
+            if (last instanceof BoundExpressionStatement exprStmt) {
+                return exprStmt.getExpression().getClassType();
+            }
+        }
+        return null;
+    }
+
+    private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax) {
+        BoundExpression target = bindExpression(syntax.getTarget());
+        List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
+        Class<?> resultType = null;
+        for (MatchArmSyntax arm : syntax.getArms()) {
+            BoundExpression pattern = arm.isDefault() ? null : bindExpression(arm.getPattern());
+            BoundExpression body;
+            if (arm.getBody() instanceof BlockExpressionSyntax blockExpr) {
+                body = bindBlockExpressionBody(blockExpr.getBlock());
+            } else {
+                body = bindExpression(arm.getBody());
+            }
+            if (resultType == null) resultType = body.getClassType();
+            arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault()));
+        }
+        if (resultType == null) resultType = Object.class;
+        return new BoundMatchExpression(target, arms, resultType);
+    }
+
+    private BoundExpression bindBlockExpressionBody(StatementSyntax block) {
+        // For block bodies in match arms, bind the block and return the last expression
+        if (block instanceof BlockStatementSyntax bs && !bs.getStatements().isEmpty()) {
+            var stmts = bs.getStatements();
+            var last = stmts.get(stmts.size() - 1);
+            if (last instanceof ExpressionStatementSyntax exprStmt) {
+                return bindExpression(exprStmt.getExpression());
+            }
+        }
+        return new BoundLiteralExpression(0);
+    }
+
+    /**
+     * Bind an interpolation expression string. Uses fast paths for common patterns
+     * (variables, member access, function calls) to avoid expensive SyntaxTree.parse().
+     */
+    private BoundExpression bindInterpolationExpr(String exprSource) {
+        // Fast path 1: simple identifier — {name}
+        if (exprSource.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+            if (_scope.tryLookup(exprSource)) {
+                return new BoundVariableExpression(_scope.lookupVariable(exprSource));
+            }
+        }
+        // Fast path 2: member access — {self.field} or {obj.field}
+        if (exprSource.matches("[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)+")) {
+            String[] segments = exprSource.split("\\.");
+            // Build chain: bind first as variable, then chain member access
+            if (_scope.tryLookup(segments[0])) {
+                SyntaxToken id = new SyntaxToken(SyntaxType.IdentifierToken, 0, segments[0], null);
+                ExpressionSyntax expr = new NameExpressionSyntax(id);
+                BoundExpression bound = bindExpression(expr);
+                for (int si = 1; si < segments.length; si++) {
+                    SyntaxToken dot = new SyntaxToken(SyntaxType.DotToken, 0, ".", null);
+                    SyntaxToken member = new SyntaxToken(SyntaxType.IdentifierToken, 0, segments[si], null);
+                    expr = new MemberAccessExpressionSyntax(expr, dot, member);
+                    bound = bindExpression(expr);
+                }
+                return bound;
+            }
+        }
+        // Slow path: full parse for complex expressions (arithmetic, function calls, etc.)
+        try {
+            var tree = SyntaxTree.parse(exprSource);
+            var root = tree.getRoot().getStatement();
+            ExpressionSyntax exprSyntax = extractExpression(root);
+            if (exprSyntax != null) {
+                return bindExpression(exprSyntax);
+            }
+        } catch (Exception e) {
+            // parse error
+        }
+        return null;
+    }
+
+    private ExpressionSyntax extractExpression(StatementSyntax root) {
+        if (root instanceof ExpressionStatementSyntax exprStmt) {
+            return exprStmt.getExpression();
+        }
+        if (root instanceof BlockStatementSyntax block && !block.getStatements().isEmpty()) {
+            var firstStmt = block.getStatements().get(0);
+            if (firstStmt instanceof ExpressionStatementSyntax exprStmt) {
+                return exprStmt.getExpression();
+            }
+        }
+        return null;
+    }
+
+    private BoundExpression makeStringConcat(BoundExpression left, BoundExpression right) {
+        BoundBinaryOperator op = BoundBinaryOperator.bind(SyntaxType.PlusToken, left.getClassType(), right.getClassType());
+        if (op == null) {
+            // Fallback: treat right as Object for String + Object concat
+            op = BoundBinaryOperator.bind(SyntaxType.PlusToken, String.class, Object.class);
+        }
+        if (op == null) {
+            op = BoundBinaryOperator.bind(SyntaxType.PlusToken, String.class, String.class);
+        }
+        return new BoundBinaryExpression(left, op, right);
     }
 
 
@@ -532,10 +727,11 @@ public class Binder {
             }
         }
 
-        // Use pre-registered function symbol if available, otherwise create and declare
+        // Use pre-registered function symbol if available (resolve by arg count for overloads)
         FunctionSymbol function;
         if (_scope.tryLookupFunction(name)) {
-            function = _scope.lookupFunction(name);
+            function = _scope.lookupFunction(name, parameters.size());
+            if (function == null) function = _scope.lookupFunction(name);
         } else {
             function = new FunctionSymbol(name, parameters, returnType);
             if (!_scope.tryDeclareFunction(function)) {
@@ -648,14 +844,16 @@ public class Binder {
             return new BoundLiteralExpression(0);
         }
 
-        FunctionSymbol function = _scope.lookupFunction(name);
-
-        // Bind arguments
+        // Bind arguments first to get count for overload resolution
         List<BoundExpression> boundArguments = new ArrayList<>();
         for (ExpressionSyntax argumentSyntax : syntax.getArguments()) {
             BoundExpression boundArgument = bindExpression(argumentSyntax);
             boundArguments.add(boundArgument);
         }
+
+        // Resolve overload by arg count, then fallback to first match
+        FunctionSymbol function = _scope.lookupFunction(name, boundArguments.size());
+        if (function == null) function = _scope.lookupFunction(name);
 
         // Check argument count
         if (boundArguments.size() != function.getParameters().size()) {
@@ -875,6 +1073,13 @@ public class Binder {
 
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
+            // If field is typed "object" but the type name is a known struct/actor, upgrade to SiyoStruct
+            if (memberType == Object.class) {
+                String fieldTypeName = structType.getFieldTypeName(memberName);
+                if (fieldTypeName != null && _structTypes.containsKey(fieldTypeName)) {
+                    memberType = SiyoStruct.class;
+                }
+            }
         }
 
         return new BoundMemberAccessExpression(target, memberName, memberType);
@@ -1190,15 +1395,24 @@ public class Binder {
             String funcName = memberAccess.getMember().getData();
             String qualifiedName = targetName + "." + funcName;
 
-            // Lookup with qualified name
-            if (_scope.tryLookupFunction(qualifiedName)) {
-                FunctionSymbol func = _scope.lookupFunction(qualifiedName);
-
-                // Bind arguments
+            // Lookup with qualified name, or bare name if self-referencing within a module
+            String resolvedName = qualifiedName;
+            if (!_scope.tryLookupFunction(qualifiedName)) {
+                // Module self-reference: inside db.siyo, db.exec() → resolve as bare exec()
+                String currentModule = _moduleHandler.getCurrentModuleName();
+                if (currentModule != null && targetName.equals(currentModule) && _scope.tryLookupFunction(funcName)) {
+                    resolvedName = funcName;
+                }
+            }
+            if (_scope.tryLookupFunction(resolvedName)) {
+                // Bind arguments first for overload resolution
                 List<BoundExpression> boundArgs = new ArrayList<>();
                 for (ExpressionSyntax argSyntax : syntax.getArguments()) {
                     boundArgs.add(bindExpression(argSyntax));
                 }
+
+                FunctionSymbol func = _scope.lookupFunction(resolvedName, boundArgs.size());
+                if (func == null) func = _scope.lookupFunction(resolvedName);
 
                 // Type check arguments
                 if (boundArgs.size() != func.getParameters().size()) {
@@ -1292,6 +1506,11 @@ public class Binder {
         }
 
         return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
+    }
+
+    private BoundStatement bindSendStatement(SendStatementSyntax syntax) {
+        BoundExpression expr = bindExpression(syntax.getExpression());
+        return new BoundSendStatement(expr);
     }
 
     private BoundStatement bindActorDeclaration(ActorDeclarationSyntax syntax) {

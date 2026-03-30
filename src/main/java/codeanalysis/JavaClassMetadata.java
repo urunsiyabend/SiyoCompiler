@@ -145,6 +145,8 @@ public class JavaClassMetadata {
 
     private JavaMethodSignature findMethodInClass(String name, int argCount, Class<?>[] argTypes) {
         JavaMethodSignature fallback = null;
+        JavaMethodSignature bestMatch = null;
+        int bestScore = -1;
         for (JavaMethodSignature sig : _methods) {
             if (!sig.getName().equals(name) || sig.getParamCount() != argCount) continue;
 
@@ -153,19 +155,50 @@ public class JavaClassMetadata {
                 return sig;
             }
 
-            // Type-aware matching
+            // Type-aware matching with scoring
             boolean match = true;
+            int score = 0;
             String[] paramDescs = sig.getParamDescriptors();
             for (int i = 0; i < argCount; i++) {
                 if (!isTypeCompatible(argTypes[i], paramDescs[i])) {
                     match = false;
                     break;
                 }
+                score += typeMatchScore(argTypes[i], paramDescs[i]);
             }
-            if (match) return sig;
+            if (match && score > bestScore) {
+                bestScore = score;
+                bestMatch = sig;
+            }
             if (argTypes == null && fallback == null) fallback = sig;
         }
+        if (bestMatch != null) return bestMatch;
         return fallback; // only used when no type info provided
+    }
+
+    /**
+     * Score a type match — higher is better (more specific).
+     * Exact match scores highest; Object→Object preferred over Object→char[].
+     */
+    private int typeMatchScore(Class<?> siyoType, String jvmDesc) {
+        if (siyoType == Integer.class && jvmDesc.equals("I")) return 10;
+        if (siyoType == Integer.class && jvmDesc.equals("J")) return 5;
+        if (siyoType == Long.class && jvmDesc.equals("J")) return 10;
+        if (siyoType == Long.class && jvmDesc.equals("I")) return 3;
+        if (siyoType == Boolean.class && jvmDesc.equals("Z")) return 10;
+        if (siyoType == Double.class && jvmDesc.equals("D")) return 10;
+        if (siyoType == Double.class && jvmDesc.equals("F")) return 5;
+        if (siyoType == String.class && jvmDesc.equals("Ljava/lang/String;")) return 10;
+        if (siyoType == String.class && jvmDesc.startsWith("Ljava/lang/CharSequence;")) return 5;
+        if (siyoType == Object.class) {
+            // Object arg: prefer Object param > String param > other reference > array
+            if (jvmDesc.equals("Ljava/lang/Object;")) return 10;
+            if (jvmDesc.equals("Ljava/lang/String;")) return 7;
+            if (jvmDesc.startsWith("[")) return 1; // arrays are poor match for Object
+            return 5;
+        }
+        if (jvmDesc.equals("Ljava/lang/Object;")) return 3; // any type to Object is acceptable but less preferred
+        return 5;
     }
 
     private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
@@ -173,6 +206,7 @@ public class JavaClassMetadata {
         // Any reference type is compatible with Object parameter
         if (jvmDesc.equals("Ljava/lang/Object;")) return true; // any Siyo type compatible with Object param (boxed if needed)
         if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
+        if (siyoType == Long.class) return jvmDesc.equals("J") || jvmDesc.equals("I");
         if (siyoType == Boolean.class) return jvmDesc.equals("Z");
         if (siyoType == Double.class) return jvmDesc.equals("D") || jvmDesc.equals("F");
         if (siyoType == String.class) return jvmDesc.equals("Ljava/lang/String;") || jvmDesc.startsWith("Ljava/lang/CharSequence;");

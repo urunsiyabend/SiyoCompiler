@@ -73,11 +73,13 @@ public class FunctionSymbol {
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof FunctionSymbol other)) return false;
-        return _name.equals(other._name) && java.util.Objects.equals(_moduleName, other._moduleName);
+        return _name.equals(other._name)
+                && java.util.Objects.equals(_moduleName, other._moduleName)
+                && _parameters.size() == other._parameters.size();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(_name, _moduleName);
+        return java.util.Objects.hash(_name, _moduleName, _parameters.size());
     }
 }

@@ -195,6 +195,9 @@ public class Lexer {
                 if (currentChar() == '=') {
                     next();
                     _type = SyntaxType.EqualsEqualsToken;
+                } else if (currentChar() == '>') {
+                    next();
+                    _type = SyntaxType.FatArrowToken;
                 } else {
                     _type = SyntaxType.EqualsToken;
                 }
@@ -283,6 +286,8 @@ public class Lexer {
                         case '\\' -> { sb.append('\\'); next(); }
                         case '"' -> { sb.append('"'); next(); }
                         case '0' -> { sb.append('\0'); next(); }
+                        case '{' -> { sb.append("\\{"); next(); } // escaped brace — keep marker for interpolation skip
+                        case '}' -> { sb.append("\\}"); next(); }
                         default -> {
                             _diagnostics.reportInvalidEscapeCharacter(new TextSpan(_position - 1, 2), currentChar());
                             next();

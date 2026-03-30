@@ -36,6 +36,18 @@ public class BuiltinFunctions {
             Integer.class
     );
 
+    public static final FunctionSymbol PARSE_LONG = new FunctionSymbol(
+            "parseLong",
+            List.of(new ParameterSymbol("s", String.class)),
+            Long.class
+    );
+
+    public static final FunctionSymbol TO_LONG = new FunctionSymbol(
+            "toLong",
+            List.of(new ParameterSymbol("value", Integer.class)),
+            Long.class
+    );
+
     public static final FunctionSymbol TO_FLOAT = new FunctionSymbol(
             "toFloat",
             List.of(new ParameterSymbol("value", Integer.class)),
@@ -150,6 +162,12 @@ public class BuiltinFunctions {
             SiyoMap.class
     );
 
+    public static final FunctionSymbol NEW_SET = new FunctionSymbol(
+            "set",
+            List.of(),
+            SiyoSet.class
+    );
+
     public static final FunctionSymbol CHANNEL = new FunctionSymbol(
             "channel",
             List.of(),
@@ -168,10 +186,34 @@ public class BuiltinFunctions {
             SiyoArray.class
     );
 
+    public static final FunctionSymbol ACTOR_HANDLE = new FunctionSymbol(
+            "actorHandle",
+            List.of(new ParameterSymbol("self", SiyoStruct.class)),
+            Object.class
+    );
+
+    public static final FunctionSymbol CAN_READ = new FunctionSymbol(
+            "canRead",
+            List.of(new ParameterSymbol("reader", Object.class)),
+            Boolean.class
+    );
+
+    public static final FunctionSymbol HTTP_GET = new FunctionSymbol(
+            "httpGet",
+            List.of(new ParameterSymbol("url", String.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol HTTP_POST = new FunctionSymbol(
+            "httpPost",
+            List.of(new ParameterSymbol("url", String.class), new ParameterSymbol("body", String.class)),
+            String.class
+    );
+
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_FLOAT, TO_INT, TO_FLOAT,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, SORT, CHANNEL, SUBSTRING, CONTAINS, INPUT, ERROR,
-                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT);
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_LONG, TO_FLOAT,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, SORT, CHANNEL, SUBSTRING, CONTAINS, INPUT, ERROR,
+                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {

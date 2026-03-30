@@ -197,6 +197,13 @@ public enum SyntaxType {
     SpawnExpression,
     ActorKeyword,
     ActorDeclaration,
+    SendKeyword,
+    SendStatement,
+    MatchKeyword,
+    MatchExpression,
+    MatchArm,
+    FatArrowToken,
+    TryExpression,
 
     /* Represents a parameter in function declaration. */
     Parameter,

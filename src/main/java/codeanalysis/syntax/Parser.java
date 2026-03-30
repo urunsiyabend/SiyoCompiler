@@ -167,6 +167,7 @@ public class Parser {
             case ActorKeyword -> parseActorDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
             case TryKeyword -> parseTryCatchStatement();
+            case SendKeyword -> parseSendStatement();
             case ImportKeyword -> parseImportStatement();
             default -> parseExpressionStatement();
         };
@@ -438,6 +439,13 @@ public class Parser {
         return new ReturnStatementSyntax(returnKeyword, expression);
     }
 
+    private StatementSyntax parseSendStatement() {
+        // send actor.method(args) — fire-and-forget actor dispatch
+        SyntaxToken keyword = match(SyntaxType.SendKeyword);
+        ExpressionSyntax expr = parseExpression();
+        return new SendStatementSyntax(keyword, expr);
+    }
+
     private StatementSyntax parseBreakStatement() {
         SyntaxToken keyword = match(SyntaxType.BreakKeyword);
         return new BreakStatementSyntax(keyword);
@@ -486,6 +494,47 @@ public class Parser {
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, closeBrace);
+    }
+
+    private ExpressionSyntax parseTryExpression() {
+        // try { expr } catch e { expr } — returns the value of whichever branch runs
+        SyntaxToken tryKeyword = match(SyntaxType.TryKeyword);
+        StatementSyntax tryBody = parseBlockStatement();
+        SyntaxToken catchKeyword = match(SyntaxType.CatchKeyword);
+        SyntaxToken errorVar = match(SyntaxType.IdentifierToken);
+        StatementSyntax catchBody = parseBlockStatement();
+        return new TryExpressionSyntax(tryKeyword, tryBody, catchKeyword, errorVar, catchBody);
+    }
+
+    private ExpressionSyntax parseMatchExpression() {
+        SyntaxToken matchKeyword = match(SyntaxType.MatchKeyword);
+        ExpressionSyntax target = parseExpression();
+        match(SyntaxType.OpenBraceToken);
+        java.util.List<MatchArmSyntax> arms = new java.util.ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            boolean isDefault = false;
+            ExpressionSyntax pattern = null;
+            if (current().getType() == SyntaxType.IdentifierToken && current().getData().equals("_")) {
+                nextToken(); // consume _
+                isDefault = true;
+            } else {
+                pattern = parseExpression();
+            }
+            SyntaxToken arrow = match(SyntaxType.FatArrowToken);
+            ExpressionSyntax body;
+            if (current().getType() == SyntaxType.OpenBraceToken) {
+                // Block body: { ... } — parse as block, wrap last expression
+                StatementSyntax block = parseBlockStatement();
+                body = new BlockExpressionSyntax(block);
+            } else {
+                body = parseExpression();
+            }
+            arms.add(new MatchArmSyntax(pattern, arrow, body, isDefault));
+            // Optional comma separator
+            if (current().getType() == SyntaxType.CommaToken) nextToken();
+        }
+        match(SyntaxType.CloseBraceToken);
+        return new MatchExpressionSyntax(matchKeyword, target, arms);
     }
 
     private ExpressionSyntax parseLambdaExpression() {
@@ -710,6 +759,12 @@ public class Parser {
                     yield new SpawnExpressionSyntax(keyword, new ExpressionStatementSyntax(spawnExpr));
                 }
             }
+            case MatchKeyword -> {
+                yield parseMatchExpression();
+            }
+            case TryKeyword -> {
+                yield parseTryExpression();
+            }
             case SelfKeyword -> {
                 // self keyword used as expression → treat as identifier
                 SyntaxToken selfToken = nextToken();
@@ -739,11 +794,12 @@ public class Parser {
                 expr = new IndexExpressionSyntax(expr, openBracket, index, closeBracket);
             } else if (current().getType() == SyntaxType.DotToken) {
                 SyntaxToken dot = match(SyntaxType.DotToken);
-                // Allow 'new' as member name for Java constructor calls
+                // Allow keywords as member names (new, send, etc.) for Java interop
                 SyntaxToken member;
-                if (current().getType() == SyntaxType.NewKeyword) {
-                    SyntaxToken newToken = nextToken();
-                    member = new SyntaxToken(SyntaxType.IdentifierToken, newToken.getPosition(), "new", null);
+                if (current().getType() == SyntaxType.NewKeyword
+                        || current().getType() == SyntaxType.SendKeyword) {
+                    SyntaxToken kwToken = nextToken();
+                    member = new SyntaxToken(SyntaxType.IdentifierToken, kwToken.getPosition(), kwToken.getData(), null);
                 } else {
                     member = match(SyntaxType.IdentifierToken);
                 }

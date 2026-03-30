@@ -34,6 +34,7 @@ public abstract class BoundTreeRewriter {
             case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
             case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
             case TryCatchStatement -> rewriteTryCatchStatement((BoundTryCatchStatement) node);
+            case SendStatement -> node; // send is atomic, no children to rewrite
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
     }
@@ -141,7 +142,7 @@ public abstract class BoundTreeRewriter {
         if (initializer == node.getInitializer() && condition == node.getCondition() && iterator == node.getIterator() && body == node.getBody()) {
             return node;
         }
-        return new BoundForStatement(initializer, condition, iterator, body);
+        return new BoundForStatement(initializer, condition, iterator, body, node.getBreakLabel(), node.getContinueLabel());
     }
 
     /**
@@ -247,6 +248,8 @@ public abstract class BoundTreeRewriter {
             case ClosureCallExpression -> node;
             case ScopeExpression -> node;
             case SpawnExpression -> node;
+            case MatchExpression -> node;
+            case TryExpression -> node;
             case MemberAssignmentExpression -> node;
             default -> throw new IllegalStateException("Unhandled bound expression type: " + node.getType() + ". This is a compiler bug.");
         };

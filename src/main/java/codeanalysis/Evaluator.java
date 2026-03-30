@@ -99,6 +99,10 @@ public class Evaluator {
                     evaluateTryCatchStatement((BoundTryCatchStatement) s);
                     index++;
                 }
+                case SendStatement -> {
+                    evaluateSendStatement((codeanalysis.binding.BoundSendStatement) s);
+                    index++;
+                }
                 default -> throw new Exception("Unexpected node: " + s.getType());
             };
         }
@@ -202,6 +206,8 @@ public class Evaluator {
             case ClosureCallExpression -> evaluateClosureCall((BoundClosureCallExpression) node);
             case ScopeExpression -> evaluateScopeExpression((BoundScopeExpression) node);
             case SpawnExpression -> evaluateSpawnExpression((BoundSpawnExpression) node);
+            case MatchExpression -> evaluateMatchExpression((codeanalysis.binding.BoundMatchExpression) node);
+            case TryExpression -> evaluateTryExpression((codeanalysis.binding.BoundTryExpression) node);
             case IndexAssignmentExpression -> evaluateIndexAssignment((BoundIndexAssignmentExpression) node);
             case MemberAssignmentExpression -> evaluateMemberAssignment((BoundMemberAssignmentExpression) node);
             default -> throw new Exception("Unexpected node: " + node.getType());
@@ -284,18 +290,35 @@ public class Evaluator {
         Object left = evaluateExpression(b.getLeft());
         Object right = evaluateExpression(b.getRight());
 
+        boolean hasLong = left instanceof Long || right instanceof Long;
         return switch (b.getOperator().getType()) {
             case Addition -> {
                 if (left instanceof String || right instanceof String)
                     yield String.valueOf(left) + String.valueOf(right);
-                if (left instanceof Double l && right instanceof Double r)
-                    yield l + r;
+                if (left instanceof Double l && right instanceof Double r) yield l + r;
+                if (hasLong) yield toLong(left) + toLong(right);
                 yield (int) left + (int) right;
             }
-            case Subtraction -> left instanceof Double l && right instanceof Double r ? l - r : (int) left - (int) right;
-            case Multiplication -> left instanceof Double l && right instanceof Double r ? l * r : (int) left * (int) right;
-            case Division -> left instanceof Double l && right instanceof Double r ? l / r : (int) left / (int) right;
-            case Modulo -> left instanceof Double l && right instanceof Double r ? l % r : (int) left % (int) right;
+            case Subtraction -> {
+                if (left instanceof Double l && right instanceof Double r) yield l - r;
+                if (hasLong) yield toLong(left) - toLong(right);
+                yield (int) left - (int) right;
+            }
+            case Multiplication -> {
+                if (left instanceof Double l && right instanceof Double r) yield l * r;
+                if (hasLong) yield toLong(left) * toLong(right);
+                yield (int) left * (int) right;
+            }
+            case Division -> {
+                if (left instanceof Double l && right instanceof Double r) yield l / r;
+                if (hasLong) yield toLong(left) / toLong(right);
+                yield (int) left / (int) right;
+            }
+            case Modulo -> {
+                if (left instanceof Double l && right instanceof Double r) yield l % r;
+                if (hasLong) yield toLong(left) % toLong(right);
+                yield (int) left % (int) right;
+            }
             case BitwiseAnd -> b.getClassType() == Boolean.class ? (boolean) left & (boolean) right : (int) left & (int) right;
             case BitwiseOr -> b.getClassType() == Boolean.class ? (boolean) left | (boolean) right : (int) left | (int) right;
             case BitwiseXor -> b.getClassType() == Boolean.class ? (boolean) left ^ (boolean) right : (int) left ^ (int) right;
@@ -305,10 +328,26 @@ public class Evaluator {
             case LogicalOr -> (boolean) left || (boolean) right;
             case Equals -> java.util.Objects.equals(left, right);
             case NotEquals -> !java.util.Objects.equals(left, right);
-            case LessThan -> left instanceof Double l && right instanceof Double r ? l < r : (int) left < (int) right;
-            case LessOrEqualsThan -> left instanceof Double l && right instanceof Double r ? l <= r : (int) left <= (int) right;
-            case GreaterThan -> left instanceof Double l && right instanceof Double r ? l > r : (int) left > (int) right;
-            case GreaterOrEqualsThen -> left instanceof Double l && right instanceof Double r ? l >= r : (int) left >= (int) right;
+            case LessThan -> {
+                if (left instanceof Double l && right instanceof Double r) yield l < r;
+                if (hasLong) yield toLong(left) < toLong(right);
+                yield (int) left < (int) right;
+            }
+            case LessOrEqualsThan -> {
+                if (left instanceof Double l && right instanceof Double r) yield l <= r;
+                if (hasLong) yield toLong(left) <= toLong(right);
+                yield (int) left <= (int) right;
+            }
+            case GreaterThan -> {
+                if (left instanceof Double l && right instanceof Double r) yield l > r;
+                if (hasLong) yield toLong(left) > toLong(right);
+                yield (int) left > (int) right;
+            }
+            case GreaterOrEqualsThen -> {
+                if (left instanceof Double l && right instanceof Double r) yield l >= r;
+                if (hasLong) yield toLong(left) >= toLong(right);
+                yield (int) left >= (int) right;
+            }
             default -> throw new Exception(String.format("Unexpected binary operator: %s", b.getOperator().getType()));
         };
     }
@@ -422,6 +461,16 @@ public class Evaluator {
         // Instance method: obj.method(args)
         Object target = evaluateExpression(node.getTarget());
         if (target == null) throw new RuntimeException("Cannot call method on null");
+        // Actor dispatch: check for direct SiyoActor methods first, then route through mailbox
+        if (target instanceof SiyoActor actor) {
+            // Direct methods on SiyoActor (stop, isStopped, etc.)
+            for (var m : SiyoActor.class.getDeclaredMethods()) {
+                if (m.getName().equals(node.getMethodName()) && m.getParameterCount() == args.length) {
+                    return m.invoke(actor, args);
+                }
+            }
+            return actor.call(node.getMethodName(), args);
+        }
         return invokeMethod(target.getClass(), target, node.getMethodName(), args);
     }
 
@@ -453,7 +502,7 @@ public class Evaluator {
                             }
                         }
                         Object result = method.invoke(target, convertedArgs);
-                        if (result instanceof Long l) return l.intValue();
+                        if (result instanceof Long) return result; // preserve as Long
                         if (result instanceof Short s) return (int) s;
                         if (result instanceof Byte b) return (int) b;
                         if (result instanceof Float f) return f.doubleValue();
@@ -547,6 +596,65 @@ public class Evaluator {
     private java.util.List<Thread> _scopeThreads = null;
     private java.util.List<Exception> _scopeErrors = null;
 
+    private void evaluateSendStatement(codeanalysis.binding.BoundSendStatement node) throws Exception {
+        BoundExpression expr = node.getExpression();
+        if (expr instanceof BoundCallExpression callExpr) {
+            codeanalysis.FunctionSymbol function = callExpr.getFunction();
+            Object[] arguments = new Object[callExpr.getArguments().size()];
+            for (int i = 0; i < arguments.length; i++) {
+                arguments[i] = evaluateExpression(callExpr.getArguments().get(i));
+            }
+            // Actor send: first arg is SiyoActor
+            if (arguments.length > 0 && arguments[0] instanceof SiyoActor actor
+                    && function.getName().contains(".")
+                    && function.getParameters().size() > 0
+                    && function.getParameters().get(0).getName().equals("self")) {
+                String methodName = function.getName().substring(function.getName().indexOf('.') + 1);
+                Object[] methodArgs = new Object[arguments.length - 1];
+                System.arraycopy(arguments, 1, methodArgs, 0, methodArgs.length);
+                actor.send(methodName, methodArgs);
+                return;
+            }
+        }
+        // Fallback: evaluate as expression, discard result
+        evaluateExpression(expr);
+    }
+
+    private Object evaluateTryExpression(codeanalysis.binding.BoundTryExpression node) throws Exception {
+        try {
+            BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
+            evaluateBlock(tryBlock);
+            return _lastValue;
+        } catch (Exception e) {
+            assignVariable(node.getErrorVariable(), e.getMessage() != null ? e.getMessage() : e.toString());
+            BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
+            evaluateBlock(catchBlock);
+            return _lastValue;
+        }
+    }
+
+    private static long toLong(Object val) {
+        if (val instanceof Long l) return l;
+        if (val instanceof Integer i) return (long) i;
+        return Long.parseLong(val.toString());
+    }
+
+    private Object evaluateMatchExpression(codeanalysis.binding.BoundMatchExpression node) throws Exception {
+        Object target = evaluateExpression(node.getTarget());
+        Object defaultResult = null;
+        for (var arm : node.getArms()) {
+            if (arm.isDefault()) {
+                defaultResult = evaluateExpression(arm.body());
+                continue;
+            }
+            Object pattern = evaluateExpression(arm.pattern());
+            if (java.util.Objects.equals(target, pattern)) {
+                return evaluateExpression(arm.body());
+            }
+        }
+        return defaultResult;
+    }
+
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
         // Check if this is an actor spawn (single expression returning actor struct)
         if (node.getBody().getStatements().size() == 1
@@ -624,9 +732,10 @@ public class Evaluator {
 
         // Start actor event loop on virtual thread
         Thread actorThread = Thread.startVirtualThread(() -> {
-            while (true) {
+            while (!actor.isStopped()) {
                 try {
                     SiyoActor.ActorMessage msg = actor.getMailbox().take();
+                    if (actor.isStopped() || msg.methodName.equals("__stop__")) break;
                     String qualifiedName = actorTypeName + "." + msg.methodName;
 
                     // Find the function
@@ -815,6 +924,12 @@ public class Evaluator {
         if (function == BuiltinFunctions.TO_INT) {
             return ((Double) arguments[0]).intValue();
         }
+        if (function == BuiltinFunctions.PARSE_LONG) {
+            return Long.parseLong((String) arguments[0]);
+        }
+        if (function == BuiltinFunctions.TO_LONG) {
+            return ((Integer) arguments[0]).longValue();
+        }
         if (function == BuiltinFunctions.TO_FLOAT) {
             return ((Integer) arguments[0]).doubleValue();
         }
@@ -878,6 +993,9 @@ public class Evaluator {
         if (function == BuiltinFunctions.NEW_MAP) {
             return new SiyoMap();
         }
+        if (function == BuiltinFunctions.NEW_SET) {
+            return new SiyoSet();
+        }
         if (function == BuiltinFunctions.CHANNEL) {
             return new SiyoChannel();
         }
@@ -917,6 +1035,29 @@ public class Evaluator {
             String[] parts = ((String) arguments[0]).split(java.util.regex.Pattern.quote((String) arguments[1]), -1);
             SiyoArray arr = new SiyoArray(java.util.Arrays.asList(parts), String.class);
             return arr;
+        }
+        if (function == BuiltinFunctions.ACTOR_HANDLE) {
+            // Extract __handle__ from the struct's fields map
+            if (arguments[0] instanceof SiyoStruct s) {
+                Object handle = s.getFieldsMap().get("__handle__");
+                if (handle != null) return handle;
+            }
+            if (arguments[0] instanceof java.util.Map m) {
+                Object handle = m.get("__handle__");
+                if (handle != null) return handle;
+            }
+            return arguments[0]; // fallback: return self as-is
+        }
+        if (function == BuiltinFunctions.CAN_READ) {
+            if (arguments[0] instanceof java.io.BufferedReader br) return br.ready();
+            if (arguments[0] instanceof java.io.Reader r) return r.ready();
+            return false;
+        }
+        if (function == BuiltinFunctions.HTTP_GET) {
+            return SiyoHttp.get((String) arguments[0]);
+        }
+        if (function == BuiltinFunctions.HTTP_POST) {
+            return SiyoHttp.post((String) arguments[0], (String) arguments[1]);
         }
         throw new Exception("Unknown built-in function: " + function.getName());
     }
