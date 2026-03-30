@@ -1668,6 +1668,21 @@ public class Emitter {
             _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoChannel", "<init>", "()V", false);
             return;
         }
+        if (function == BuiltinFunctions.CHANNEL_BUFFERED) {
+            _mv.visitTypeInsn(NEW, "codeanalysis/SiyoChannel");
+            _mv.visitInsn(DUP);
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoChannel", "<init>", "(I)V", false);
+            return;
+        }
+        if (function == BuiltinFunctions.RANDOM) {
+            _mv.visitMethodInsn(INVOKESTATIC, "java/util/concurrent/ThreadLocalRandom", "current",
+                    "()Ljava/util/concurrent/ThreadLocalRandom;", false);
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/util/concurrent/ThreadLocalRandom", "nextInt",
+                    "(I)I", false);
+            return;
+        }
         if (function == BuiltinFunctions.PUSH) {
             emitExpression(node.getArguments().get(0)); // list
             emitExpression(node.getArguments().get(1)); // value

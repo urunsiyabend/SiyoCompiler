@@ -174,6 +174,12 @@ public class BuiltinFunctions {
             SiyoChannel.class
     );
 
+    public static final FunctionSymbol CHANNEL_BUFFERED = new FunctionSymbol(
+            "channel",
+            List.of(new ParameterSymbol("capacity", Integer.class)),
+            SiyoChannel.class
+    );
+
     public static final FunctionSymbol SORT = new FunctionSymbol(
             "sort",
             List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("comparator", SiyoClosure.class)),
@@ -184,6 +190,12 @@ public class BuiltinFunctions {
             "split",
             List.of(new ParameterSymbol("s", String.class), new ParameterSymbol("delimiter", String.class)),
             SiyoArray.class
+    );
+
+    public static final FunctionSymbol RANDOM = new FunctionSymbol(
+            "random",
+            List.of(new ParameterSymbol("max", Integer.class)),
+            Integer.class
     );
 
     public static final FunctionSymbol ACTOR_HANDLE = new FunctionSymbol(
@@ -212,7 +224,7 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_LONG, TO_FLOAT,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, SORT, CHANNEL, SUBSTRING, CONTAINS, INPUT, ERROR,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
     }
 

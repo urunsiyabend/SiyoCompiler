@@ -467,6 +467,74 @@ public class Binder {
         return new BoundTryExpression(tryBody, errorVar, catchBody, resultType);
     }
 
+    /**
+     * Channel for-in: for msg in ch { ... } → desugars to:
+     *   mut _ch = ch
+     *   while true { mut msg = _ch.receive(); if msg == null { break }; body }
+     */
+    private BoundStatement bindChannelForIn(ForInStatementSyntax syntax, BoundExpression channel, String itemName) {
+        int uid = _labelCounter++;
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
+
+        // Store channel in local
+        VariableSymbol chVar = new VariableSymbol("_ch" + uid, true, SiyoChannel.class);
+        _scope.tryDeclare(chVar);
+        BoundVariableDeclaration chDecl = new BoundVariableDeclaration(chVar, channel);
+
+        // Item variable (Object type — receive returns Object)
+        VariableSymbol itemVar = new VariableSymbol(itemName, true, Object.class);
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
+        _scope.tryDeclare(itemVar);
+
+        LabelSymbol breakLabel = generateLabel("break");
+        LabelSymbol continueLabel = generateLabel("continue");
+        _loopStack.push(new LoopLabels(breakLabel, continueLabel));
+
+        BoundStatement userBody = bindStatement(syntax.getBody());
+        _loopStack.pop();
+
+        // Build: msg = _ch.receive()
+        codeanalysis.JavaClassInfo chClass = _typeResolver.resolveJavaClassForSiyoType(SiyoChannel.class);
+        codeanalysis.JavaMethodSignature recvSig = chClass != null ? chClass.resolveMethod("receive", 0) : null;
+        BoundExpression recvCall = new BoundJavaMethodCallExpression(chClass, new BoundVariableExpression(chVar),
+                "receive", java.util.List.of(), recvSig, null);
+        BoundVariableDeclaration itemDecl = new BoundVariableDeclaration(itemVar, recvCall);
+
+        // Build: if msg == null { break }
+        BoundExpression nullCheck = new BoundBinaryExpression(
+                new BoundVariableExpression(itemVar),
+                BoundBinaryOperator.bind(codeanalysis.syntax.SyntaxType.EqualsEqualsToken, Object.class, Object.class),
+                new BoundLiteralExpression(null));
+        BoundStatement breakStmt = new BoundConditionalGotoStatement(breakLabel, nullCheck, true);
+
+        // Assemble while body: [itemDecl, nullCheck→break, userBody]
+        ArrayList<BoundStatement> whileBody = new ArrayList<>();
+        whileBody.add(itemDecl);
+        whileBody.add(breakStmt);
+        if (userBody instanceof BoundBlockStatement block) {
+            whileBody.addAll(block.getStatements());
+        } else {
+            whileBody.add(userBody);
+        }
+
+        BoundWhileStatement whileStmt = new BoundWhileStatement(
+                new BoundLiteralExpression(true),
+                new BoundBlockStatement(whileBody),
+                breakLabel, continueLabel);
+
+        _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
+        _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
+
+        ArrayList<BoundStatement> outer = new ArrayList<>();
+        outer.add(chDecl);
+        outer.add(whileStmt);
+        return new BoundBlockStatement(outer);
+    }
+
     private Class<?> lastExprType(BoundStatement body) {
         if (body instanceof BoundBlockStatement block && !block.getStatements().isEmpty()) {
             var last = block.getStatements().get(block.getStatements().size() - 1);
@@ -878,6 +946,12 @@ public class Binder {
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
         BoundExpression collection = bindExpression(syntax.getCollection());
         String itemName = syntax.getItemName().getData();
+
+        // Channel iteration: for msg in ch { ... } → while (true) { msg = ch.receive(); if msg == null break; body }
+        if (collection.getClassType() == SiyoChannel.class) {
+            return bindChannelForIn(syntax, collection, itemName);
+        }
+
         int uid = _labelCounter++; // unique id to avoid variable name collisions
 
         // Create index and collection variables with unique names

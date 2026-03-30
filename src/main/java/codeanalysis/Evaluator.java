@@ -997,7 +997,13 @@ public class Evaluator {
             return new SiyoSet();
         }
         if (function == BuiltinFunctions.CHANNEL) {
-            return new SiyoChannel();
+            return new SiyoChannel(); // unbuffered (SynchronousQueue)
+        }
+        if (function == BuiltinFunctions.CHANNEL_BUFFERED) {
+            return new SiyoChannel((int) arguments[0]); // buffered
+        }
+        if (function == BuiltinFunctions.RANDOM) {
+            return java.util.concurrent.ThreadLocalRandom.current().nextInt((int) arguments[0]);
         }
         if (function == BuiltinFunctions.CHR) {
             int code = (arguments[0] instanceof Byte b) ? (int) b : (int) arguments[0];
