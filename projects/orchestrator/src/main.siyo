@@ -1,0 +1,404 @@
+// Siyo Task Orchestrator — mini Temporal/Celery
+// 7 actors: TaskStore, Scheduler, WorkerPool, Worker(x3), RetryManager, Notifier, ApiHandler
+import java "java.net.ServerSocket"
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.System"
+import java "java.lang.Thread"
+import java "java.lang.Math"
+import "db"
+import "http"
+
+// === TaskStore Actor ===
+// Single source of truth. All task mutations go through here.
+
+actor TaskStore {
+    connStr: string,
+    listeners: map
+}
+
+impl TaskStore {
+    fn new(connStr: string) -> TaskStore {
+        TaskStore { connStr: connStr, listeners: map() }
+    }
+
+    fn createTask(self, name: string, payload: string, maxRetries: int, delaySeconds: int, dependsOn: int) -> int {
+        imut runAt = System.currentTimeMillis() + toLong(delaySeconds * 1000)
+        db.exec(self.connStr, "INSERT INTO tasks (name, payload, max_retries, depends_on, run_at) VALUES ('" + name + "','" + payload + "'," + maxRetries + "," + dependsOn + "," + runAt + ")")
+        return db.queryInt(self.connStr, "SELECT MAX(id) FROM tasks")
+    }
+
+    fn getTask(self, id: int) -> string {
+        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE id = " + id)
+    }
+
+    fn listTasks(self) -> string {
+        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks ORDER BY id")
+    }
+
+    fn deadLetterTasks(self) -> string {
+        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'dead' ORDER BY id")
+    }
+
+    fn cancelTask(self, id: int) -> bool {
+        imut status = db.queryStr(self.connStr, "SELECT status FROM tasks WHERE id = " + id)
+        if status == "pending" {
+            db.exec(self.connStr, "UPDATE tasks SET status = 'cancelled' WHERE id = " + id)
+            return true
+        }
+        return false
+    }
+
+    fn claimPending(self, workerId: string) -> string {
+        // Find a ready pending task: not delayed, dependency completed
+        imut now = System.currentTimeMillis()
+        imut rows = db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 20")
+        // Parse first eligible task from the JSON array
+        // PAIN POINT: No way to iterate query results row-by-row without raw JDBC
+        // PAIN POINT: Must re-query for each candidate's run_at and dependency check
+        imut ids = self.findPendingIds()
+        if len(ids) == 0 { return "" }
+        imut parts = split(ids, ",")
+        for i in range(0, len(parts)) {
+            imut tidStr = toString(parts[i])
+            imut tid = parseInt(tidStr)
+            // Check run_at
+            imut runAt = self.getRunAt(tid)
+            if runAt > now { continue }
+            // Check dependency
+            imut dep = db.queryInt(self.connStr, "SELECT depends_on FROM tasks WHERE id = " + tid)
+            if dep > 0 {
+                imut depStatus = db.queryStr(self.connStr, "SELECT status FROM tasks WHERE id = " + dep)
+                if depStatus != "completed" { continue }
+            }
+            // Claim it
+            imut name = db.queryStr(self.connStr, "SELECT name FROM tasks WHERE id = " + tid)
+            imut payload = db.queryStr(self.connStr, "SELECT payload FROM tasks WHERE id = " + tid)
+            db.exec(self.connStr, "UPDATE tasks SET status = 'running', worker = '" + workerId + "' WHERE id = " + tid)
+            return "{tid}|{name}|{payload}"
+        }
+        return ""
+    }
+
+    fn findPendingIds(self) -> string {
+        imut result = db.queryStr(self.connStr, "SELECT GROUP_CONCAT(id) FROM (SELECT id FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 20)")
+        if result == "null" { return "" }
+        return result
+    }
+
+    fn getRunAt(self, id: int) -> long {
+        imut val = db.queryStr(self.connStr, "SELECT run_at FROM tasks WHERE id = " + id)
+        if len(val) == 0 { return toLong(0) }
+        return parseLong(val)
+    }
+
+    fn completeTask(self, id: int, result: string) -> string {
+        db.exec(self.connStr, "UPDATE tasks SET status = 'completed', result = '" + result + "' WHERE id = " + id)
+        return "completed"
+    }
+
+    fn failTask(self, id: int, reason: string) -> string {
+        // Increment retries, set back to pending for retry or dead
+        imut retries = db.queryInt(self.connStr, "SELECT retries FROM tasks WHERE id = " + id)
+        imut maxRetries = db.queryInt(self.connStr, "SELECT max_retries FROM tasks WHERE id = " + id)
+        imut newRetries = retries + 1
+        if newRetries >= maxRetries {
+            db.exec(self.connStr, "UPDATE tasks SET status = 'dead', retries = " + newRetries + ", result = '" + reason + "' WHERE id = " + id)
+            return "dead"
+        }
+        // Exponential backoff: 1s, 2s, 4s, 8s...
+        mut backoffMs = 1000
+        for i in range(0, retries) { backoffMs = backoffMs * 2 }
+        imut runAt = System.currentTimeMillis() + toLong(backoffMs)
+        db.exec(self.connStr, "UPDATE tasks SET status = 'pending', retries = " + newRetries + ", run_at = " + runAt + ", worker = '' WHERE id = " + id)
+        return "retry"
+    }
+
+    fn getStats(self) -> string {
+        imut total = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks")
+        imut pending = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'pending'")
+        imut running = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'running'")
+        imut completed = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'completed'")
+        imut failed = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'dead'")
+        imut cancelled = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'cancelled'")
+        return "\{\"total\":{total},\"pending\":{pending},\"running\":{running},\"completed\":{completed},\"dead\":{failed},\"cancelled\":{cancelled}\}"
+    }
+
+    fn addListener(self, event: string, ch: channel) -> string {
+        self.listeners.set(event, ch)
+        return "ok"
+    }
+
+    fn notifyEvent(self, event: string, taskId: int) -> string {
+        if self.listeners.has(event) {
+            imut ch = self.listeners.get(event)
+            ch.send("{event}:{taskId}")
+        }
+        return "ok"
+    }
+}
+
+// === Worker Actor ===
+// Simulates task execution. Random success/failure for testing.
+
+actor Worker {
+    store: TaskStore,
+    pool: object,
+    workerId: string,
+    busy: bool
+}
+
+impl Worker {
+    fn new(store: TaskStore, pool: object, workerId: string) -> Worker {
+        Worker { store: store, pool: pool, workerId: workerId, busy: false }
+    }
+
+    fn execute(self, taskInfo: string) -> string {
+        // taskInfo = "id|name|payload"
+        imut parts = split(taskInfo, "|")
+        imut taskId = parseInt(toString(parts[0]))
+        imut taskName = toString(parts[1])
+        imut payload = toString(parts[2])
+        self.busy = true
+
+        // Simulate work: sleep 100-300ms
+        // PAIN POINT: No random() builtin — use currentTimeMillis % N as poor man's random
+        imut sleepMs = 100 + (System.currentTimeMillis() % toLong(200))
+        Thread.sleep(sleepMs)
+
+        // Simulate failure: tasks with "fail" in name always fail, others succeed
+        if contains(taskName, "fail") {
+            self.store.failTask(taskId, "simulated failure")
+            self.store.notifyEvent("failed", taskId)
+            return "failed"
+        }
+
+        imut result = "done:{payload}"
+        self.store.completeTask(taskId, result)
+        self.store.notifyEvent("completed", taskId)
+        return "completed"
+    }
+
+    fn isBusy(self) -> bool {
+        return self.busy
+    }
+}
+
+// === WorkerPool Actor ===
+// Manages N workers, distributes tasks round-robin.
+
+actor WorkerPool {
+    store: TaskStore,
+    workers: map,
+    workerIds: map,
+    count: int,
+    nextIdx: int,
+    active: int
+}
+
+impl WorkerPool {
+    fn new(store: TaskStore, count: int) -> WorkerPool {
+        WorkerPool { store: store, workers: map(), workerIds: map(), count: count, nextIdx: 0, active: 0 }
+    }
+
+    fn init(self) -> string {
+        imut myHandle = actorHandle(self)
+        for i in range(0, self.count) {
+            imut wid = "worker-{i}"
+            mut w = spawn Worker.new(self.store, myHandle, wid)
+            self.workers.set(wid, w)
+            self.workerIds.set(i, wid)
+        }
+        return "ok"
+    }
+
+    fn assignTask(self, taskInfo: string) -> string {
+        // Round-robin dispatch — send is fire-and-forget, returns immediately
+        imut idx = self.nextIdx % self.count
+        self.nextIdx = (self.nextIdx + 1) % self.count
+        imut wid = self.workerIds.getStr(idx)
+        imut w = self.workers.get(wid)
+        send w.execute(taskInfo)
+        return wid
+    }
+
+    fn workerDone(self, workerId: string) -> string {
+        self.active -= 1
+        return "ok"
+    }
+
+    fn getActive(self) -> int {
+        return self.active
+    }
+
+    fn getCount(self) -> int {
+        return self.count
+    }
+}
+
+// === Scheduler Actor ===
+// Periodic loop: pull pending tasks, assign to workers.
+
+actor Scheduler {
+    store: TaskStore,
+    pool: WorkerPool,
+    running: bool
+}
+
+impl Scheduler {
+    fn new(store: TaskStore, pool: WorkerPool) -> Scheduler {
+        Scheduler { store: store, pool: pool, running: true }
+    }
+
+    fn run(self) {
+        while self.running {
+            self.tick()
+            Thread.sleep(200)
+        }
+    }
+
+    fn tick(self) -> string {
+        for i in range(0, 3) {
+            imut taskInfo = self.store.claimPending("scheduler")
+            if len(taskInfo) == 0 { break }
+            imut assigned = self.pool.assignTask(taskInfo)
+        }
+        return "ok"
+    }
+
+    fn stop(self) -> string {
+        self.running = false
+        return "stopped"
+    }
+}
+
+// === API Handler Actor ===
+// HTTP server: one actor per request.
+
+actor ApiHandler {
+    store: TaskStore,
+    pool: WorkerPool,
+    connStr: string,
+    socket: object,
+    reqId: int
+}
+
+impl ApiHandler {
+    fn new(store: TaskStore, pool: WorkerPool, connStr: string, socket: object, reqId: int) -> ApiHandler {
+        ApiHandler { store: store, pool: pool, connStr: connStr, socket: socket, reqId: reqId }
+    }
+
+    fn run(self) {
+        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
+        imut requestLine = reader.readLine()
+        if requestLine == null {
+            self.socket.close()
+            return
+        }
+
+        imut method = http.parseMethod(requestLine)
+        imut path = http.parsePath(requestLine)
+        imut cl = http.readHeaders(reader)
+        mut body = ""
+        if cl > 0 { body = http.readBody(reader, cl) }
+
+        imut resp = match method {
+            "GET" => self.handleGet(path),
+            "POST" => self.handlePost(path, body),
+            "DELETE" => self.handleDelete(path),
+            _ => http.badRequest("\{\"error\":\"unsupported method\"\}")
+        }
+
+        mut out = self.socket.getOutputStream()
+        out.write(resp.getBytes())
+        out.flush()
+        self.socket.close()
+        println("[{self.reqId}] {method} {path}")
+    }
+
+    fn handleGet(self, path: string) -> string {
+        // Reads go directly to SQLite — don't block the TaskStore actor
+        if path == "/tasks" {
+            return http.ok(db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks ORDER BY id"))
+        }
+        if path == "/dead-letter" {
+            return http.ok(db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'dead' ORDER BY id"))
+        }
+        if path == "/stats" {
+            imut taskStats = self.store.getStats()
+            imut active = self.pool.getActive()
+            imut workerCount = self.pool.getCount()
+            return http.ok("\{\"tasks\":{taskStats},\"workers\":\{\"total\":{workerCount},\"active\":{active}\}\}")
+        }
+        if startsWith(path, "/tasks/") {
+            imut id = parseInt(http.pathSegment(path, 2))
+            imut task = db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE id = " + id)
+            if task == "[]" { return http.notFound("\{\"error\":\"not found\"\}") }
+            return http.ok(task)
+        }
+        return http.notFound("\{\"error\":\"not found\"\}")
+    }
+
+    fn handlePost(self, path: string, body: string) -> string {
+        if path != "/tasks" { return http.notFound("\{\"error\":\"not found\"\}") }
+        imut name = http.parseField(body, "name")
+        if len(name) == 0 { return http.badRequest("\{\"error\":\"name required\"\}") }
+        imut payload = http.parseField(body, "payload")
+        imut maxRetriesStr = http.parseField(body, "max_retries")
+        imut delayStr = http.parseField(body, "delay_seconds")
+        imut depStr = http.parseField(body, "depends_on")
+        mut maxRetries = 3
+        if len(maxRetriesStr) > 0 { maxRetries = parseInt(maxRetriesStr) }
+        mut delay = 0
+        if len(delayStr) > 0 { delay = parseInt(delayStr) }
+        mut dep = 0
+        if len(depStr) > 0 { dep = parseInt(depStr) }
+        imut id = self.store.createTask(name, payload, maxRetries, delay, dep)
+        return http.created("\{\"id\":{id},\"status\":\"pending\"\}")
+    }
+
+    fn handleDelete(self, path: string) -> string {
+        if !startsWith(path, "/tasks/") { return http.notFound("\{\"error\":\"not found\"\}") }
+        imut id = parseInt(http.pathSegment(path, 2))
+        if self.store.cancelTask(id) {
+            return http.ok("\{\"id\":{id},\"status\":\"cancelled\"\}")
+        }
+        return http.badRequest("\{\"error\":\"cannot cancel (not pending)\"\}")
+    }
+}
+
+// === Main ===
+
+imut PORT = 6100
+imut CONN = "jdbc:sqlite:orchestrator.db"
+
+db.initSchema(CONN)
+println("DB initialized")
+
+mut store = spawn TaskStore.new(CONN)
+mut pool = spawn WorkerPool.new(store, 3)
+pool.init()
+println("Worker pool: 3 workers")
+
+mut scheduler = spawn Scheduler.new(store, pool)
+println("Scheduler started")
+
+mut server = ServerSocket.new(PORT)
+mut reqCount = 0
+
+println("=== Siyo Task Orchestrator === http://localhost:{PORT}")
+println("  POST /tasks   - submit task")
+println("  GET  /tasks   - list all")
+println("  GET  /tasks/N - get by id")
+println("  DEL  /tasks/N - cancel")
+println("  GET  /dead-letter")
+println("  GET  /stats")
+println("")
+
+while true {
+    mut socket = server.accept()
+    reqCount += 1
+    spawn ApiHandler.new(store, pool, CONN, socket, reqCount)
+}

@@ -1,0 +1,171 @@
+// Todo REST API — Actor-backed concurrent HTTP server
+// GET /todos, POST /todos, GET /todos/:id, DELETE /todos/:id, PATCH /todos/:id
+import java "java.net.ServerSocket"
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import "json"
+import "http"
+
+// === TodoStore Actor — owns all state, thread-safe via mailbox ===
+
+actor TodoStore {
+    todos: map,
+    nextId: int
+}
+
+impl TodoStore {
+    fn new() -> TodoStore {
+        TodoStore { todos: map(), nextId: 1 }
+    }
+
+    fn list(self) -> string {
+        imut keys = self.todos.keys()
+        mut arr = "["
+        for i in range(0, len(keys)) {
+            if i > 0 { arr = arr + "," }
+            arr = arr + toString(self.todos.get(keys[i]))
+        }
+        return arr + "]"
+    }
+
+    fn get(self, id: int) -> string {
+        if self.todos.has(id) { return toString(self.todos.get(id)) }
+        return ""
+    }
+
+    fn create(self, title: string) -> string {
+        imut id = self.nextId
+        self.nextId = id + 1
+        imut todo = json.obj("id", json.num(id), "title", json.str(title), "done", json.bool(false))
+        self.todos.set(id, todo)
+        return todo
+    }
+
+    fn delete(self, id: int) -> bool {
+        if !self.todos.has(id) { return false }
+        self.todos.remove(id)
+        return true
+    }
+
+    fn toggle(self, id: int, done: bool) -> string {
+        if !self.todos.has(id) { return "" }
+        imut title = json.parseField(toString(self.todos.get(id)), "title")
+        imut todo = json.obj("id", json.num(id), "title", json.str(title), "done", json.bool(done))
+        self.todos.set(id, todo)
+        return todo
+    }
+}
+
+// === Handler Actor — one per connection ===
+
+actor Handler {
+    store: TodoStore,
+    socket: object,
+    reqId: int
+}
+
+impl Handler {
+    fn new(store: TodoStore, socket: object, reqId: int) -> Handler {
+        Handler { store: store, socket: socket, reqId: reqId }
+    }
+
+    fn run(self) {
+        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
+        imut requestLine = reader.readLine()
+        if requestLine == null {
+            self.socket.close()
+            return
+        }
+
+        imut method = http.parseMethod(requestLine)
+        imut path = http.parsePath(requestLine)
+        imut basePath = http.getBasePath(path)
+
+        // Read headers
+        mut contentLength = 0
+        mut header = reader.readLine()
+        while header != null {
+            if len(header) == 0 { header = null }
+            else {
+                imut cl = http.parseContentLength(header)
+                if cl >= 0 { contentLength = cl }
+                header = reader.readLine()
+            }
+        }
+
+        // Read body
+        mut body = ""
+        if contentLength > 0 { body = http.readBody(reader, contentLength) }
+
+        // Route
+        imut response = match method {
+            "GET" => self.handleGet(basePath, path),
+            "POST" => self.handlePost(basePath, body),
+            "PATCH" => self.handlePatch(basePath, body),
+            "DELETE" => self.handleDelete(basePath),
+            _ => http.badRequest(json.err("unsupported method"))
+        }
+
+        // Send
+        mut out = self.socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        self.socket.close()
+        println("[" + self.reqId + "] " + method + " " + basePath + " → " + len(response) + "B")
+    }
+
+    fn handleGet(self, basePath: string, path: string) -> string {
+        if basePath == "/todos" { return http.ok(self.store.list()) }
+        if !startsWith(basePath, "/todos/") { return http.notFound(json.err("not found")) }
+        imut id = parseInt(http.pathSegment(path, 2))
+        imut todo = self.store.get(id)
+        if len(todo) > 0 { return http.ok(todo) }
+        return http.notFound(json.err("todo not found"))
+    }
+
+    fn handlePost(self, basePath: string, body: string) -> string {
+        if basePath != "/todos" { return http.notFound(json.err("not found")) }
+        imut title = json.parseField(body, "title")
+        if len(title) == 0 { return http.badRequest(json.err("title required")) }
+        return http.created(self.store.create(title))
+    }
+
+    fn handlePatch(self, basePath: string, body: string) -> string {
+        if !startsWith(basePath, "/todos/") { return http.notFound(json.err("not found")) }
+        imut id = parseInt(http.pathSegment(basePath, 2))
+        imut done = json.parseField(body, "done") == "true"
+        imut todo = self.store.toggle(id, done)
+        if len(todo) > 0 { return http.ok(todo) }
+        return http.notFound(json.err("todo not found"))
+    }
+
+    fn handleDelete(self, basePath: string) -> string {
+        if !startsWith(basePath, "/todos/") { return http.notFound(json.err("not found")) }
+        imut id = parseInt(http.pathSegment(basePath, 2))
+        if self.store.delete(id) {
+            return http.ok(json.obj("deleted", json.num(id), "ok", json.bool(true)))
+        }
+        return http.notFound(json.err("todo not found"))
+    }
+}
+
+// === Main ===
+
+imut PORT = 8080
+mut store = spawn TodoStore.new()
+mut server = ServerSocket.new(PORT)
+mut reqCount = 0
+
+println("=== Todo REST API === http://localhost:" + PORT)
+println("  curl localhost:" + PORT + "/todos")
+println("  curl -X POST -d '{\"title\":\"Buy milk\"}' localhost:" + PORT + "/todos")
+println("  curl -X PATCH -d '{\"done\":true}' localhost:" + PORT + "/todos/1")
+println("  curl -X DELETE localhost:" + PORT + "/todos/1")
+println("")
+
+while true {
+    mut socket = server.accept()
+    reqCount += 1
+    spawn Handler.new(store, socket, reqCount)
+}

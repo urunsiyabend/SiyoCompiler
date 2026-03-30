@@ -1,0 +1,37 @@
+// Shared HTTP helpers
+
+fn parseMethod(line: string) -> string {
+    mut m = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { return m }
+        m = m + line[i]
+    }
+    return m
+}
+
+fn parsePath(line: string) -> string {
+    mut spaces = 0
+    mut p = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { spaces += 1 }
+        else if spaces == 1 { p = p + line[i] }
+    }
+    return p
+}
+
+fn response(status: int, statusText: string, body: string) -> string {
+    return "HTTP/1.1 {status} {statusText}\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n{body}"
+}
+
+fn ok(body: string) -> string { return http.response(200, "OK", body) }
+fn unauthorized(body: string) -> string { return http.response(401, "Unauthorized", body) }
+fn tooMany(body: string) -> string { return http.response(429, "Too Many Requests", body) }
+fn notFound(body: string) -> string { return http.response(404, "Not Found", body) }
+fn badGateway(body: string) -> string { return http.response(502, "Bad Gateway", body) }
+
+fn headerValue(header: string, name: string) -> string {
+    if !startsWith(header, name) { return "" }
+    imut colonIdx = indexOf(header, ":")
+    if colonIdx < 0 { return "" }
+    return trim(substring(header, colonIdx + 1, len(header)))
+}

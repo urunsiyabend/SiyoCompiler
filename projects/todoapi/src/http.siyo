@@ -1,0 +1,66 @@
+// HTTP helper module — parse requests, build responses
+
+fn parseMethod(line: string) -> string {
+    mut m = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { return m }
+        m = m + line[i]
+    }
+    return m
+}
+
+fn parsePath(line: string) -> string {
+    mut spaces = 0
+    mut p = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { spaces += 1 }
+        else if spaces == 1 { p = p + line[i] }
+    }
+    return p
+}
+
+fn getBasePath(path: string) -> string {
+    mut b = ""
+    for i in range(0, len(path)) {
+        if path[i] == "?" { return b }
+        b = b + path[i]
+    }
+    return b
+}
+
+fn pathSegment(path: string, index: int) -> string {
+    imut parts = split(http.getBasePath(path), "/")
+    if index < len(parts) { return toString(parts[index]) }
+    return ""
+}
+
+fn response(status: int, statusText: string, body: string) -> string {
+    return "HTTP/1.1 {status} {statusText}\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{body}"
+}
+
+fn ok(body: string) -> string { return http.response(200, "OK", body) }
+fn created(body: string) -> string { return http.response(201, "Created", body) }
+fn notFound(body: string) -> string { return http.response(404, "Not Found", body) }
+fn badRequest(body: string) -> string { return http.response(400, "Bad Request", body) }
+
+fn readBody(reader: object, contentLength: int) -> string {
+    mut body = ""
+    for i in range(0, contentLength) {
+        body = body + chr(reader.read())
+    }
+    return body
+}
+
+fn parseContentLength(header: string) -> int {
+    if !contains(header, "Content-Length") { return 0 - 1 }
+    mut val = ""
+    mut afterColon = false
+    for i in range(0, len(header)) {
+        if afterColon {
+            if header[i] != " " { val = val + header[i] }
+        }
+        if header[i] == ":" { afterColon = true }
+    }
+    if len(val) == 0 { return 0 }
+    return parseInt(val)
+}

@@ -1,0 +1,30 @@
+// HTTP helpers for the load balancer
+
+fn parseRequestLine(line: string) -> string { return line }
+
+fn parseMethod(line: string) -> string {
+    mut m = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { return m }
+        m = m + line[i]
+    }
+    return m
+}
+
+fn parsePath(line: string) -> string {
+    mut spaces = 0
+    mut p = ""
+    for i in range(0, len(line)) {
+        if line[i] == " " { spaces += 1 }
+        else if spaces == 1 { p = p + line[i] }
+    }
+    return p
+}
+
+fn response(status: int, statusText: string, body: string) -> string {
+    return "HTTP/1.1 {status} {statusText}\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n{body}"
+}
+
+fn ok(body: string) -> string { return http.response(200, "OK", body) }
+fn badGateway(body: string) -> string { return http.response(502, "Bad Gateway", body) }
+fn notFound(body: string) -> string { return http.response(404, "Not Found", body) }

@@ -1,0 +1,315 @@
+// Siyo Load Balancer — reverse proxy with round-robin, health checks, stats
+// Architecture: 4 actors cooperating via message passing
+//   LoadBalancer — tracks healthy backends, round-robin selection
+//   HealthChecker — periodic ping loop, updates LoadBalancer
+//   Stats — tracks requests, errors, latency
+//   Handler — per-request, forwards to backend, relays response
+import java "java.net.ServerSocket"
+import java "java.net.Socket"
+import java "java.net.InetSocketAddress"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+import java "java.lang.System"
+import "http"
+import "backend"
+
+// === Stats Actor ===
+
+actor Stats {
+    totalReqs: int,
+    errors: int,
+    totalLatency: int
+}
+
+impl Stats {
+    fn new() -> Stats {
+        Stats { totalReqs: 0, errors: 0, totalLatency: 0 }
+    }
+
+    fn recordSuccess(self, latencyMs: int) -> string {
+        self.totalReqs += 1
+        self.totalLatency += latencyMs
+        return "ok"
+    }
+
+    fn recordError(self) -> string {
+        self.totalReqs += 1
+        self.errors += 1
+        return "ok"
+    }
+
+    fn getStats(self) -> string {
+        mut avgLatency = 0
+        imut successful = self.totalReqs - self.errors
+        if successful > 0 { avgLatency = self.totalLatency / successful }
+        return "\{\"total\":{self.totalReqs},\"errors\":{self.errors},\"avg_latency_ms\":{avgLatency}\}"
+    }
+}
+
+// === LoadBalancer Actor ===
+
+actor LoadBalancer {
+    hosts: map,
+    healthy: map,
+    count: int,
+    nextIdx: int
+}
+
+impl LoadBalancer {
+    fn new() -> LoadBalancer {
+        LoadBalancer { hosts: map(), healthy: map(), count: 0, nextIdx: 0 }
+    }
+
+    fn addBackend(self, id: int, host: string, port: int) -> string {
+        imut key = "" + id
+        self.hosts.set(key, host + ":" + port)
+        self.healthy.set(key, true)
+        self.count += 1
+        return "added"
+    }
+
+    fn markHealthy(self, id: int, isHealthy: bool) -> string {
+        self.healthy.set("" + id, isHealthy)
+        return "ok"
+    }
+
+    // Round-robin: pick next healthy backend, return "host:port" or "" if none
+    fn nextBackend(self) -> string {
+        mut attempts = 0
+        while attempts < self.count {
+            imut idx = self.nextIdx
+            self.nextIdx = (self.nextIdx + 1) % self.count
+            imut key = "" + idx
+            if self.hosts.has(key) {
+                imut h = self.healthy.get(key)
+                if h == true {
+                    return toString(self.hosts.get(key))
+                }
+            }
+            attempts += 1
+        }
+        return ""
+    }
+
+    fn getBackendCount(self) -> int {
+        return self.count
+    }
+
+    fn getStatus(self) -> string {
+        mut result = "["
+        for i in range(0, self.count) {
+            if i > 0 { result = result + "," }
+            imut key = "" + i
+            imut addr = toString(self.hosts.get(key))
+            imut up = self.healthy.get(key) == true
+            if up { result = result + "\{\"addr\":\"{addr}\",\"healthy\":true\}" }
+            else { result = result + "\{\"addr\":\"{addr}\",\"healthy\":false\}" }
+        }
+        return result + "]"
+    }
+}
+
+// === HealthChecker Actor ===
+
+actor HealthChecker {
+    lb: LoadBalancer,
+    intervalMs: int,
+    backendCount: int
+}
+
+impl HealthChecker {
+    fn new(lb: LoadBalancer, intervalMs: int, backendCount: int) -> HealthChecker {
+        HealthChecker { lb: lb, intervalMs: intervalMs, backendCount: backendCount }
+    }
+
+    fn run(self) {
+        // PAIN POINT: No sleep builtin — must import Thread and call Thread.sleep()
+        // PAIN POINT: No timer/interval primitive — must manually loop with sleep
+        while true {
+            Thread.sleep(self.intervalMs)
+            for i in range(0, self.backendCount) {
+                self.pingBackend(i)
+            }
+        }
+    }
+
+    fn pingBackend(self, id: int) {
+        imut port = 9001 + id
+        imut resp = try { httpGet("http://localhost:{port}/health") } catch e { "" }
+        self.lb.markHealthy(id, len(resp) > 0)
+    }
+}
+
+// === Handler Actor — one per request ===
+
+actor Handler {
+    lb: LoadBalancer,
+    stats: Stats,
+    socket: object,
+    reqId: int
+}
+
+impl Handler {
+    fn new(lb: LoadBalancer, stats: Stats, socket: object, reqId: int) -> Handler {
+        Handler { lb: lb, stats: stats, socket: socket, reqId: reqId }
+    }
+
+    fn run(self) {
+        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
+        imut requestLine = reader.readLine()
+        if requestLine == null {
+            self.socket.close()
+            return
+        }
+
+        imut method = http.parseMethod(requestLine)
+        imut path = http.parsePath(requestLine)
+
+        // Drain client headers
+        mut contentLength = 0
+        mut h = reader.readLine()
+        while h != null {
+            if len(h) == 0 { h = null }
+            else {
+                if contains(h, "Content-Length") {
+                    // PAIN POINT: No easy header parser — reimplement every time
+                    mut val = ""
+                    mut afterColon = false
+                    for ci in range(0, len(h)) {
+                        if afterColon {
+                            if h[ci] != " " { val = val + h[ci] }
+                        }
+                        if h[ci] == ":" { afterColon = true }
+                    }
+                    if len(val) > 0 { contentLength = parseInt(val) }
+                }
+                h = reader.readLine()
+            }
+        }
+
+        // Read client body
+        mut clientBody = ""
+        if contentLength > 0 {
+            for bi in range(0, contentLength) {
+                clientBody = clientBody + chr(reader.read())
+            }
+        }
+
+        // Stats/health endpoint
+        if path == "/_stats" {
+            imut statsJson = self.stats.getStats()
+            self.sendResponse(http.ok(statsJson))
+            println("[{self.reqId}] {method} {path} -> stats")
+            return
+        }
+        if path == "/_backends" {
+            imut status = self.lb.getStatus()
+            self.sendResponse(http.ok(status))
+            println("[{self.reqId}] {method} {path} -> backends")
+            return
+        }
+
+        // Pick backend
+        imut backendAddr = self.lb.nextBackend()
+        if len(backendAddr) == 0 {
+            self.stats.recordError()
+            self.sendResponse(http.badGateway("\{\"error\":\"no healthy backends\"\}"))
+            println("[{self.reqId}] {method} {path} -> 502 no backends")
+            return
+        }
+
+        // Parse host:port
+        // PAIN POINT: indexOf returns int but we need string splitting
+        imut colonIdx = indexOf(backendAddr, ":")
+        imut backendHost = substring(backendAddr, 0, colonIdx)
+        imut backendPort = parseInt(substring(backendAddr, colonIdx + 1, len(backendAddr)))
+
+        // Forward request to backend
+        imut t0 = System.currentTimeMillis()
+        imut backendResponse = try {
+            self.forwardToBackend(backendHost, backendPort, method, path, contentLength, clientBody)
+        } catch e { "" }
+        imut latency = System.currentTimeMillis() - t0
+
+        if len(backendResponse) > 0 {
+            self.stats.recordSuccess(parseInt(toString(latency)))
+            mut out = self.socket.getOutputStream()
+            out.write(backendResponse.getBytes())
+            out.flush()
+            println("[{self.reqId}] {method} {path} -> {backendAddr} ({latency}ms)")
+        } else {
+            self.stats.recordError()
+            self.sendResponse(http.badGateway("\{\"error\":\"backend unreachable\"\}"))
+            println("[{self.reqId}] {method} {path} -> 502 ({backendAddr} failed)")
+        }
+        self.socket.close()
+    }
+
+    fn forwardToBackend(self, host: string, port: int, method: string, path: string, contentLength: int, body: string) -> string {
+        mut bs = Socket.new()
+        bs.connect(InetSocketAddress.new(host, port), 2000)
+        mut bw = PrintWriter.new(bs.getOutputStream(), true)
+        bw.println("{method} {path} HTTP/1.1")
+        bw.println("Host: {host}:{port}")
+        bw.println("Connection: close")
+        if contentLength > 0 { bw.println("Content-Length: {contentLength}") }
+        bw.println("")
+        if contentLength > 0 { bw.print(body) }
+        bw.flush()
+        mut response = ""
+        mut br = BufferedReader.new(InputStreamReader.new(bs.getInputStream()))
+        mut bline = br.readLine()
+        while bline != null {
+            response = response + bline + "\r\n"
+            bline = br.readLine()
+        }
+        bs.close()
+        return response
+    }
+
+    fn sendResponse(self, response: string) {
+        mut out = self.socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        self.socket.close()
+    }
+}
+
+// === Main ===
+
+imut LB_PORT = 3000
+
+// Start 3 echo backends
+spawn Backend.new(9001, "backend-1")
+spawn Backend.new(9002, "backend-2")
+spawn Backend.new(9003, "backend-3")
+Thread.sleep(300)
+
+// Create actors
+mut stats = spawn Stats.new()
+mut lb = spawn LoadBalancer.new()
+lb.addBackend(0, "localhost", 9001)
+lb.addBackend(1, "localhost", 9002)
+lb.addBackend(2, "localhost", 9003)
+
+// Start health checker (every 3 seconds)
+spawn HealthChecker.new(lb, 3000, 3)
+
+// Accept loop
+mut server = ServerSocket.new(LB_PORT)
+mut reqCount = 0
+
+println("=== Siyo Load Balancer === http://localhost:" + LB_PORT)
+println("  backends: :9001, :9002, :9003")
+println("  curl localhost:" + LB_PORT + "/hello")
+println("  curl localhost:" + LB_PORT + "/_stats")
+println("  curl localhost:" + LB_PORT + "/_backends")
+println("")
+
+while true {
+    mut socket = server.accept()
+    reqCount += 1
+    spawn Handler.new(lb, stats, socket, reqCount)
+}

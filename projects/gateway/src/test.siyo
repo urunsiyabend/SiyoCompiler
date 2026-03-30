@@ -1,0 +1,119 @@
+// API Gateway Test Suite
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+
+mut passed = 0
+mut failed = 0
+
+fn check(label: string, actual: string, expected: string) {
+    if contains(actual, expected) {
+        println("  PASS {label}")
+        passed += 1
+    } else {
+        println("  FAIL {label}: expected [{expected}] got [{actual}]")
+        failed += 1
+    }
+}
+
+fn req(method: string, path: string, token: string) -> string {
+    mut s = Socket.new("localhost", 5000)
+    mut w = PrintWriter.new(s.getOutputStream(), true)
+    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
+    w.println("{method} {path} HTTP/1.1")
+    w.println("Host: localhost:5000")
+    if len(token) > 0 {
+        w.println("Authorization: Bearer {token}")
+    }
+    w.println("Connection: close")
+    w.println("")
+    w.flush()
+    mut resp = ""
+    mut line = r.readLine()
+    while line != null {
+        resp = resp + line + "\n"
+        line = r.readLine()
+    }
+    s.close()
+    return resp
+}
+
+println("=== API Gateway Test Suite ===")
+println("")
+Thread.sleep(500)
+
+// === 1. Auth ===
+println("[1] Authentication")
+
+imut r1 = req("GET", "/api/users", "")
+check("no token → 401", r1, "401")
+check("missing token msg", r1, "missing token")
+
+imut r2 = req("GET", "/api/users", "bad-token")
+check("bad token → 401", r2, "401")
+check("invalid token msg", r2, "invalid token")
+
+imut r3 = req("GET", "/api/users", "tok-alice")
+check("valid token → 200", r3, "200 OK")
+check("reaches user-service", r3, "user-service")
+
+// === 2. Routing ===
+println("")
+println("[2] Routing")
+
+imut r4 = req("GET", "/api/users/123", "tok-alice")
+check("/api/users → user-service", r4, "user-service")
+check("path preserved", r4, "/api/users/123")
+
+imut r5 = req("GET", "/api/orders", "tok-bob")
+check("/api/orders → order-service", r5, "order-service")
+
+imut r6 = req("GET", "/unknown", "tok-alice")
+check("no route → 404", r6, "404")
+
+// === 3. Rate Limiting ===
+println("")
+println("[3] Rate Limiting (5 req / window)")
+
+// Use admin token — fresh user, no prior requests
+// Make 5 requests (should all pass)
+mut allOk = true
+for i in range(0, 5) {
+    imut r = req("GET", "/api/users", "tok-admin")
+    if !contains(r, "200") { allOk = false }
+}
+check("5 requests pass", toString(allOk), "true")
+
+// 6th request should be rate limited
+imut r7 = req("GET", "/api/users", "tok-admin")
+check("6th → 429", r7, "429")
+check("has limit info", r7, "\"limit\":")
+
+// Different user should NOT be limited
+imut r8 = req("GET", "/api/users", "tok-bob")
+check("bob not limited", r8, "200")
+
+// === 4. Stats ===
+println("")
+println("[4] Stats Endpoint")
+
+imut r9 = req("GET", "/_stats", "")
+check("stats → 200", r9, "200")
+check("has total", r9, "\"total\":")
+check("has auth_failures", r9, "\"auth_failures\":")
+check("has rate_limited", r9, "\"rate_limited\":")
+check("has proxied", r9, "\"proxied\":")
+
+// === 5. Multi-user isolation ===
+println("")
+println("[5] User Isolation")
+
+// alice's requests don't affect bob's rate limit
+imut r10 = req("GET", "/api/orders", "tok-bob")
+check("bob still works", r10, "order-service")
+
+println("")
+println("Results: {passed} passed, {failed} failed")
+if failed == 0 { println("ALL TESTS PASSED") }

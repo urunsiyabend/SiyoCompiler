@@ -1,0 +1,41 @@
+// Echo backend — returns JSON with its identity and the request info
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import "http"
+
+actor Backend {
+    port: int,
+    name: string
+}
+
+impl Backend {
+    fn new(port: int, name: string) -> Backend {
+        Backend { port: port, name: name }
+    }
+
+    fn run(self) {
+        mut server = ServerSocket.new(self.port)
+        println("  backend {self.name} on :{self.port}")
+        while true {
+            mut socket = server.accept()
+            mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+            imut requestLine = reader.readLine()
+            if requestLine != null {
+                imut method = http.parseMethod(requestLine)
+                imut path = http.parsePath(requestLine)
+                mut h = reader.readLine()
+                while h != null {
+                    if len(h) == 0 { h = null }
+                    else { h = reader.readLine() }
+                }
+                imut body = "\{\"service\":\"{self.name}\",\"method\":\"{method}\",\"path\":\"{path}\"\}"
+                mut out = socket.getOutputStream()
+                out.write(http.ok(body).getBytes())
+                out.flush()
+            }
+            socket.close()
+        }
+    }
+}

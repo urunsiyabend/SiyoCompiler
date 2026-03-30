@@ -1,0 +1,145 @@
+// Task Orchestrator — comprehensive test suite
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+
+mut passed = 0
+mut failed = 0
+
+fn check(label: string, actual: string, expected: string) {
+    if contains(actual, expected) {
+        println("  PASS {label}")
+        passed += 1
+    } else {
+        println("  FAIL {label}: expected [{expected}] got [{actual}]")
+        failed += 1
+    }
+}
+
+fn req(method: string, path: string, body: string) -> string {
+    mut s = Socket.new("localhost", 6100)
+    mut w = PrintWriter.new(s.getOutputStream(), true)
+    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
+    w.println("{method} {path} HTTP/1.1")
+    w.println("Host: localhost:6100")
+    if len(body) > 0 {
+        w.println("Content-Length: {len(body)}")
+        w.println("Content-Type: application/json")
+    }
+    w.println("Connection: close")
+    w.println("")
+    if len(body) > 0 { w.print(body) }
+    w.flush()
+    mut resp = ""
+    mut line = r.readLine()
+    while line != null {
+        resp = resp + toString(line) + "\n"
+        line = r.readLine()
+    }
+    s.close()
+    return resp
+}
+
+fn waitFor(id: int, expected: string, maxMs: int) -> string {
+    mut waited = 0
+    while waited < maxMs {
+        imut r = req("GET", "/tasks/{id}", "")
+        if contains(r, expected) { return r }
+        Thread.sleep(300)
+        waited += 300
+    }
+    return req("GET", "/tasks/{id}", "")
+}
+
+println("=== Task Orchestrator Test ===")
+println("")
+Thread.sleep(500)
+
+// 1. Create & complete
+println("[1] Submit & Complete")
+imut r1 = req("POST", "/tasks", "\{\"name\":\"email\",\"payload\":\"alice@test.com\"\}")
+check("create 201", r1, "201")
+check("has id", r1, "\"id\":")
+imut r1b = waitFor(1, "completed", 8000)
+check("completed", r1b, "\"status\":\"completed\"")
+check("result", r1b, "done:alice@test.com")
+
+// 2. Multiple
+println("")
+println("[2] Multiple Tasks")
+req("POST", "/tasks", "\{\"name\":\"a\",\"payload\":\"1\"\}")
+req("POST", "/tasks", "\{\"name\":\"b\",\"payload\":\"2\"\}")
+Thread.sleep(3000)
+imut r2 = req("GET", "/tasks", "")
+check("has a", r2, "\"name\":\"a\"")
+check("has b", r2, "\"name\":\"b\"")
+
+// 3. Retry → dead
+println("")
+println("[3] Retry → Dead Letter")
+imut r3 = req("POST", "/tasks", "\{\"name\":\"fail-job\",\"payload\":\"doomed\",\"max_retries\":2\}")
+check("fail created", r3, "201")
+imut r3b = waitFor(4, "dead", 15000)
+check("dead", r3b, "\"status\":\"dead\"")
+imut r3c = req("GET", "/dead-letter", "")
+check("in dead letter", r3c, "fail-job")
+
+// 4. Delayed
+println("")
+println("[4] Delayed Execution")
+imut r4 = req("POST", "/tasks", "\{\"name\":\"delayed\",\"payload\":\"later\",\"delay_seconds\":2\}")
+check("delayed created", r4, "201")
+Thread.sleep(500)
+imut r4b = req("GET", "/tasks/5", "")
+check("still pending", r4b, "\"status\":\"pending\"")
+imut r4c = waitFor(5, "completed", 8000)
+check("completed after delay", r4c, "\"status\":\"completed\"")
+
+// 5. Dependencies
+println("")
+println("[5] Dependencies")
+imut r5a = req("POST", "/tasks", "\{\"name\":\"parent\",\"payload\":\"p\"\}")
+check("parent created", r5a, "201")
+imut r5b = req("POST", "/tasks", "\{\"name\":\"child\",\"payload\":\"c\",\"depends_on\":6\}")
+check("child created", r5b, "201")
+imut r5c = req("GET", "/tasks/7", "")
+// Child might be pending (dep not done) or already running (scheduler fast)
+imut childNotDone = !contains(r5c, "\"status\":\"completed\"")
+if childNotDone { println("  PASS child not yet done") }
+else { println("  FAIL child completed too early") }
+if childNotDone { passed += 1 } else { failed += 1 }
+imut r5d = waitFor(6, "completed", 8000)
+check("parent done", r5d, "completed")
+imut r5e = waitFor(7, "completed", 8000)
+check("child done", r5e, "completed")
+
+// 6. Cancel
+println("")
+println("[6] Cancel")
+imut r6a = req("POST", "/tasks", "\{\"name\":\"cancel-me\",\"payload\":\"x\",\"delay_seconds\":30\}")
+check("created", r6a, "201")
+imut r6b = req("DELETE", "/tasks/8", "")
+check("cancelled", r6b, "\"status\":\"cancelled\"")
+imut r6c = req("DELETE", "/tasks/8", "")
+check("double cancel fails", r6c, "cannot cancel")
+
+// 7. Stats
+println("")
+println("[7] Stats")
+imut r7 = req("GET", "/stats", "")
+check("stats 200", r7, "200")
+check("has total", r7, "\"total\":")
+check("has completed", r7, "\"completed\":")
+check("has workers", r7, "\"workers\":")
+
+// 8. Validation
+println("")
+println("[8] Validation")
+check("no name", req("POST", "/tasks", "\{\}"), "name required")
+check("not found", req("GET", "/tasks/999", ""), "404")
+
+println("")
+println("Results: {passed} passed, {failed} failed")
+if failed == 0 { println("ALL TESTS PASSED") }

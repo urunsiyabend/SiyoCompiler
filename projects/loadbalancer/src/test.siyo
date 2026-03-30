@@ -1,0 +1,104 @@
+// Load Balancer automated test
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+
+mut passed = 0
+mut failed = 0
+
+fn check(label: string, actual: string, expected: string) {
+    if contains(actual, expected) {
+        println("  PASS {label}")
+        passed += 1
+    } else {
+        println("  FAIL {label}: expected [{expected}] got [{actual}]")
+        failed += 1
+    }
+}
+
+fn httpGet(port: int, path: string) -> string {
+    mut s = Socket.new("localhost", port)
+    mut w = PrintWriter.new(s.getOutputStream(), true)
+    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
+    w.println("GET {path} HTTP/1.1")
+    w.println("Host: localhost:{port}")
+    w.println("Connection: close")
+    w.println("")
+    w.flush()
+    mut response = ""
+    mut line = r.readLine()
+    while line != null {
+        response = response + line + "\n"
+        line = r.readLine()
+    }
+    s.close()
+    return response
+}
+
+println("=== Load Balancer Test Suite ===")
+println("")
+Thread.sleep(1000)
+
+// 1. Basic proxying — request reaches a backend
+println("[1] Basic Proxying")
+imut r1 = httpGet(3000, "/hello")
+check("proxied", r1, "200 OK")
+check("has backend", r1, "backend")
+check("has path", r1, "/hello")
+
+// 2. Round-robin — 3 requests should hit different backends
+println("")
+println("[2] Round-Robin Distribution")
+mut backends = ""
+for i in range(0, 6) {
+    imut r = httpGet(3000, "/test")
+    // Extract backend name from response body
+    if contains(r, "backend-1") { backends = backends + "1" }
+    else if contains(r, "backend-2") { backends = backends + "2" }
+    else if contains(r, "backend-3") { backends = backends + "3" }
+    else { backends = backends + "?" }
+}
+println("  distribution: {backends}")
+check("hits b1", backends, "1")
+check("hits b2", backends, "2")
+check("hits b3", backends, "3")
+
+// 3. Stats endpoint
+println("")
+println("[3] Stats Endpoint")
+imut r3 = httpGet(3000, "/_stats")
+check("stats 200", r3, "200 OK")
+check("has total", r3, "\"total\":")
+check("has errors", r3, "\"errors\":")
+check("has latency", r3, "avg_latency_ms")
+
+// 4. Backends endpoint
+println("")
+println("[4] Backends Status")
+imut r4 = httpGet(3000, "/_backends")
+check("backends 200", r4, "200 OK")
+check("has addr", r4, "localhost")
+check("has healthy", r4, "\"healthy\":")
+
+// 5. Multiple paths work
+println("")
+println("[5] Different Paths")
+imut r5a = httpGet(3000, "/api/users")
+check("path /api/users", r5a, "/api/users")
+imut r5b = httpGet(3000, "/api/data")
+check("path /api/data", r5b, "/api/data")
+
+// 6. Stats accumulate
+println("")
+println("[6] Stats Accumulation")
+imut r6 = httpGet(3000, "/_stats")
+// We've made at least 10 requests by now
+check("requests counted", r6, "\"total\":")
+// Total should be > 0 — the exact number depends on prior requests
+check("latency tracked", r6, "avg_latency_ms")
+
+println("")
+println("Results: {passed} passed, {failed} failed")
+if failed == 0 { println("ALL TESTS PASSED") }

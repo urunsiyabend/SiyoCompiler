@@ -1,0 +1,93 @@
+// Todo API automated test
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.PrintWriter"
+import java "java.lang.Thread"
+
+mut passed = 0
+mut failed = 0
+
+fn check(label: string, actual: string, expected: string) {
+    if contains(actual, expected) {
+        println("  PASS {label}")
+        passed += 1
+    } else {
+        println("  FAIL {label}: expected [{expected}] got [{actual}]")
+        failed += 1
+    }
+}
+
+fn httpRequest(method: string, path: string, body: string) -> string {
+    mut s = Socket.new("localhost", 8080)
+    mut w = PrintWriter.new(s.getOutputStream(), true)
+    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
+    w.println("{method} {path} HTTP/1.1")
+    w.println("Host: localhost:8080")
+    if len(body) > 0 {
+        w.println("Content-Length: {len(body)}")
+        w.println("Content-Type: application/json")
+    }
+    w.println("")
+    if len(body) > 0 { w.print(body) }
+    w.flush()
+    mut response = ""
+    mut line = r.readLine()
+    while line != null {
+        response = response + line + "\n"
+        line = r.readLine()
+    }
+    s.close()
+    return response
+}
+
+println("=== Todo API Test Suite ===")
+println("")
+Thread.sleep(500)
+
+println("[1] GET /todos (empty)")
+check("empty list", httpRequest("GET", "/todos", ""), "[]")
+
+println("")
+println("[2] POST /todos")
+imut r2 = httpRequest("POST", "/todos", "\{\"title\":\"Buy milk\"\}")
+check("create 201", r2, "201 Created")
+check("has title", r2, "Buy milk")
+check("has id", r2, "\"id\":1")
+check("done false", r2, "\"done\":false")
+check("create 2nd", httpRequest("POST", "/todos", "\{\"title\":\"Walk dog\"\}"), "Walk dog")
+
+println("")
+println("[3] GET /todos")
+imut r4 = httpRequest("GET", "/todos", "")
+check("list milk", r4, "Buy milk")
+check("list dog", r4, "Walk dog")
+
+println("")
+println("[4] GET /todos/1")
+imut r5 = httpRequest("GET", "/todos/1", "")
+check("get one", r5, "Buy milk")
+check("get id", r5, "\"id\":1")
+check("404", httpRequest("GET", "/todos/999", ""), "404")
+
+println("")
+println("[5] PATCH /todos/1")
+imut r7 = httpRequest("PATCH", "/todos/1", "\{\"done\":true\}")
+check("toggle", r7, "\"done\":true")
+check("title kept", r7, "Buy milk")
+check("persisted", httpRequest("GET", "/todos/1", ""), "\"done\":true")
+
+println("")
+println("[6] DELETE /todos/2")
+check("delete ok", httpRequest("DELETE", "/todos/2", ""), "\"ok\":true")
+check("gone", httpRequest("GET", "/todos/2", ""), "404")
+check("1 left", httpRequest("GET", "/todos", ""), "Buy milk")
+
+println("")
+println("[7] Validation")
+check("no title", httpRequest("POST", "/todos", "\{\}"), "title required")
+check("del 404", httpRequest("DELETE", "/todos/999", ""), "404")
+
+println("")
+println("Results: {passed} passed, {failed} failed")
+if failed == 0 { println("ALL TESTS PASSED") }
