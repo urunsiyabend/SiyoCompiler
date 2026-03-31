@@ -4,7 +4,7 @@
   <img src="src/main/java/SiyoLanguage.png" alt="Siyo logo" width="180" />
 </p>
 
-Siyo Compiler is an experimental programming language and compiler project written in Java. The repository has grown well beyond a lexer/parser prototype: it now includes an interpreter, a JVM bytecode compiler, a REPL, file-based module loading, structs, enums, arrays, and a large automated test suite.
+Siyo Compiler is an experimental programming language and compiler project written in Java. The repository includes an interpreter, a JVM bytecode compiler, a REPL, file-based module loading, structs, enums, arrays, and a large automated test suite.
 
 ## Current Status
 
