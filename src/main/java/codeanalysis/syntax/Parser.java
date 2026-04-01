@@ -222,6 +222,10 @@ public class Parser {
         SyntaxToken keyword = match(expectedKeyword);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         SyntaxToken equals = match(SyntaxType.EqualsToken);
+        if (current().getType() == SyntaxType.SendKeyword) {
+            _diagnostics.reportError(current().getSpan(),
+                    "send is a statement and does not return a value\n\n  help: use a channel to receive results from async actor calls");
+        }
         ExpressionSyntax initializer = parseExpression();
         return new VariableDeclarationSyntax(keyword, identifier, equals, initializer);
     }
@@ -409,6 +413,27 @@ public class Parser {
             return null;
         }
         SyntaxToken arrowToken = match(SyntaxType.ArrowToken);
+        // Handle function type: -> fn(int, int) -> int
+        if (current().getType() == SyntaxType.FnKeyword) {
+            SyntaxToken fnToken = nextToken();
+            SyntaxToken identifier = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            // Skip the parameter list and optional return type of the function signature
+            if (current().getType() == SyntaxType.OpenParenthesisToken) {
+                int depth = 1;
+                nextToken(); // skip '('
+                while (depth > 0 && current().getType() != SyntaxType.EOFToken) {
+                    if (current().getType() == SyntaxType.OpenParenthesisToken) depth++;
+                    else if (current().getType() == SyntaxType.CloseParenthesisToken) depth--;
+                    nextToken();
+                }
+                // Skip optional return type: -> int
+                if (current().getType() == SyntaxType.ArrowToken) {
+                    nextToken(); // skip '->'
+                    nextToken(); // skip return type identifier
+                }
+            }
+            return new TypeClauseSyntax(arrowToken, identifier);
+        }
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         // Handle array return type: -> int[]
         if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
