@@ -121,27 +121,35 @@ cd SiyoCompiler
 mvn package -DskipTests
 ```
 
-This produces `target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar` — a single fat JAR with no external dependencies.
+Add `bin/` to your PATH:
+
+```bash
+export PATH="$PWD/bin:$PATH"    # Unix / macOS / Git Bash
+```
+
+Or on Windows CMD:
+
+```cmd
+set PATH=%cd%\bin;%PATH%
+```
 
 ## Usage
 
 ```bash
-JAR=target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar
-
-# Run (compiles to bytecode, executes — default mode)
-java -jar $JAR run program.siyo
+# Run (compiles to bytecode, executes)
+siyoc run hello.siyo
 
 # Compile to .class file
-java -jar $JAR compile program.siyo
+siyoc compile hello.siyo
 
 # Interpret (tree-walking, useful for debugging)
-java -jar $JAR interpret program.siyo
+siyoc interpret hello.siyo
 
 # REPL
-java -jar $JAR repl
+siyoc repl
 
-# With Java classpath (e.g. SQLite JDBC driver)
-java -jar $JAR -cp lib/sqlite-jdbc.jar run server.siyo
+# With external JARs on the classpath
+siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 ```
 
 ## Language Features
@@ -186,9 +194,9 @@ The repository includes 29 example programs and 2 multi-file projects:
 | **Concurrency** | SiyoDB (actor-based TCP database), chat server |
 
 ```bash
-java -jar $JAR run examples/fizzbuzz.siyo
-java -jar $JAR run examples/json_parser.siyo
-java -jar $JAR -cp lib/sqlite-jdbc.jar run examples/rest_api_v2.siyo
+siyoc run examples/fizzbuzz.siyo
+siyoc run examples/json_parser.siyo
+siyoc -cp lib/sqlite-jdbc.jar run examples/rest_api_v2.siyo
 ```
 
 ## How it works

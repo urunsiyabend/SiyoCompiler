@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Siyo Compiler launcher (delegates to .bat on Windows for classpath handling)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIYO_JAR="$SCRIPT_DIR/../target/siyo-compiler-0.1.0-SNAPSHOT.jar"
+SIYO_JAR="$SCRIPT_DIR/../target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
 
 if [ ! -f "$SIYO_JAR" ]; then
     echo "Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'"

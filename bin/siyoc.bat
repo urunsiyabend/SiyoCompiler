@@ -1,6 +1,6 @@
 @echo off
 set SCRIPT_DIR=%~dp0
-set SIYO_JAR=%SCRIPT_DIR%..\target\siyo-compiler-0.1.0-SNAPSHOT.jar
+set SIYO_JAR=%SCRIPT_DIR%..\target\siyo-compiler-0.1.0-SNAPSHOT-shaded.jar
 
 if not exist "%SIYO_JAR%" (
     echo Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'
