@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Extract version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+    - name: Set Maven version
+      run: mvn -B versions:set -DnewVersion=${{ steps.version.outputs.VERSION }} -DgenerateBackupPoms=false
+
+    - name: Build and Test
+      run: mvn -B verify
+
+    - name: Prepare release artifacts
+      run: |
+        VERSION=${{ steps.version.outputs.VERSION }}
+        STAGING="siyo-${VERSION}"
+        mkdir -p "${STAGING}/bin"
+
+        # Fat JAR
+        cp target/siyo-compiler-${VERSION}-shaded.jar "${STAGING}/siyoc.jar"
+
+        # Launcher scripts
+        cp bin/siyoc "${STAGING}/bin/siyoc"
+        cp bin/siyoc.bat "${STAGING}/bin/siyoc.bat"
+        chmod +x "${STAGING}/bin/siyoc"
+
+        # Patch launchers to use siyoc.jar from parent dir
+        sed -i 's|../target/siyo-compiler-.*-shaded.jar|../siyoc.jar|' "${STAGING}/bin/siyoc"
+        sed -i 's|%SCRIPT_DIR%..\\target\\siyo-compiler-.*-shaded.jar|%SCRIPT_DIR%..\\siyoc.jar|' "${STAGING}/bin/siyoc.bat"
+
+        # Docs
+        cp README.md "${STAGING}/"
+        cp GRAMMAR.md "${STAGING}/"
+        cp FUTURE.md "${STAGING}/"
+        cp LICENSE* "${STAGING}/" 2>/dev/null || true
+
+        # Examples
+        cp -r examples "${STAGING}/examples"
+
+        # Create archives
+        tar czf "siyo-${VERSION}.tar.gz" "${STAGING}"
+        zip -r  "siyo-${VERSION}.zip"    "${STAGING}"
+
+        # Standalone JAR with version name
+        cp "${STAGING}/siyoc.jar" "siyoc-${VERSION}.jar"
+
+        echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+    - name: Generate release notes
+      id: notes
+      run: |
+        VERSION=${{ steps.version.outputs.VERSION }}
+        cat > release-notes.md << 'NOTES_EOF'
+        ## Siyo $VERSION
+
+        ### Installation
+
+        **Option 1 — Download and extract:**
+        ```bash
+        # Linux / macOS
+        tar xzf siyo-$VERSION.tar.gz
+        export PATH="$PWD/siyo-$VERSION/bin:$PATH"
+
+        # Windows
+        # Extract siyo-$VERSION.zip, add bin\ to PATH
+        ```
+
+        **Option 2 — JAR only (requires Java 21+):**
+        ```bash
+        java -jar siyoc-$VERSION.jar run hello.siyo
+        ```
+
+        ### Usage
+        ```bash
+        siyoc run program.siyo         # compile to bytecode & run
+        siyoc compile program.siyo     # emit .class file
+        siyoc interpret program.siyo   # tree-walking interpreter
+        siyoc repl                     # interactive REPL
+        ```
+
+        ### Requirements
+        - Java 21 or later
+
+        See [GRAMMAR.md](https://github.com/urunsiyabend/SiyoCompiler/blob/v$VERSION/GRAMMAR.md) for the full language reference.
+        NOTES_EOF
+        sed -i "s/\$VERSION/${VERSION}/g" release-notes.md
+        # Remove leading whitespace from heredoc
+        sed -i 's/^        //' release-notes.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Siyo ${{ steps.version.outputs.VERSION }}
+        body_path: release-notes.md
+        files: |
+          siyoc-${{ steps.version.outputs.VERSION }}.jar
+          siyo-${{ steps.version.outputs.VERSION }}.tar.gz
+          siyo-${{ steps.version.outputs.VERSION }}.zip
