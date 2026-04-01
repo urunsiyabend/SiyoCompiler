@@ -38,8 +38,8 @@ jobs:
         STAGING="siyo-${VERSION}"
         mkdir -p "${STAGING}/bin"
 
-        # Fat JAR
-        cp target/siyo-compiler-${VERSION}-shaded.jar "${STAGING}/siyoc.jar"
+        # Fat JAR (shade plugin replaces the main jar, no -shaded suffix)
+        cp target/siyo-compiler-${VERSION}.jar "${STAGING}/siyoc.jar"
 
         # Launcher scripts
         cp bin/siyoc "${STAGING}/bin/siyoc"
@@ -47,8 +47,8 @@ jobs:
         chmod +x "${STAGING}/bin/siyoc"
 
         # Patch launchers to use siyoc.jar from parent dir
-        sed -i 's|../target/siyo-compiler-.*-shaded.jar|../siyoc.jar|' "${STAGING}/bin/siyoc"
-        sed -i 's|%SCRIPT_DIR%..\\target\\siyo-compiler-.*-shaded.jar|%SCRIPT_DIR%..\\siyoc.jar|' "${STAGING}/bin/siyoc.bat"
+        sed -i 's|SIYO_JAR=.*|SIYO_JAR="$SCRIPT_DIR/../siyoc.jar"|' "${STAGING}/bin/siyoc"
+        sed -i 's|set SIYO_JAR=.*|set SIYO_JAR=%SCRIPT_DIR%..\\siyoc.jar|' "${STAGING}/bin/siyoc.bat"
 
         # Docs
         cp README.md "${STAGING}/"
