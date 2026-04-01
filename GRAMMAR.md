@@ -1,6 +1,4 @@
-# Siyo Language Grammar
-
-This document describes the grammar of the Siyo programming language.
+# Siyo Language Grammar (0.1.0)
 
 ## Lexical Grammar
 
@@ -8,16 +6,24 @@ This document describes the grammar of the Siyo programming language.
 
 | Keyword | Description |
 |---------|-------------|
-| `true`  | Boolean literal true |
-| `false` | Boolean literal false |
-| `mut`   | Mutable variable declaration |
-| `imut`  | Immutable variable declaration |
-| `if`    | Conditional statement |
-| `else`  | Else clause |
+| `true` / `false` | Boolean literals |
+| `mut` | Mutable variable declaration |
+| `imut` | Immutable variable declaration |
+| `if` / `else` | Conditional |
 | `while` | While loop |
-| `for`   | For loop |
-| `fn`    | Function declaration |
-| `return`| Return statement |
+| `for` / `in` | For loop / for-in iteration |
+| `fn` | Function / lambda declaration |
+| `return` | Return statement |
+| `break` / `continue` | Loop control |
+| `try` / `catch` | Error handling |
+| `match` | Pattern matching expression |
+| `struct` | Struct type declaration |
+| `enum` | Enum type declaration |
+| `import` | Module / Java class import |
+| `scope` / `spawn` | Structured concurrency |
+| `send` | Actor fire-and-forget message |
+| `actor` | Actor struct marker |
+| `null` | Null literal |
 
 ### Operators
 
@@ -25,370 +31,251 @@ This document describes the grammar of the Siyo programming language.
 
 | Operator | Description |
 |----------|-------------|
-| `+`      | Unary plus (identity) |
-| `-`      | Unary minus (negation) |
-| `!`      | Logical NOT |
-| `~`      | Bitwise NOT |
+| `+` | Identity |
+| `-` | Negation |
+| `!` | Logical NOT |
+| `~` | Bitwise NOT |
 
 #### Binary Operators
 
 | Operator | Description |
 |----------|-------------|
-| `+`      | Addition |
-| `-`      | Subtraction |
-| `*`      | Multiplication |
-| `/`      | Division |
-| `%`      | Modulo |
-| `==`     | Equality |
-| `!=`     | Inequality |
-| `<`      | Less than |
-| `<=`     | Less than or equal |
-| `>`      | Greater than |
-| `>=`     | Greater than or equal |
-| `&&`     | Logical AND |
-| `\|\|`   | Logical OR |
-| `&`      | Bitwise AND |
-| `\|`     | Bitwise OR |
-| `^`      | Bitwise XOR |
-| `<<`     | Left shift |
-| `>>`     | Right shift |
+| `+` `-` `*` `/` `%` | Arithmetic |
+| `==` `!=` | Equality (all types) |
+| `<` `<=` `>` `>=` | Ordering (int, long, double, string) |
+| `&&` `\|\|` | Logical AND / OR (short-circuit) |
+| `&` `\|` `^` | Bitwise AND / OR / XOR |
+| `<<` `>>` | Bit shifts |
 
-#### Assignment Operator
+#### Compound Assignment
 
-| Operator | Description |
-|----------|-------------|
-| `=`      | Assignment |
+`+=`, `-=`, `*=`, `/=`
 
-### Delimiters
-
-| Token | Description |
-|-------|-------------|
-| `(`   | Open parenthesis |
-| `)`   | Close parenthesis |
-| `{`   | Open brace |
-| `}`   | Close brace |
-| `:`   | Type annotation separator |
-| `,`   | Parameter/argument separator |
-| `->`  | Return type indicator |
-
-### Literals
-
-- **Number**: Sequence of digits (`0-9`)
-- **Boolean**: `true` or `false`
-- **Identifier**: Letter followed by letters or digits (`[a-zA-Z][a-zA-Z0-9]*`)
-
-## Operator Precedence
-
-Higher precedence binds tighter. Operators at the same precedence level are left-associative.
+### Operator Precedence
 
 | Precedence | Operators | Description |
 |------------|-----------|-------------|
-| 6 (highest)| `+` `-` `!` `~` (unary) | Unary operators |
-| 5          | `*` `/` `%` | Multiplicative |
-| 4          | `+` `-` | Additive |
-| 3          | `==` `!=` `<` `<=` `>` `>=` | Relational |
-| 2          | `&&` `&` `<<` `>>` | Logical/Bitwise AND, Shifts |
-| 1 (lowest) | `\|\|` `\|` `^` | Logical/Bitwise OR, XOR |
+| 6 (highest)| `+` `-` `!` `~` (unary) | Unary |
+| 5 | `*` `/` `%` | Multiplicative |
+| 4 | `+` `-` | Additive |
+| 3 | `==` `!=` `<` `<=` `>` `>=` | Relational |
+| 2 | `&&` `&` `<<` `>>` | AND / shifts |
+| 1 (lowest) | `\|\|` `\|` `^` | OR / XOR |
+
+### Literals
+
+- **Integer**: `42`, `-7`
+- **Float**: `3.14`, `0.5`
+- **Long**: returned by Java interop (e.g. `System.currentTimeMillis()`)
+- **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` and interpolation `"x = {expr}"`
+- **Boolean**: `true`, `false`
+- **Null**: `null`
+- **Array**: `[1, 2, 3]`, `[]`
+
+### Delimiters
+
+`(` `)` `{` `}` `[` `]` `:` `,` `->` `.`
 
 ## Syntactic Grammar
-
-### Compilation Unit
-
-```
-compilation_unit
-    : statement EOF
-    ;
-```
 
 ### Statements
 
 ```
+compilation_unit  : statement* EOF
+
 statement
     : block_statement
     | variable_declaration
     | if_statement
     | while_statement
     | for_statement
+    | for_in_statement
     | function_declaration
+    | struct_declaration
+    | enum_declaration
     | return_statement
+    | break_statement
+    | continue_statement
+    | try_catch_statement
+    | scope_expression
+    | import_statement
+    | send_statement
     | expression_statement
-    ;
-
-block_statement
-    : '{' statement* '}'
-    ;
 
 variable_declaration
     : ('mut' | 'imut') IDENTIFIER '=' expression
-    ;
 
 if_statement
-    : 'if' expression statement else_clause?
-    ;
+    : 'if' expression block ('else' (if_statement | block))?
 
-else_clause
-    : 'else' statement
-    ;
-
-while_statement
-    : 'while' expression statement
-    ;
-
-for_statement
-    : 'for' statement expression expression statement
-    ;
+while_statement : 'while' expression block
+for_statement   : 'for' variable_declaration expression expression block
+for_in_statement: 'for' IDENTIFIER 'in' expression block
 
 function_declaration
-    : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause? block_statement
-    ;
+    : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause? block
 
-parameter_list
-    : parameter (',' parameter)*
-    ;
+struct_declaration
+    : 'struct' IDENTIFIER '{' field_list '}'
 
-parameter
-    : IDENTIFIER ':' type_identifier
-    ;
+enum_declaration
+    : 'enum' IDENTIFIER '{' IDENTIFIER (',' IDENTIFIER)* '}'
 
-type_clause
-    : '->' type_identifier
-    ;
+try_catch_statement
+    : 'try' block 'catch' IDENTIFIER block
 
-type_identifier
-    : 'int'
-    | 'bool'
-    ;
+scope_expression
+    : 'scope' block          // spawned threads joined at block end
 
-return_statement
-    : 'return' expression?
-    ;
+send_statement
+    : 'send' expression      // fire-and-forget actor message
 
-expression_statement
-    : expression
-    ;
+import_statement
+    : 'import' STRING
+    | 'import' 'java' STRING
+
+return_statement : 'return' expression?
+break_statement  : 'break'
+continue_statement: 'continue'
 ```
 
 ### Expressions
 
 ```
-expression
-    : assignment_expression
-    ;
+expression : assignment_expression
 
 assignment_expression
     : IDENTIFIER '=' expression
+    | IDENTIFIER compound_op expression
     | binary_expression
-    ;
 
 binary_expression
-    : unary_expression (binary_operator unary_expression)*
-    ;
+    : unary_expression (binary_op unary_expression)*
 
 unary_expression
-    : unary_operator unary_expression
-    | primary_expression
-    ;
+    : unary_op unary_expression
+    | postfix_expression
+
+postfix_expression
+    : primary_expression ('[' expression ']' | '.' IDENTIFIER | '(' argument_list? ')')*
 
 primary_expression
-    : literal_expression
-    | call_expression
-    | name_expression
-    | parenthesized_expression
-    ;
+    : NUMBER | FLOAT | STRING | 'true' | 'false' | 'null'
+    | IDENTIFIER
+    | '(' expression ')'
+    | '[' expression_list? ']'
+    | struct_literal
+    | lambda_expression
+    | match_expression
+    | try_expression
+    | spawn_expression
 
-literal_expression
-    : NUMBER
-    | 'true'
-    | 'false'
-    ;
+lambda_expression
+    : 'fn' '(' parameter_list? ')' type_clause? block
 
-call_expression
-    : IDENTIFIER '(' argument_list? ')'
-    ;
+match_expression
+    : 'match' expression '{' match_arm* '}'
 
-argument_list
-    : expression (',' expression)*
-    ;
+match_arm
+    : expression '=>' expression
+    | '_' '=>' expression
 
-name_expression
-    : IDENTIFIER
-    ;
+try_expression
+    : 'try' block 'catch' IDENTIFIER block
 
-parenthesized_expression
-    : '(' expression ')'
-    ;
+spawn_expression
+    : 'spawn' block
+
+struct_literal
+    : IDENTIFIER '{' (IDENTIFIER ':' expression ',')* '}'
 ```
-
-Note: `call_expression` is matched when an identifier is followed by `(`. Otherwise, `name_expression` is matched.
 
 ## Type System
 
 ### Built-in Types
 
 | Type | Java Mapping | Description |
-|------|--------------|-------------|
+|------|-------------|-------------|
 | `int` | `Integer` | 32-bit signed integer |
-| `bool` | `Boolean` | Boolean value |
+| `long` | `Long` | 64-bit signed integer |
+| `float` | `Double` | 64-bit floating point |
+| `bool` | `Boolean` | Boolean |
+| `string` | `String` | Immutable string |
+| `int[]` / `string[]` | `SiyoArray` | Dynamic array |
+| `fn` | `SiyoClosure` | First-class function |
+| `channel` | `SiyoChannel` | Thread-safe channel |
+| `map` | `SiyoMap` | Key-value map |
+| `set` | `SiyoSet` | Unique value set |
+| `object` / `any` | `Object` | Any type |
 
 ### Type Rules
 
-1. **Literal Types**
-   - Number literals have type `int`
-   - `true` and `false` have type `bool`
+- Arithmetic operators work on `int`, `long`, `double` (same-type operands)
+- String supports `+` (concatenation), `==`, `!=`, `<`, `>`, `<=`, `>=`
+- `null` supports `==` and `!=` with any type
+- Assignment requires compatible types; `imut` variables cannot be reassigned
+- Function return type checked against declared type
+- Array elements must be homogeneous
+- Channel receive returns `Object`
 
-2. **Unary Operators**
-   - `+`, `-`, `~`: Operand must be `int`, result is `int`
-   - `!`: Operand must be `bool`, result is `bool`
+## Built-in Functions
 
-3. **Binary Operators**
-   - Arithmetic (`+`, `-`, `*`, `/`, `%`): Both operands must be `int`, result is `int`
-   - Comparison (`<`, `<=`, `>`, `>=`): Both operands must be `int`, result is `bool`
-   - Equality (`==`, `!=`): Both operands must have the same type, result is `bool`
-   - Logical (`&&`, `||`): Both operands must be `bool`, result is `bool`
-   - Bitwise (`&`, `|`, `^`): Both operands must be the same type (`int` or `bool`), result is the same type
-   - Shift (`<<`, `>>`): Both operands must be `int`, result is `int`
+### Type Conversion
+`toString(any)`, `toInt(double)`, `toInt(string)`, `toDouble(int)`, `toFloat(int)`, `toLong(int)`, `parseInt(string)`, `parseFloat(string)`, `parseLong(string)`
 
-4. **Assignment**
-   - Right-hand side type must match the variable's declared type
-   - Cannot assign to `imut` (immutable) variables
+### String
+`len(string)`, `substring(s, start, end)`, `contains(s, sub)`, `indexOf(s, sub)`, `startsWith(s, prefix)`, `endsWith(s, suffix)`, `replace(s, old, new)`, `trim(s)`, `toUpper(s)`, `toLower(s)`, `split(s, delim)`, `chr(int)`, `ord(string)`
 
-5. **Control Flow**
-   - Condition in `if`, `while`, and `for` statements must be `bool`
+### Array
+`len(array)`, `push(arr, val)`, `pop(arr)`, `removeAt(arr, idx)`, `sort(arr, comparator)`
 
-6. **Functions**
-   - Function parameters have explicit types
-   - Return type is specified after `->`, or omitted for void functions
-   - Return statement expression type must match function return type
-   - Return without expression is only valid in void functions
-   - Return with expression is only valid in non-void functions
+### I/O
+`print(val)`, `println(val)`, `input(prompt)`, `error(msg)`
 
-7. **Function Calls**
-   - Number of arguments must match number of parameters
-   - Each argument type must match corresponding parameter type
-   - Call expression type is the function's return type (or void)
+### Collections
+`map()`, `set()`, `channel()`, `channel(capacity)`, `range(start, end)`
 
-## Examples
+### Other
+`random(max)`, `httpGet(url)`, `httpPost(url, body)`, `canRead(reader)`
 
-### Variable Declaration
+## Concurrency
 
+### Scope / Spawn
 ```siyo
-mut x = 10          // mutable integer
-imut y = true       // immutable boolean
+scope {
+    spawn { /* task 1 */ }
+    spawn { /* task 2 */ }
+}
+// all spawned threads joined here
 ```
 
-### Control Flow
-
+### Channels
 ```siyo
-// If statement
-if x > 5 {
-    x = x - 1
-}
+imut ch = channel()     // unbuffered (rendezvous)
+imut ch = channel(10)   // buffered
 
-// If-else statement
-if x == 0 {
-    y = false
-} else {
-    y = true
-}
+ch.send(value)          // blocks until taken / space available
+ch.receive()            // blocks until value available
+ch.close()              // signal no more values
 
-// While loop
-while x > 0 {
-    x = x - 1
-}
-
-// For loop
-for mut i = 0 i < 10 i = i + 1 {
-    x = x + i
-}
+for msg in ch { ... }   // iterate until closed
 ```
 
-### Expressions
-
+### Actors
 ```siyo
-// Arithmetic
-1 + 2 * 3           // 7 (precedence)
-(1 + 2) * 3         // 9 (parentheses)
+actor struct Counter { count: int }
+fn Counter.increment(n: int) -> int { self.count += n; self.count }
 
-// Logical
-true && false       // false
-true || false       // true
-!true               // false
-
-// Bitwise
-5 & 3               // 1
-5 | 3               // 7
-5 ^ 3               // 6
-~1                  // -2
-8 >> 2              // 2
-2 << 3              // 16
-
-// Comparison
-5 > 3               // true
-5 == 5              // true
-5 != 3              // true
+mut c = spawn Counter.new(Counter { count: 0 })
+imut result = c.increment(5)   // synchronous call
+send c.increment(1)            // fire-and-forget
 ```
 
-### Functions
+## Java Interop
 
 ```siyo
-// Simple function with return type
-fn add(a: int, b: int) -> int {
-    return a + b
-}
-
-// Function with boolean return
-fn isPositive(n: int) -> bool {
-    return n > 0
-}
-
-// Void function (no return type)
-fn doNothing() {
-    return
-}
-
-// Function call
-{
-    mut result = add(10, 20)    // 30
-    isPositive(result)          // true
-}
-
-// Recursion
-fn factorial(n: int) -> int {
-    if n <= 1 {
-        return 1
-    }
-    return n * factorial(n - 1)
-}
-
-factorial(5)                    // 120
+import java "java.net.Socket"
+mut s = Socket.new("localhost", 8080)
 ```
 
-### Scoping
-
-```siyo
-{
-    mut x = 10
-    {
-        // Inner x shadows outer x
-        imut x = true
-        x               // true
-    }
-    x                   // 10
-}
-```
-
-### Function Scoping
-
-```siyo
-// Functions have their own scope
-fn compute(x: int) -> int {
-    mut y = x * 2       // y is local to the function
-    return y + 1
-}
-
-{
-    mut y = 100         // This y is separate from function's y
-    compute(5)          // Returns 11, does not affect outer y
-    y                   // Still 100
-}
-```
+Static methods, constructors, and instance methods are callable. Return types are mapped automatically.
