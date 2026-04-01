@@ -19,6 +19,7 @@ public class Emitter {
     private final DiagnosticBox _diagnostics = new DiagnosticBox();
     private String _className;
     private boolean _needsRangeHelper = false;
+    private boolean _needsSortHelper = false;
 
     // Current method state
     private MethodVisitor _mv;
@@ -126,6 +127,9 @@ public class Emitter {
         // Emit helper methods if needed
         if (_needsRangeHelper) {
             emitRangeHelper(cw);
+        }
+        if (_needsSortHelper) {
+            emitSortHelper(cw);
         }
 
         // Generate shared Scanner field if needed
@@ -349,7 +353,9 @@ public class Emitter {
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
-        if (isGlobalField(node.getVariable())) {
+        // For declarations: use identity check only. A new VariableSymbol that is not
+        // the exact global instance is a local (possibly shadowing the global).
+        if (!_inIsolatedMethod && _globalFields.contains(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = declareLocal(node.getVariable());
@@ -383,7 +389,9 @@ public class Emitter {
         Label catchStart = new Label();
         Label catchEnd = new Label();
 
-        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
+        // Defer visitTryCatchBlock — emit AFTER the try body so that nested
+        // (inner) handlers appear first in the exception table. The JVM picks
+        // the first matching handler, so inner must precede outer.
 
         // Try body
         _mv.visitLabel(tryStart);
@@ -395,6 +403,10 @@ public class Emitter {
             emitStatement(node.getTryBody());
         }
         _mv.visitLabel(tryEnd);
+
+        // Now register the handler — after any inner handlers have been registered
+        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
+
         _mv.visitJumpInsn(GOTO, catchEnd);
 
         // Catch body - exception on stack
@@ -717,14 +729,27 @@ public class Emitter {
             };
             _mv.visitJumpInsn(jumpInsn, trueLabel);
         } else if (type == String.class) {
-            // String value equality via Objects.equals
-            _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals",
-                    "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
-            if (node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
-                _mv.visitInsn(ICONST_1);
-                _mv.visitInsn(IXOR);
+            if (node.getOperator().getType() == BoundBinaryOperatorType.Equals
+                    || node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
+                _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
+                if (node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
+                    _mv.visitInsn(ICONST_1);
+                    _mv.visitInsn(IXOR);
+                }
+                return;
             }
-            return; // Objects.equals already returns boolean
+            // String ordering: compareTo → int, then compare to 0
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "compareTo",
+                    "(Ljava/lang/String;)I", false);
+            int jumpInsn = switch (node.getOperator().getType()) {
+                case LessThan -> IFLT;
+                case LessOrEqualsThan -> IFLE;
+                case GreaterThan -> IFGT;
+                case GreaterOrEqualsThen -> IFGE;
+                default -> throw new UnsupportedOperationException();
+            };
+            _mv.visitJumpInsn(jumpInsn, trueLabel);
         } else {
             // Object reference equality
             int jumpInsn = switch (node.getOperator().getType()) {
@@ -814,12 +839,14 @@ public class Emitter {
         Label catchStart = new Label();
         Label catchEnd = new Label();
 
-        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
-
         // Try body — emit statements, last expression value stays on stack
         _mv.visitLabel(tryStart);
         emitBlockLastAsValue(node.getTryBody());
         _mv.visitLabel(tryEnd);
+
+        // Register handler AFTER try body so inner handlers appear first
+        _mv.visitTryCatchBlock(tryStart, tryEnd, catchStart, "java/lang/Throwable");
+
         _mv.visitJumpInsn(GOTO, catchEnd);
 
         // Catch body — exception on stack, store error var
@@ -1014,8 +1041,21 @@ public class Emitter {
         int savedScopeThreadsLocal = _scopeThreadsLocal;
         _scopeThreadsLocal = threadsLocal;
 
-        // Emit body (spawns will add threads to the list)
-        emitBlockStatement(node.getBody());
+        // Emit body — lowering happens per-statement to preserve spawn variable mappings
+        if (node.getBody() instanceof BoundBlockStatement) {
+            BoundBlockStatement block = (BoundBlockStatement) node.getBody();
+            for (BoundStatement stmt : block.getStatements()) {
+                if (stmt.getType() == BoundNodeType.ForStatement) {
+                    // Lower for-in/for loops before emission
+                    BoundBlockStatement lowered = codeanalysis.lowering.Lowerer.lower(stmt);
+                    emitBlockStatement(lowered);
+                } else {
+                    emitStatement(stmt);
+                }
+            }
+        } else {
+            emitStatement(node.getBody());
+        }
 
         // Join all threads
         _mv.visitVarInsn(ALOAD, threadsLocal);
@@ -1222,19 +1262,24 @@ public class Emitter {
         _inMainMethod = false;
         _inIsolatedMethod = true;
 
-        // Map captured variables to local slots
-        for (VariableSymbol captured : lambda.getCapturedVariables()) {
+        // Map captured variables to local slots (passed as Object)
+        java.util.Set<VariableSymbol> capturedSet = lambda.getCapturedVariables();
+        for (VariableSymbol captured : capturedSet) {
             _locals.put(captured, _nextLocal++);
         }
         // Map parameters to local slots
         for (ParameterSymbol param : lambda.getParameters()) {
             _locals.put(param, _nextLocal);
-            _nextLocal += (param.getType() == Double.class) ? 2 : 1;
+            _nextLocal += (param.getType() == Double.class || param.getType() == Long.class) ? 2 : 1;
         }
+
+        // Track captured vars so emitVariableLoad uses ALOAD + unbox
+        _spawnCapturedVars = capturedSet;
 
         // Emit body
         FunctionSymbol tempFunc = new FunctionSymbol("lambda$" + index, lambda.getParameters(), lambda.getReturnType());
         emitFunctionBody(lambda.getBody(), tempFunc);
+        _spawnCapturedVars = null;
         _mv.visitMaxs(0, 0);
         _mv.visitEnd();
         _inMainMethod = savedInMain;
@@ -1617,17 +1662,31 @@ public class Emitter {
             if (node.getArguments().get(0).getClassType() != String.class) {
                 _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
             }
-            _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "parseInt", "(Ljava/lang/String;)I", false);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseInt",
+                    "(Ljava/lang/String;)I", false);
             return;
         }
         if (function == BuiltinFunctions.PARSE_FLOAT) {
             emitExpression(node.getArguments().get(0));
-            _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Double", "parseDouble", "(Ljava/lang/String;)D", false);
+            if (node.getArguments().get(0).getClassType() != String.class) {
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            }
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseDouble",
+                    "(Ljava/lang/String;)D", false);
             return;
         }
         if (function == BuiltinFunctions.TO_INT) {
             emitExpression(node.getArguments().get(0));
             _mv.visitInsn(D2I);
+            return;
+        }
+        if (function == BuiltinFunctions.TO_INT_STR) {
+            emitExpression(node.getArguments().get(0));
+            if (node.getArguments().get(0).getClassType() != String.class) {
+                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            }
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseInt",
+                    "(Ljava/lang/String;)I", false);
             return;
         }
         if (function == BuiltinFunctions.PARSE_LONG) {
@@ -1640,7 +1699,7 @@ public class Emitter {
             _mv.visitInsn(I2L);
             return;
         }
-        if (function == BuiltinFunctions.TO_FLOAT) {
+        if (function == BuiltinFunctions.TO_FLOAT || function == BuiltinFunctions.TO_DOUBLE) {
             emitExpression(node.getArguments().get(0));
             _mv.visitInsn(I2D);
             return;
@@ -1694,6 +1753,30 @@ public class Emitter {
             emitBoxIfNeeded(node.getArguments().get(1).getClassType());
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", true);
             _mv.visitInsn(POP); // discard boolean
+            return;
+        }
+        if (function == BuiltinFunctions.REMOVE_AT) {
+            emitExpression(node.getArguments().get(0)); // list
+            emitExpression(node.getArguments().get(1)); // index
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "remove", "(I)Ljava/lang/Object;", true);
+            _mv.visitInsn(POP); // discard removed element
+            return;
+        }
+        if (function == BuiltinFunctions.POP) {
+            emitExpression(node.getArguments().get(0)); // list
+            _mv.visitInsn(DUP);
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+            _mv.visitInsn(ICONST_1);
+            _mv.visitInsn(ISUB);
+            _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "remove", "(I)Ljava/lang/Object;", true);
+            return;
+        }
+        if (function == BuiltinFunctions.SORT) {
+            emitExpression(node.getArguments().get(0)); // list
+            emitExpression(node.getArguments().get(1)); // comparator (closure)
+            _needsSortHelper = true;
+            _mv.visitMethodInsn(INVOKESTATIC, _className, "$sort",
+                    "(Ljava/util/List;Ljava/lang/Object;)V", false);
             return;
         }
         if (function == BuiltinFunctions.SUBSTRING) {
@@ -1752,6 +1835,16 @@ public class Emitter {
         if (function == BuiltinFunctions.TRIM) {
             emitExpression(node.getArguments().get(0));
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TO_UPPER) {
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "toUpperCase", "()Ljava/lang/String;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TO_LOWER) {
+            emitExpression(node.getArguments().get(0));
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "toLowerCase", "()Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.SPLIT) {
@@ -1937,12 +2030,20 @@ public class Emitter {
 
     private boolean isGlobalField(VariableSymbol var) {
         if (_inIsolatedMethod) return false;
+        // If this exact variable is already declared as a local, it shadows the global
+        if (_locals.containsKey(var)) return false;
         // Use reference equality first (same VariableSymbol instance)
         if (_globalFields.contains(var)) return true;
         // For main method, also try name-based (lowered vars may have different instances)
         if (_inMainMethod) {
             for (VariableSymbol g : _globalFields) {
-                if (g.getName().equals(var.getName())) return true;
+                if (g.getName().equals(var.getName())) {
+                    // But not if a local with the same name exists (shadowing)
+                    for (VariableSymbol local : _locals.keySet()) {
+                        if (local.getName().equals(var.getName())) return false;
+                    }
+                    return true;
+                }
             }
         }
         return false;
@@ -1950,16 +2051,29 @@ public class Emitter {
 
     private int getLocal(VariableSymbol variable) {
         Integer slot = _locals.get(variable);
-        if (slot == null) {
-            // Try name-based lookup as fallback (different VariableSymbol instances with same name)
-            for (var entry : _locals.entrySet()) {
-                if (entry.getKey().getName().equals(variable.getName())) {
-                    return entry.getValue();
+        if (slot != null) return slot;
+        // Name-based fallback (different VariableSymbol instances with same name)
+        for (var entry : _locals.entrySet()) {
+            if (entry.getKey().getName().equals(variable.getName())) {
+                return entry.getValue();
+            }
+        }
+        // Parent spawn propagation: variable is captured by outer spawn,
+        // inner spawn needs to access it from the outer spawn method's locals
+        if (_spawnCapturedVars != null) {
+            for (VariableSymbol cap : _spawnCapturedVars) {
+                if (cap.getName().equals(variable.getName())) {
+                    // Find the slot by name since identity may differ
+                    for (var entry : _locals.entrySet()) {
+                        if (entry.getKey().getName().equals(variable.getName())) {
+                            _locals.put(variable, entry.getValue()); // cache for next lookup
+                            return entry.getValue();
+                        }
+                    }
                 }
             }
-            throw new IllegalStateException("Variable not declared: " + variable.getName());
         }
-        return slot;
+        throw new IllegalStateException("Variable not declared: " + variable.getName());
     }
 
     private Label getLabel(LabelSymbol symbol) {
@@ -1977,12 +2091,17 @@ public class Emitter {
     }
 
     private void collectGlobalVariables(BoundBlockStatement block) {
+        java.util.Set<String> seenNames = new java.util.HashSet<>();
         for (BoundStatement stmt : block.getStatements()) {
             if (stmt instanceof BoundVariableDeclaration varDecl) {
                 String name = varDecl.getVariable().getName();
                 // Don't treat synthetic lowered variables as globals
-                if (!name.startsWith("_idx") && !name.startsWith("_col")) {
-                    _globalFields.add(varDecl.getVariable());
+                if (!name.startsWith("_idx") && !name.startsWith("_col") && !name.startsWith("_ch")) {
+                    // Only the first declaration of each name is global (outermost scope).
+                    // Subsequent same-name declarations are inner-scope shadows.
+                    if (seenNames.add(name)) {
+                        _globalFields.add(varDecl.getVariable());
+                    }
                 }
             }
         }
@@ -2013,6 +2132,30 @@ public class Emitter {
         mv.visitLabel(loopEnd);
         mv.visitVarInsn(ALOAD, 2);
         mv.visitInsn(ARETURN);
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+    }
+
+    /**
+     * Generates: static void $sort(List list, Object closureObj)
+     * Calls closureDispatch$ with the closure's lambdaId and captured vars for each comparison.
+     */
+    private void emitSortHelper(ClassWriter cw) {
+        // $sort(List, Object) where Object is Object[]{lambdaId, captured[]}
+        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC, "$sort",
+                "(Ljava/util/List;Ljava/lang/Object;)V", null, null);
+        mv.visitCode();
+        // list.sort((a, b) -> { Object[] closure = (Object[]) closureObj;
+        //   int id = (Integer) closure[0]; Object[] cap = (Object[]) closure[1];
+        //   return (Integer) closureDispatch$(id, cap, new Object[]{a, b}); })
+        mv.visitVarInsn(ALOAD, 0); // list
+        mv.visitVarInsn(ALOAD, 1); // closure obj
+        // Use invokedynamic or inner class approach - simplest: use SiyoRuntime helper
+        // Actually, use lambda metafactory to create Comparator
+        // Simplest correct: call a static helper that does the sorting via reflection
+        mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "sortList",
+                "(Ljava/util/List;Ljava/lang/Object;)V", false);
+        mv.visitInsn(RETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
     }
