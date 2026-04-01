@@ -1,223 +1,352 @@
-// SiyoChat - Multi-room TCP Chat Server (Actor Model)
-// Architecture: Room actors (state), ConcurrentHashMap (writer broadcast), ClientHandler actors (per client)
+// SiyoChat v3 - IRC-style Multi-room TCP Chat Server
+// Features: auth, rooms, PM, message history, presence
 import java "java.net.ServerSocket"
 import java "java.net.Socket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
 import java "java.io.PrintWriter"
 import java "java.lang.System"
-import java "java.util.concurrent.ConcurrentHashMap"
+import "db"
+import "auth"
 
-// === Room State ===
-// Room is an actor that owns member list and room name.
+// === RoomRegistry Actor ===
+// Owns ALL state: rooms, writers, nicks, auth, db connection string
 
-actor Room {
-    name: string,
-    memberKeys: string[],
-    memberCount: int
+actor RoomRegistry {
+    rooms: map,
+    writers: map,
+    nicks: map,
+    authed: map,
+    connStr: string
 }
 
-impl Room {
-    fn new(name: string) -> Room {
-        Room { name: name, memberKeys: [""], memberCount: 0 }
-    }
-
-    fn join(self, key: string) -> string {
-        // Check already in
-        for i in range(0, self.memberCount) {
-            if self.memberKeys[i] == key { return "already in #" + self.name }
+impl RoomRegistry {
+    fn new(connStr: string) -> RoomRegistry {
+        RoomRegistry {
+            rooms: map(),
+            writers: map(),
+            nicks: map(),
+            authed: map(),
+            connStr: connStr
         }
-        if self.memberCount == 0 { self.memberKeys[0] = key }
-        else { push(self.memberKeys, key) }
-        self.memberCount += 1
-        return "joined #" + self.name + " (" + self.memberCount + " members)"
     }
 
-    fn leave(self, key: string) -> string {
-        for i in range(0, self.memberCount) {
-            if self.memberKeys[i] == key {
-                removeAt(self.memberKeys, i)
-                self.memberCount -= 1
-                return "left #" + self.name
+    // --- Auth ---
+
+    fn register(self, nick: string, password: string) -> string {
+        imut hash = auth.hashPassword(password)
+        if db.userExists(self.connStr, nick) { return "ERR nick taken" }
+        db.addUser(self.connStr, nick, hash)
+        return "OK registered as " + nick
+    }
+
+    fn login(self, key: string, nick: string, password: string) -> string {
+        imut stored = db.getPasshash(self.connStr, nick)
+        if len(stored) == 0 { return "ERR unknown nick" }
+        imut hash = auth.hashPassword(password)
+        if hash != stored { return "ERR bad password" }
+        self.authed.set(key, nick)
+        self.nicks.set(key, nick)
+        return "OK logged in as " + nick
+    }
+
+    fn isAuthed(self, key: string) -> bool {
+        self.authed.has(key)
+    }
+
+    fn getNick(self, key: string) -> string {
+        if self.nicks.has(key) { return toString(self.nicks.get(key)) }
+        return "anon"
+    }
+
+    // --- Writer management ---
+
+    fn addWriter(self, key: string, ref: object) -> string {
+        self.writers.set(key, ref)
+        self.nicks.set(key, "anon")
+        return "ok"
+    }
+
+    fn removeWriter(self, key: string) -> string {
+        imut nick = self.getNick(key)
+        imut roomKeys = self.rooms.keys()
+        for i in range(0, len(roomKeys)) {
+            imut room = toString(roomKeys[i])
+            imut members = toString(self.rooms.get(room))
+            if contains(members, key) {
+                self.leaveRoom(room, key)
+                self.broadcastRoom(room, key, "* " + nick + " disconnected")
             }
         }
-        return "not in #" + self.name
+        self.writers.remove(key)
+        self.nicks.remove(key)
+        self.authed.remove(key)
+        return "ok"
     }
 
-    fn getMembers(self) -> string {
-        // Return comma-separated member keys
+    // --- Room management ---
+
+    fn joinRoom(self, room: string, key: string) -> string {
+        mut members = ""
+        if self.rooms.has(room) { members = toString(self.rooms.get(room)) }
+        if len(members) == 0 { members = key }
+        else { members = members + "," + key }
+        self.rooms.set(room, members)
+        imut hist = db.getHistory(self.connStr, "#" + room, 20)
+        if len(hist) > 0 { return "joined #" + room + "\n" + hist }
+        return "joined #" + room
+    }
+
+    fn leaveRoom(self, room: string, key: string) -> string {
+        if !self.rooms.has(room) { return "not in room" }
+        imut members = toString(self.rooms.get(room))
+        imut parts = split(members, ",")
         mut result = ""
-        for i in range(0, self.memberCount) {
-            if i > 0 { result += "," }
-            result += self.memberKeys[i]
+        mut c = 0
+        for p in parts {
+            if p != key {
+                if c > 0 { result = result + "," }
+                result = result + p
+                c += 1
+            }
+        }
+        if c == 0 { self.rooms.remove(room) }
+        else { self.rooms.set(room, result) }
+        return "left #" + room
+    }
+
+    fn broadcastRoom(self, room: string, sender: string, msg: string) -> string {
+        if !self.rooms.has(room) { return "0" }
+        imut members = toString(self.rooms.get(room))
+        imut parts = split(members, ",")
+        mut sent = 0
+        for p in parts {
+            if p != sender {
+                if self.writers.has(p) {
+                    imut w = self.writers.get(p)
+                    w.println(msg)
+                    sent += 1
+                }
+            }
+        }
+        return "" + sent
+    }
+
+    fn sendMessage(self, room: string, senderKey: string, text: string) -> string {
+        imut nick = self.getNick(senderKey)
+        imut msg = "[#" + room + "] " + nick + ": " + text
+        self.broadcastRoom(room, "", msg)
+        db.saveMessage(self.connStr, nick, "#" + room, "room", text)
+        return msg
+    }
+
+    // --- Private messaging ---
+
+    fn sendPM(self, senderKey: string, targetNick: string, text: string) -> string {
+        imut senderNick = self.getNick(senderKey)
+        imut keys = self.nicks.keys()
+        mut targetKey = ""
+        for i in range(0, len(keys)) {
+            imut k = toString(keys[i])
+            if toString(self.nicks.get(k)) == targetNick {
+                targetKey = k
+            }
+        }
+        if len(targetKey) == 0 { return "ERR user not online: " + targetNick }
+        if !self.writers.has(targetKey) { return "ERR user not online: " + targetNick }
+        imut w = self.writers.get(targetKey)
+        w.println("[PM from " + senderNick + "] " + text)
+        db.saveMessage(self.connStr, senderNick, targetNick, "pm", text)
+        return "PM sent to " + targetNick
+    }
+
+    // --- Presence ---
+
+    fn listRooms(self) -> string {
+        imut k = self.rooms.keys()
+        if len(k) == 0 { return "(no rooms)" }
+        mut r = ""
+        for i in range(0, len(k)) {
+            if i > 0 { r = r + ", " }
+            r = r + "#" + toString(k[i])
+        }
+        return r
+    }
+
+    fn whoOnline(self) -> string {
+        imut keys = self.nicks.keys()
+        mut result = ""
+        mut c = 0
+        for i in range(0, len(keys)) {
+            imut k = toString(keys[i])
+            imut nick = toString(self.nicks.get(k))
+            if nick != "anon" {
+                if c > 0 { result = result + ", " }
+                result = result + nick
+                c += 1
+            }
+        }
+        if c == 0 { return "(nobody logged in)" }
+        return result
+    }
+
+    fn whoInRoom(self, room: string) -> string {
+        if !self.rooms.has(room) { return "(empty or no such room)" }
+        imut members = toString(self.rooms.get(room))
+        imut parts = split(members, ",")
+        mut result = ""
+        mut c = 0
+        for p in parts {
+            imut nick = self.getNick(p)
+            if c > 0 { result = result + ", " }
+            result = result + nick
+            c += 1
         }
         return result
     }
 
-    fn count(self) -> int { self.memberCount }
-}
-
-// === Global State ===
-// Writer map: key → PrintWriter (for broadcast, ConcurrentHashMap = thread-safe)
-// Room map: name → Room actor handle (global map, single-threaded access from accept loop)
-
-mut writerMap = ConcurrentHashMap.new()
-mut rooms = map()
-mut roomNames = [""]
-mut roomCount = 0
-
-fn getOrCreateRoom(name: string) -> object {
-    if rooms.has(name) { return rooms.get(name) }
-    mut room = spawn Room.new(name)
-    rooms.set(name, room)
-    if roomCount == 0 { roomNames[0] = name }
-    else { push(roomNames, name) }
-    roomCount += 1
-    return room
-}
-
-fn listRooms() -> string {
-    if roomCount == 0 { return "(no rooms)" }
-    mut result = ""
-    for i in range(0, roomCount) {
-        if i > 0 { result += ", " }
-        result += "#" + roomNames[i]
-    }
-    return result
-}
-
-fn broadcastToRoom(room: object, senderKey: string, message: string) {
-    // Get member keys from room actor
-    imut memberStr = room.getMembers()
-    if len(memberStr) == 0 { return }
-    imut members = split(memberStr, ",")
-    for member in members {
-        if member != senderKey {
-            if writerMap.containsKey(member) {
-                imut w = writerMap.get(member)
-                w.println(message)
-            }
-        }
+    fn getRoomHistory(self, room: string) -> string {
+        db.getHistory(self.connStr, "#" + room, 20)
     }
 }
 
-// === Client Handler Actor ===
+// === Client Actor ===
 
-actor ClientHandler {
+actor Client {
+    reg: RoomRegistry,
     socket: object,
-    clientId: int,
-    nickname: string,
-    currentRoom: string,
-    writerKey: string
+    id: int,
+    key: string,
+    room: string
 }
 
-impl ClientHandler {
-    fn new(socket: object, clientId: int) -> ClientHandler {
-        ClientHandler {
-            socket: socket,
-            clientId: clientId,
-            nickname: "user" + clientId,
-            currentRoom: "",
-            writerKey: "c" + clientId
-        }
+impl Client {
+    fn new(reg: RoomRegistry, socket: object, id: int) -> Client {
+        Client { reg: reg, socket: socket, id: id, key: "c" + id, room: "" }
     }
 
     fn run(self) {
         mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
         mut writer = PrintWriter.new(self.socket.getOutputStream(), true)
-        writerMap.put(self.writerKey, writer)
+        self.reg.addWriter(self.key, writer)
+        writer.println("=== SiyoChat v3 === /register /login /join /leave /msg /pm /rooms /who /history /quit")
+        println("[c" + self.id + "] connected")
 
-        writer.println("=== SiyoChat === Commands: /nick, /join, /leave, /msg, /rooms, /quit")
-        println("[" + self.nickname + "] connected")
-
-        mut connected = true
-        while connected {
+        mut on = true
+        while on {
             imut line = reader.readLine()
-            if line == null {
-                connected = false
-            } else {
+            if line == null { on = false }
+            else {
                 imut cmd = trim(line)
                 if len(cmd) == 0 {
                     // skip
-
-                } else if startsWith(cmd, "/nick ") {
-                    imut old = self.nickname
-                    self.nickname = substring(cmd, 6, len(cmd))
-                    writer.println("Now known as " + self.nickname)
-                    if len(self.currentRoom) > 0 {
-                        imut room = getOrCreateRoom(self.currentRoom)
-                        broadcastToRoom(room, self.writerKey, "* " + old + " is now " + self.nickname)
+                } else if startsWith(cmd, "/register ") {
+                    imut rest = substring(cmd, 10, len(cmd))
+                    imut sp = indexOf(rest, " ")
+                    if sp < 0 { writer.println("Usage: /register nick password") }
+                    else {
+                        imut nick = substring(rest, 0, sp)
+                        imut pass = substring(rest, sp + 1, len(rest))
+                        writer.println(self.reg.register(nick, pass))
                     }
-
+                } else if startsWith(cmd, "/login ") {
+                    imut rest = substring(cmd, 7, len(cmd))
+                    imut sp = indexOf(rest, " ")
+                    if sp < 0 { writer.println("Usage: /login nick password") }
+                    else {
+                        imut nick = substring(rest, 0, sp)
+                        imut pass = substring(rest, sp + 1, len(rest))
+                        writer.println(self.reg.login(self.key, nick, pass))
+                    }
                 } else if startsWith(cmd, "/join ") {
-                    imut name = substring(cmd, 6, len(cmd))
-                    if len(self.currentRoom) > 0 {
-                        imut oldRoom = getOrCreateRoom(self.currentRoom)
-                        oldRoom.leave(self.writerKey)
-                        broadcastToRoom(oldRoom, self.writerKey, "* " + self.nickname + " left")
+                    if !self.reg.isAuthed(self.key) { writer.println("ERR login first") }
+                    else {
+                        imut name = substring(cmd, 6, len(cmd))
+                        if len(self.room) > 0 {
+                            self.reg.leaveRoom(self.room, self.key)
+                            self.reg.broadcastRoom(self.room, self.key, "* " + self.reg.getNick(self.key) + " left")
+                        }
+                        imut result = self.reg.joinRoom(name, self.key)
+                        writer.println(result)
+                        self.room = name
+                        self.reg.broadcastRoom(name, self.key, "* " + self.reg.getNick(self.key) + " joined")
                     }
-                    imut room = getOrCreateRoom(name)
-                    writer.println(room.join(self.writerKey))
-                    self.currentRoom = name
-                    broadcastToRoom(room, self.writerKey, "* " + self.nickname + " joined #" + name)
-
                 } else if cmd == "/leave" {
-                    if len(self.currentRoom) == 0 {
-                        writer.println("Not in a room")
-                    } else {
-                        imut room = getOrCreateRoom(self.currentRoom)
-                        room.leave(self.writerKey)
-                        broadcastToRoom(room, self.writerKey, "* " + self.nickname + " left")
-                        writer.println("Left #" + self.currentRoom)
-                        self.currentRoom = ""
-                    }
-
-                } else if cmd == "/rooms" {
-                    writer.println(listRooms())
-
+                    if len(self.room) > 0 {
+                        imut nick = self.reg.getNick(self.key)
+                        self.reg.broadcastRoom(self.room, self.key, "* " + nick + " left")
+                        self.reg.leaveRoom(self.room, self.key)
+                        writer.println("left #" + self.room)
+                        self.room = ""
+                    } else { writer.println("not in a room") }
                 } else if startsWith(cmd, "/msg ") {
-                    if len(self.currentRoom) == 0 {
-                        writer.println("Join a room first: /join name")
-                    } else {
+                    if !self.reg.isAuthed(self.key) { writer.println("ERR login first") }
+                    else if len(self.room) == 0 { writer.println("join a room first") }
+                    else {
                         imut text = substring(cmd, 5, len(cmd))
-                        imut msg = "[#" + self.currentRoom + "] " + self.nickname + ": " + text
-                        imut room = getOrCreateRoom(self.currentRoom)
-                        broadcastToRoom(room, "", msg)
+                        self.reg.sendMessage(self.room, self.key, text)
                     }
-
+                } else if startsWith(cmd, "/pm ") {
+                    if !self.reg.isAuthed(self.key) { writer.println("ERR login first") }
+                    else {
+                        imut rest = substring(cmd, 4, len(cmd))
+                        imut sp = indexOf(rest, " ")
+                        if sp < 0 { writer.println("Usage: /pm nick message") }
+                        else {
+                            imut target = substring(rest, 0, sp)
+                            imut text = substring(rest, sp + 1, len(rest))
+                            writer.println(self.reg.sendPM(self.key, target, text))
+                        }
+                    }
+                } else if cmd == "/rooms" {
+                    writer.println(self.reg.listRooms())
+                } else if cmd == "/who" {
+                    writer.println(self.reg.whoOnline())
+                } else if startsWith(cmd, "/who ") {
+                    imut room = substring(cmd, 5, len(cmd))
+                    writer.println(self.reg.whoInRoom(room))
+                } else if cmd == "/history" {
+                    if len(self.room) == 0 { writer.println("join a room first") }
+                    else {
+                        imut hist = self.reg.getRoomHistory(self.room)
+                        if len(hist) == 0 { writer.println("(no history)") }
+                        else { writer.println(hist) }
+                    }
                 } else if cmd == "/quit" {
                     writer.println("Bye!")
-                    connected = false
-
+                    on = false
                 } else {
-                    writer.println("Unknown: " + cmd)
+                    writer.println("? unknown: " + cmd)
                 }
             }
         }
 
-        if len(self.currentRoom) > 0 {
-            imut room = getOrCreateRoom(self.currentRoom)
-            room.leave(self.writerKey)
-            broadcastToRoom(room, self.writerKey, "* " + self.nickname + " disconnected")
+        if len(self.room) > 0 {
+            self.reg.broadcastRoom(self.room, self.key, "* " + self.reg.getNick(self.key) + " disconnected")
+            self.reg.leaveRoom(self.room, self.key)
         }
-        writerMap.remove(self.writerKey)
+        self.reg.removeWriter(self.key)
         self.socket.close()
-        println("[" + self.nickname + "] disconnected")
+        println("[c" + self.id + "] disconnected")
     }
 }
 
 // === Main ===
 
-imut PORT = 7778
-mut server = ServerSocket.new(PORT)
-mut clientCount = 0
+imut PORT = 11111
+imut CONN = "jdbc:sqlite:chat.db"
 
-println("=== SiyoChat Server ===")
-println("Port " + PORT)
-println("")
+db.initSchema(CONN)
+println("DB initialized")
+
+mut reg = spawn RoomRegistry.new(CONN)
+mut server = ServerSocket.new(PORT)
+mut count = 0
+
+println("=== SiyoChat v3 === Port " + PORT)
 
 while true {
     mut socket = server.accept()
-    clientCount += 1
-    spawn ClientHandler.new(socket, clientCount)
+    count += 1
+    spawn Client.new(reg, socket, count)
 }
