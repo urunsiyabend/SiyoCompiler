@@ -25,7 +25,7 @@ It ships with an actor model, Go-style channels, closures, pattern matching, str
 
 **Concurrent key-value store with actors:**
 
-```siyo
+```rust
 actor Store { data: map }
 
 impl Store {
@@ -50,7 +50,7 @@ send store.set("async", "fire-and-forget")
 
 **REST API with SQLite (runs on JVM):**
 
-```siyo
+```rust
 import java "java.sql.DriverManager"
 import java "java.net.ServerSocket"
 
@@ -71,7 +71,7 @@ println("Listening on :3000")
 
 **Closures and higher-order functions:**
 
-```siyo
+```rust
 fn makeMultiplier(factor: int) -> fn(int) -> int {
     return fn(x: int) -> int { x * factor }
 }
@@ -92,7 +92,7 @@ sort(words, fn(a: string, b: string) -> int {
 
 **Structured concurrency with channels:**
 
-```siyo
+```rust
 imut results = channel(10)
 
 scope {

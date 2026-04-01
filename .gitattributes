@@ -1,0 +1,3 @@
+# Syntax highlighting for .siyo files on GitHub
+# Rust is the closest match: fn, mut, struct, enum, match, ->, //, closures
+*.siyo linguist-language=Rust
