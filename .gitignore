@@ -20,3 +20,8 @@ buildNumber.properties
 .claude/
 *.db
 build_output.txt
+
+# IDE / build artifacts
+.depintel/
+*.class
+lib/
