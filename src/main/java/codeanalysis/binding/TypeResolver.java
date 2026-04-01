@@ -1,6 +1,6 @@
 package codeanalysis.binding;
 
-import codeanalysis.*;;
+import codeanalysis.*;
 
 import java.util.HashMap;
 import java.util.List;
