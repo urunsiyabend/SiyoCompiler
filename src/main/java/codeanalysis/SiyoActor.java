@@ -52,6 +52,9 @@ public class SiyoActor {
      * Send a message and wait for reply (synchronous).
      */
     public Object call(String methodName, Object[] args) {
+        if (_stopped) {
+            throw new RuntimeException("Actor is stopped: cannot call '" + methodName + "'");
+        }
         LinkedBlockingQueue<Object> replyChannel = new LinkedBlockingQueue<>(1);
         try {
             _mailbox.put(new ActorMessage(methodName, deepCopyArgs(args), replyChannel));
@@ -70,6 +73,7 @@ public class SiyoActor {
      * Send a message without waiting for reply (fire-and-forget).
      */
     public void send(String methodName, Object[] args) {
+        if (_stopped) return; // silently ignore sends to stopped actors
         try {
             _mailbox.put(new ActorMessage(methodName, deepCopyArgs(args), null));
         } catch (InterruptedException e) {

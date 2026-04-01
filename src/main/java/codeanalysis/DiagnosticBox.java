@@ -257,6 +257,10 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         report(span, message);
     }
 
+    public void reportError(TextSpan span, String message) {
+        report(span, message);
+    }
+
     public void reportSendOnNonActor(TextSpan span) {
         report(span, "send can only be used with actor method calls\n\n  help: send dispatches asynchronously to an actor's mailbox.\n  For regular function calls, just call the function directly.");
     }
