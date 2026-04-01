@@ -329,21 +329,25 @@ public class Evaluator {
             case Equals -> java.util.Objects.equals(left, right);
             case NotEquals -> !java.util.Objects.equals(left, right);
             case LessThan -> {
+                if (left instanceof String l && right instanceof String r) yield l.compareTo(r) < 0;
                 if (left instanceof Double l && right instanceof Double r) yield l < r;
                 if (hasLong) yield toLong(left) < toLong(right);
                 yield (int) left < (int) right;
             }
             case LessOrEqualsThan -> {
+                if (left instanceof String l && right instanceof String r) yield l.compareTo(r) <= 0;
                 if (left instanceof Double l && right instanceof Double r) yield l <= r;
                 if (hasLong) yield toLong(left) <= toLong(right);
                 yield (int) left <= (int) right;
             }
             case GreaterThan -> {
+                if (left instanceof String l && right instanceof String r) yield l.compareTo(r) > 0;
                 if (left instanceof Double l && right instanceof Double r) yield l > r;
                 if (hasLong) yield toLong(left) > toLong(right);
                 yield (int) left > (int) right;
             }
             case GreaterOrEqualsThen -> {
+                if (left instanceof String l && right instanceof String r) yield l.compareTo(r) >= 0;
                 if (left instanceof Double l && right instanceof Double r) yield l >= r;
                 if (hasLong) yield toLong(left) >= toLong(right);
                 yield (int) left >= (int) right;
@@ -905,7 +909,7 @@ public class Evaluator {
             return ((String) arguments[0]).length();
         }
         if (function == BuiltinFunctions.TO_STRING) {
-            return arguments[0].toString();
+            return String.valueOf(arguments[0]);
         }
         if (function == BuiltinFunctions.PARSE_INT) {
             try {
@@ -924,6 +928,10 @@ public class Evaluator {
         if (function == BuiltinFunctions.TO_INT) {
             return ((Double) arguments[0]).intValue();
         }
+        if (function == BuiltinFunctions.TO_INT_STR) {
+            try { return Integer.parseInt((String) arguments[0]); }
+            catch (NumberFormatException e) { return 0; }
+        }
         if (function == BuiltinFunctions.PARSE_LONG) {
             return Long.parseLong((String) arguments[0]);
         }
@@ -932,6 +940,15 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.TO_FLOAT) {
             return ((Integer) arguments[0]).doubleValue();
+        }
+        if (function == BuiltinFunctions.TO_DOUBLE) {
+            return ((Integer) arguments[0]).doubleValue();
+        }
+        if (function == BuiltinFunctions.TO_UPPER) {
+            return ((String) arguments[0]).toUpperCase();
+        }
+        if (function == BuiltinFunctions.TO_LOWER) {
+            return ((String) arguments[0]).toLowerCase();
         }
         if (function == BuiltinFunctions.PRINT) {
             System.out.print(arguments[0]);
@@ -980,9 +997,12 @@ public class Evaluator {
                     frame.getLocals().put(comparator.getParameters().get(0), a);
                     frame.getLocals().put(comparator.getParameters().get(1), b);
                     _callStack.push(frame);
+                    _returnTriggered = false;
                     evaluateBlock(comparator.getBody());
                     _callStack.pop();
-                    Object result = _lastValue;
+                    Object result = _returnTriggered ? _returnValue : _lastValue;
+                    _returnTriggered = false;
+                    _returnValue = null;
                     return (result instanceof Integer i) ? i : 0;
                 } catch (Exception e) {
                     return 0;

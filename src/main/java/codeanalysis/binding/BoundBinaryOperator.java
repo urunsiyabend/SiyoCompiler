@@ -100,6 +100,10 @@ public class BoundBinaryOperator {
             new BoundBinaryOperator(SyntaxType.PlusToken, BoundBinaryOperatorType.Addition, Object.class, String.class, String.class),
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, String.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, String.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessToken, BoundBinaryOperatorType.LessThan, String.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.LessOrEqualsToken, BoundBinaryOperatorType.LessOrEqualsThan, String.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterToken, BoundBinaryOperatorType.GreaterThan, String.class, Boolean.class),
+            new BoundBinaryOperator(SyntaxType.GreaterOrEqualsToken, BoundBinaryOperatorType.GreaterOrEqualsThen, String.class, Boolean.class),
 
             new BoundBinaryOperator(SyntaxType.EqualsEqualsToken, BoundBinaryOperatorType.Equals, Object.class, Boolean.class),
             new BoundBinaryOperator(SyntaxType.BangEqualsToken, BoundBinaryOperatorType.NotEquals, Object.class, Boolean.class),

@@ -144,6 +144,32 @@ public class BuiltinFunctions {
             String.class
     );
 
+    public static final FunctionSymbol TO_UPPER = new FunctionSymbol(
+            "toUpper",
+            List.of(new ParameterSymbol("s", String.class)),
+            String.class
+    );
+
+    public static final FunctionSymbol TO_LOWER = new FunctionSymbol(
+            "toLower",
+            List.of(new ParameterSymbol("s", String.class)),
+            String.class
+    );
+
+    // toInt(string) -> int — alias for parseInt
+    public static final FunctionSymbol TO_INT_STR = new FunctionSymbol(
+            "toInt",
+            List.of(new ParameterSymbol("value", String.class)),
+            Integer.class
+    );
+
+    // toDouble(int) -> double — alias for toFloat
+    public static final FunctionSymbol TO_DOUBLE = new FunctionSymbol(
+            "toDouble",
+            List.of(new ParameterSymbol("value", Integer.class)),
+            Double.class
+    );
+
     public static final FunctionSymbol REMOVE_AT = new FunctionSymbol(
             "removeAt",
             List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("index", Integer.class)),
@@ -223,9 +249,9 @@ public class BuiltinFunctions {
     );
 
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_LONG, TO_FLOAT,
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
                 PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
-                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
+                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {
