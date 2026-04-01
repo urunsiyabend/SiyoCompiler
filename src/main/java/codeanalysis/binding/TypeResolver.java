@@ -293,6 +293,7 @@ public class TypeResolver {
     }
 
     public Class<?> lookupType(String name) {
+        if (name == null) return null;
         if (name.endsWith("[]")) {
             return SiyoArray.class;
         }

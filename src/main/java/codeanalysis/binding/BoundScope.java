@@ -53,16 +53,23 @@ public class BoundScope {
     }
 
     /**
-     * Declare a function. Allows overloads (same name, different param count).
-     * Rejects exact duplicates (same name AND same param count).
+     * Declare a function. Allows overloads (same name, different param count or types).
+     * Rejects exact duplicates (same name AND same param count AND same param types).
      */
     public boolean tryDeclareFunction(FunctionSymbol functionSymbol) {
         List<FunctionSymbol> overloads = _functions.get(functionSymbol.getName());
         if (overloads != null) {
-            // Check for exact duplicate (same param count)
+            // Check for exact duplicate (same param count AND same param types)
             for (FunctionSymbol existing : overloads) {
                 if (existing.getParameters().size() == functionSymbol.getParameters().size()) {
-                    return false; // duplicate
+                    boolean sameTypes = true;
+                    for (int i = 0; i < existing.getParameters().size(); i++) {
+                        if (existing.getParameters().get(i).getType() != functionSymbol.getParameters().get(i).getType()) {
+                            sameTypes = false;
+                            break;
+                        }
+                    }
+                    if (sameTypes) return false; // true duplicate
                 }
             }
             overloads.add(functionSymbol);
@@ -102,6 +109,35 @@ public class BoundScope {
         }
         if (_parent == null) return null;
         return _parent.lookupFunction(name, argCount);
+    }
+
+    /**
+     * Lookup function by name, arg count, and argument types (type-aware overload resolution).
+     */
+    public FunctionSymbol lookupFunction(String name, java.util.List<Class<?>> argTypes) {
+        List<FunctionSymbol> overloads = _functions.get(name);
+        if (overloads != null) {
+            // First: exact match on all parameter types
+            for (FunctionSymbol func : overloads) {
+                if (func.getParameters().size() != argTypes.size()) continue;
+                boolean match = true;
+                for (int i = 0; i < argTypes.size(); i++) {
+                    Class<?> paramType = func.getParameters().get(i).getType();
+                    Class<?> argType = argTypes.get(i);
+                    if (paramType != Object.class && argType != Object.class && paramType != argType) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return func;
+            }
+            // Fallback: match by arg count only
+            for (FunctionSymbol func : overloads) {
+                if (func.getParameters().size() == argTypes.size()) return func;
+            }
+        }
+        if (_parent == null) return null;
+        return _parent.lookupFunction(name, argTypes);
     }
 
     public Iterable<FunctionSymbol> getDeclaredFunctions() {

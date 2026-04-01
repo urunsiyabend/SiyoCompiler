@@ -10,6 +10,8 @@ import codeanalysis.ParameterSymbol;
 import codeanalysis.SiyoArray;
 import codeanalysis.SiyoChannel;
 import codeanalysis.SiyoClosure;
+import codeanalysis.SiyoMap;
+import codeanalysis.SiyoSet;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
 import codeanalysis.VariableSymbol;
@@ -535,6 +537,18 @@ public class Binder {
         return new BoundBlockStatement(outer);
     }
 
+    private boolean isActorHandle(VariableSymbol var) {
+        if (var.getType() != SiyoStruct.class) return false;
+        // Check if the struct type for this variable is an actor
+        StructSymbol structType = _typeResolver.getVarStructType(var);
+        return structType != null && structType.isActor();
+    }
+
+    private boolean isMutableContainerType(Class<?> type) {
+        return type == SiyoArray.class || type == SiyoMap.class
+                || type == SiyoSet.class || type == SiyoStruct.class;
+    }
+
     private Class<?> lastExprType(BoundStatement body) {
         if (body instanceof BoundBlockStatement block && !block.getStatements().isEmpty()) {
             var last = block.getStatements().get(block.getStatements().size() - 1);
@@ -919,8 +933,11 @@ public class Binder {
             boundArguments.add(boundArgument);
         }
 
-        // Resolve overload by arg count, then fallback to first match
-        FunctionSymbol function = _scope.lookupFunction(name, boundArguments.size());
+        // Resolve overload: try type-aware first, then arg count, then first match
+        java.util.List<Class<?>> argTypes = new java.util.ArrayList<>();
+        for (BoundExpression arg : boundArguments) argTypes.add(arg.getClassType());
+        FunctionSymbol function = _scope.lookupFunction(name, argTypes);
+        if (function == null) function = _scope.lookupFunction(name, boundArguments.size());
         if (function == null) function = _scope.lookupFunction(name);
 
         // Check argument count
@@ -1306,8 +1323,16 @@ public class Binder {
             VariableSymbol var = varExpr.getVariable();
             if (!localVarNames.contains(var.getName())) {
                 captured.add(var);
+                // Reject mutable variables (except channels and synthetic loop vars)
                 if (!var.isReadOnly() && var.getType() != SiyoChannel.class
                         && !var.getName().startsWith("_idx") && !var.getName().startsWith("_col")) {
+                    mutableCaptures.add(var);
+                }
+                // Reject mutable containers even when imut — contents are mutable
+                // Exempt: primitives, channels, actor handles (actors ARE meant to be shared)
+                if (var.isReadOnly() && isMutableContainerType(var.getType())
+                        && var.getType() != SiyoChannel.class
+                        && !isActorHandle(var)) {
                     mutableCaptures.add(var);
                 }
             }
@@ -1392,8 +1417,13 @@ public class Binder {
             returnType = _typeResolver.lookupType(syntax.getTypeClause().getIdentifier().getData());
         }
 
+        // Set _currentFunction so return statements are allowed inside lambda body
+        FunctionSymbol previousFunction = _currentFunction;
+        _currentFunction = new FunctionSymbol("$lambda", parameters, returnType);
+
         // Bind body
         BoundStatement body = bindStatement(syntax.getBody());
+        _currentFunction = previousFunction;
         BoundBlockStatement blockBody = body instanceof BoundBlockStatement block
                 ? block : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
 
@@ -1413,27 +1443,38 @@ public class Binder {
 
     private void collectCapturedVars(BoundNode node, List<ParameterSymbol> params,
                                       java.util.Set<VariableSymbol> captured) {
+        // First pass: collect all locally declared variable names
+        java.util.Set<String> localNames = new java.util.HashSet<>();
+        for (ParameterSymbol p : params) localNames.add(p.getName());
+        collectLocalVarNames(node, localNames);
+
+        // Second pass: find references to variables not declared locally
+        collectExternalRefs(node, localNames, captured);
+    }
+
+    private void collectLocalVarNames(BoundNode node, java.util.Set<String> names) {
+        if (node instanceof BoundVariableDeclaration varDecl) {
+            names.add(varDecl.getVariable().getName());
+        }
+        for (var it = node.getChildren(); it.hasNext(); ) {
+            collectLocalVarNames(it.next(), names);
+        }
+    }
+
+    private void collectExternalRefs(BoundNode node, java.util.Set<String> localNames,
+                                      java.util.Set<VariableSymbol> captured) {
         if (node instanceof BoundVariableExpression varExpr) {
-            VariableSymbol var = varExpr.getVariable();
-            // Not a parameter and not a local → captured from outer scope
-            boolean isParam = false;
-            for (ParameterSymbol p : params) {
-                if (p.getName().equals(var.getName())) { isParam = true; break; }
-            }
-            if (!isParam && !(var instanceof ParameterSymbol)) {
-                captured.add(var);
+            if (!localNames.contains(varExpr.getVariable().getName())) {
+                captured.add(varExpr.getVariable());
             }
         }
         if (node instanceof BoundAssignmentExpression assignExpr) {
-            VariableSymbol var = assignExpr.getVariable();
-            boolean isParam = false;
-            for (ParameterSymbol p : params) {
-                if (p.getName().equals(var.getName())) { isParam = true; break; }
+            if (!localNames.contains(assignExpr.getVariable().getName())) {
+                captured.add(assignExpr.getVariable());
             }
-            if (!isParam) captured.add(var);
         }
         for (var it = node.getChildren(); it.hasNext(); ) {
-            collectCapturedVars(it.next(), params, captured);
+            collectExternalRefs(it.next(), localNames, captured);
         }
     }
 
