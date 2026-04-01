@@ -126,6 +126,30 @@ class CompilationTest {
             {"GlobalVarFunc", "mut x = 10\nfn getX() -> int { x }\nprintln(toString(getX()))"},
             {"ImplicitReturn", "fn double(n: int) -> int { n * 2 }\nprintln(toString(double(21)))"},
             {"MultiForIn", "for a in [1, 2] { println(toString(a)) }\nfor b in [3, 4] { println(toString(b)) }"},
+            // Variable shadowing
+            {"VarShadowBlock", "mut x = 1\n{ mut x = 2\nprintln(toString(x)) }\nprintln(toString(x))"},
+            {"VarShadowDeep", "mut x = 1\nprintln(toString(x))\n{ mut x = 2\nprintln(toString(x))\n{ mut x = 3\nprintln(toString(x)) }\nprintln(toString(x)) }\nprintln(toString(x))"},
+            {"VarShadowIf", "mut x = 10\nif true { mut x = 20\nprintln(toString(x)) }\nprintln(toString(x))"},
+            // Nested try-catch
+            {"NestedTryCatch", "mut x = 0\ntry { try { error(\"inner\") } catch e { x = 1 }\nx = x + 10 } catch e { x = -1 }\nprintln(toString(x))"},
+            {"NestedTryNoRethrow", "mut r = \"\"\ntry { r = r + \"a\"\ntry { r = r + \"b\"\nerror(\"x\") } catch e { r = r + \"c\" }\nr = r + \"d\" } catch e { r = r + \"e\" }\nprintln(r)"},
+            // Continue in for-in
+            {"ForInContinue", "mut sum = 0\nfor x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {\nif x % 2 == 0 continue\nsum += x }\nprintln(toString(sum))"},
+            // Lambda with capture
+            {"LambdaCapture", "imut base = 10\nimut add = fn(x: int) -> int { x + base }\nprintln(toString(add(5)))\nprintln(toString(add(20)))"},
+            // removeAt and pop
+            {"RemoveAt", "mut arr = [10, 20, 30]\nremoveAt(arr, 1)\nprintln(toString(len(arr)))\nprintln(toString(arr[0]))\nprintln(toString(arr[1]))"},
+            {"Pop", "mut arr = [10, 20, 30]\nimut last = pop(arr)\nprintln(toString(last))\nprintln(toString(len(arr)))"},
+            // parseInt with invalid input
+            {"ParseIntSafe", "println(toString(parseInt(\"42\")))\nprintln(toString(parseInt(\"hello\")))"},
+            // toUpper/toLower
+            {"ToUpperLower", "println(toUpper(\"hello\"))\nprintln(toLower(\"WORLD\"))"},
+            // toInt(string) overload
+            {"ToIntStr", "println(toString(toInt(\"42\")))\nprintln(toString(toInt(\"bad\")))"},
+            // toDouble
+            {"ToDouble", "println(toString(toDouble(42)))"},
+            // fn returning fn (closure factory)
+            {"ClosureFactory", "fn makeMultiplier(factor: int) -> fn(int) -> int {\nreturn fn(x: int) -> int { x * factor }\n}\nimut triple = makeMultiplier(3)\nprintln(toString(triple(5)))"},
         };
     }
 }
