@@ -213,7 +213,30 @@ public class ModuleHandler {
             }
         }
 
-        // 3. Project root
+        // 3. Project src/ root (when siyo.toml exists)
+        codeanalysis.project.SiyoProject project = codeanalysis.project.SiyoProject.getCurrent();
+        if (project != null) {
+            java.nio.file.Path srcRoot = project.getSourceRoot();
+            candidate = srcRoot.resolve(pathName + ".siyo");
+            if (java.nio.file.Files.exists(candidate)) {
+                return candidate.toAbsolutePath().toString();
+            }
+            // Subdirectory in src/
+            dirCandidate = srcRoot.resolve(pathName);
+            if (java.nio.file.Files.isDirectory(dirCandidate)) {
+                java.nio.file.Path indexFile = dirCandidate.resolve("index.siyo");
+                if (java.nio.file.Files.exists(indexFile)) {
+                    return indexFile.toAbsolutePath().toString();
+                }
+                String dirName = dirCandidate.getFileName().toString();
+                java.nio.file.Path namedFile = dirCandidate.resolve(dirName + ".siyo");
+                if (java.nio.file.Files.exists(namedFile)) {
+                    return namedFile.toAbsolutePath().toString();
+                }
+            }
+        }
+
+        // 4. CWD root (fallback)
         String projectRoot = System.getProperty("user.dir");
         candidate = java.nio.file.Paths.get(projectRoot, pathName + ".siyo");
         if (java.nio.file.Files.exists(candidate)) {

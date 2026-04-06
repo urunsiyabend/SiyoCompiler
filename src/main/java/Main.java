@@ -1,4 +1,5 @@
 import codeanalysis.*;
+import codeanalysis.project.SiyoProject;
 import codeanalysis.syntax.SyntaxTree;
 
 import java.util.*;
@@ -41,8 +42,20 @@ public class Main {
         }
 
         String[] cargs = remaining.toArray(new String[0]);
+
+        // siyoc new <name> — create project skeleton
+        if (cargs.length >= 2 && cargs[0].equals("new")) {
+            SiyoProject.createNew(cargs[1]);
+            return;
+        }
+
         if (cargs.length >= 2 && cargs[0].equals("run")) {
             compileAndRun(cargs[1]); // bytecode default (26x faster)
+            return;
+        }
+        // siyoc run (no args) — project mode via siyo.toml
+        if (cargs.length == 1 && cargs[0].equals("run")) {
+            runProject();
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("interpret")) {
@@ -62,6 +75,29 @@ public class Main {
             return;
         }
         repl();
+    }
+
+    private static void runProject() {
+        java.nio.file.Path cwd = java.nio.file.Paths.get(System.getProperty("user.dir"));
+        SiyoProject project = SiyoProject.load(cwd);
+        if (project == null) {
+            System.err.println("Error: no siyo.toml found in current directory.");
+            System.exit(1);
+        }
+
+        // Resolve dependencies (download missing JARs, add to classpath)
+        project.resolveDependencies();
+
+        // Set as current project for module resolution
+        SiyoProject.setCurrent(project);
+
+        java.nio.file.Path mainFile = project.getMainFile();
+        if (!java.nio.file.Files.exists(mainFile)) {
+            System.err.println("Error: main file not found: " + mainFile);
+            System.exit(1);
+        }
+
+        compileAndRun(mainFile.toString());
     }
 
     private static void compileAndRun(String path) {

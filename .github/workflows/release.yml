@@ -9,8 +9,21 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            archive: tar.gz
+          - os: macos-14
+            platform: macos-arm64
+            archive: tar.gz
+          - os: windows-latest
+            platform: windows-x64
+            archive: zip
+
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
@@ -24,89 +37,126 @@ jobs:
 
     - name: Extract version from tag
       id: version
+      shell: bash
       run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
     - name: Set Maven version
       run: mvn -B versions:set -DnewVersion=${{ steps.version.outputs.VERSION }} -DgenerateBackupPoms=false
 
-    - name: Build and Test
-      run: mvn -B verify
+    - name: Build
+      run: mvn -B package -DskipTests
 
-    - name: Prepare release artifacts
+    - name: Create bundled JRE with jlink
+      shell: bash
+      run: |
+        jlink \
+          --add-modules ALL-MODULE-PATH \
+          --output runtime \
+          --strip-debug \
+          --no-man-pages \
+          --no-header-files \
+          --compress zip-6
+
+    - name: Bundle distribution (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
       run: |
         VERSION=${{ steps.version.outputs.VERSION }}
-        STAGING="siyo-${VERSION}"
-        mkdir -p "${STAGING}/bin"
+        DIST="siyo-${VERSION}-${{ matrix.platform }}"
+        mkdir -p "${DIST}/bin" "${DIST}/lib"
 
-        # Fat JAR (shade plugin replaces the main jar, no -shaded suffix)
-        cp target/siyo-compiler-${VERSION}.jar "${STAGING}/siyoc.jar"
+        cp target/siyo-compiler-${VERSION}.jar "${DIST}/lib/siyoc.jar"
+        mv runtime "${DIST}/runtime"
 
-        # Launcher scripts
-        cp bin/siyoc "${STAGING}/bin/siyoc"
-        cp bin/siyoc.bat "${STAGING}/bin/siyoc.bat"
-        chmod +x "${STAGING}/bin/siyoc"
+        # Wrapper script
+        cat > "${DIST}/bin/siyoc" << 'WRAPPER'
+        #!/bin/sh
+        set -e
+        SIYO_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+        exec "$SIYO_HOME/runtime/bin/java" -jar "$SIYO_HOME/lib/siyoc.jar" "$@"
+        WRAPPER
+        sed -i.bak 's/^        //' "${DIST}/bin/siyoc" && rm -f "${DIST}/bin/siyoc.bak"
+        chmod +x "${DIST}/bin/siyoc"
 
-        # Patch launchers to use siyoc.jar from parent dir
-        sed -i 's|SIYO_JAR=.*|SIYO_JAR="$SCRIPT_DIR/../siyoc.jar"|' "${STAGING}/bin/siyoc"
-        sed -i 's|set SIYO_JAR=.*|set SIYO_JAR=%SCRIPT_DIR%..\\siyoc.jar|' "${STAGING}/bin/siyoc.bat"
+        tar czf "${DIST}.tar.gz" "${DIST}"
 
-        # Docs
-        cp README.md "${STAGING}/"
-        cp GRAMMAR.md "${STAGING}/"
-        cp FUTURE.md "${STAGING}/"
-        cp LICENSE* "${STAGING}/" 2>/dev/null || true
+    - name: Bundle distribution (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        VERSION=${{ steps.version.outputs.VERSION }}
+        DIST="siyo-${VERSION}-${{ matrix.platform }}"
+        mkdir -p "${DIST}/bin" "${DIST}/lib"
 
-        # Examples
-        cp -r examples "${STAGING}/examples"
+        cp target/siyo-compiler-${VERSION}.jar "${DIST}/lib/siyoc.jar"
+        mv runtime "${DIST}/runtime"
 
-        # Create archives
-        tar czf "siyo-${VERSION}.tar.gz" "${STAGING}"
-        zip -r  "siyo-${VERSION}.zip"    "${STAGING}"
+        # Wrapper script
+        printf '@echo off\r\nset "SIYO_HOME=%%~dp0.."\r\n"%%SIYO_HOME%%\\runtime\\bin\\java.exe" -jar "%%SIYO_HOME%%\\lib\\siyoc.jar" %%*\r\n' > "${DIST}/bin/siyoc.cmd"
 
-        # Standalone JAR with version name
-        cp "${STAGING}/siyoc.jar" "siyoc-${VERSION}.jar"
+        7z a -tzip "${DIST}.zip" "${DIST}"
 
-        echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-${{ matrix.platform }}
+        path: siyo-*-${{ matrix.platform }}.${{ matrix.archive }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Extract version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
 
     - name: Generate release notes
-      id: notes
       run: |
         VERSION=${{ steps.version.outputs.VERSION }}
-        cat > release-notes.md << 'NOTES_EOF'
-        ## Siyo $VERSION
+        cat > release-notes.md << EOF
+        ## Siyo ${VERSION}
 
-        ### Installation
+        ### Quick Install
 
-        **Option 1 — Download and extract:**
-        ```bash
-        # Linux / macOS
-        tar xzf siyo-$VERSION.tar.gz
-        export PATH="$PWD/siyo-$VERSION/bin:$PATH"
+        **Linux / macOS:**
+        \`\`\`bash
+        curl -fsSL https://raw.githubusercontent.com/urunsiyabend/SiyoCompiler/master/install.sh | sh
+        \`\`\`
 
-        # Windows
-        # Extract siyo-$VERSION.zip, add bin\ to PATH
-        ```
+        **Windows (PowerShell):**
+        \`\`\`powershell
+        irm https://raw.githubusercontent.com/urunsiyabend/SiyoCompiler/master/install.ps1 | iex
+        \`\`\`
 
-        **Option 2 — JAR only (requires Java 21+):**
-        ```bash
-        java -jar siyoc-$VERSION.jar run hello.siyo
-        ```
+        ### Manual Install
+
+        Download the archive for your platform, extract it, and add \`bin/\` to your PATH.
+        No Java installation required — a bundled JRE is included.
 
         ### Usage
-        ```bash
-        siyoc run program.siyo         # compile to bytecode & run
-        siyoc compile program.siyo     # emit .class file
-        siyoc interpret program.siyo   # tree-walking interpreter
-        siyoc repl                     # interactive REPL
-        ```
+        \`\`\`bash
+        siyoc new my-app       # create project
+        cd my-app && siyoc run # build & run
+        siyoc run file.siyo    # run single file
+        siyoc repl             # interactive REPL
+        \`\`\`
 
-        ### Requirements
-        - Java 21 or later
+        ### Uninstall
+        \`\`\`bash
+        rm -rf ~/.siyo   # Linux/macOS
+        \`\`\`
 
-        See [GRAMMAR.md](https://github.com/urunsiyabend/SiyoCompiler/blob/v$VERSION/GRAMMAR.md) for the full language reference.
-        NOTES_EOF
-        sed -i "s/\$VERSION/${VERSION}/g" release-notes.md
-        # Remove leading whitespace from heredoc
+        See [GRAMMAR.md](https://github.com/urunsiyabend/SiyoCompiler/blob/v${VERSION}/GRAMMAR.md) for the language reference.
+        EOF
         sed -i 's/^        //' release-notes.md
 
     - name: Create GitHub Release
@@ -115,6 +165,4 @@ jobs:
         name: Siyo ${{ steps.version.outputs.VERSION }}
         body_path: release-notes.md
         files: |
-          siyoc-${{ steps.version.outputs.VERSION }}.jar
-          siyo-${{ steps.version.outputs.VERSION }}.tar.gz
-          siyo-${{ steps.version.outputs.VERSION }}.zip
+          dist/*

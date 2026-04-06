@@ -1,6 +1,19 @@
 @echo off
-set SCRIPT_DIR=%~dp0
-set SIYO_JAR=%SCRIPT_DIR%..\target\siyo-compiler-0.1.0-SNAPSHOT-shaded.jar
+setlocal
+
+set "SCRIPT_DIR=%~dp0"
+set "SIYO_HOME=%SCRIPT_DIR%.."
+
+REM Distribution mode: bundled JRE
+if exist "%SIYO_HOME%\lib\siyoc.jar" (
+    if exist "%SIYO_HOME%\runtime\bin\java.exe" (
+        "%SIYO_HOME%\runtime\bin\java.exe" -jar "%SIYO_HOME%\lib\siyoc.jar" %*
+        exit /b %ERRORLEVEL%
+    )
+)
+
+REM Development mode: shaded JAR from Maven build
+set "SIYO_JAR=%SIYO_HOME%\target\siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
 
 if not exist "%SIYO_JAR%" (
     echo Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'

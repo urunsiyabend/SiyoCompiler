@@ -1,23 +1,27 @@
-#!/usr/bin/env bash
-# Siyo Compiler launcher (delegates to .bat on Windows for classpath handling)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIYO_JAR="$SCRIPT_DIR/../target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
+#!/bin/sh
+# Siyo Compiler launcher
+# Works in two modes:
+#   1. Distribution: bundled runtime/ + lib/siyoc.jar (no Java required)
+#   2. Development:  target/ shaded JAR (requires system Java)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SIYO_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Distribution mode: bundled JRE
+if [ -f "$SIYO_HOME/lib/siyoc.jar" ] && [ -d "$SIYO_HOME/runtime" ]; then
+    exec "$SIYO_HOME/runtime/bin/java" -jar "$SIYO_HOME/lib/siyoc.jar" "$@"
+fi
+
+# Development mode: shaded JAR from Maven build
+SIYO_JAR="$SIYO_HOME/target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
+if [ ! -f "$SIYO_JAR" ]; then
+    # Try non-snapshot name (release build)
+    SIYO_JAR=$(ls "$SIYO_HOME"/target/siyo-compiler-*.jar 2>/dev/null | grep -v original | head -1)
+fi
 
 if [ ! -f "$SIYO_JAR" ]; then
     echo "Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'"
     exit 1
 fi
 
-# Check if we have -cp flag (needs special Windows handling)
-HAS_CP=false
-for arg in "$@"; do
-    [[ "$arg" == "-cp" || "$arg" == "--classpath" ]] && HAS_CP=true
-done
-
-if [[ "$HAS_CP" == "true" ]] && [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
-    # On Windows Git Bash, delegate to .bat for correct classpath separator handling
-    cmd //c "$(cygpath -w "$SCRIPT_DIR/siyoc.bat")" "$@"
-else
-    # Unix or no -cp flag
-    java -jar "$SIYO_JAR" "$@"
-fi
+exec java -jar "$SIYO_JAR" "$@"
