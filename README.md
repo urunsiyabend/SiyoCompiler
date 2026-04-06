@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.1.0-green" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/version-0.1.1-green" alt="v0.1.1">
   <img src="https://img.shields.io/badge/tests-1402%20passing-brightgreen" alt="Tests">
 </p>
 
@@ -113,30 +113,51 @@ scope {
 
 ## Install
 
-**Requirements:** Java 21+, Maven 3.9+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/urunsiyabend/SiyoCompiler/master/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/urunsiyabend/SiyoCompiler/master/install.ps1 | iex
+```
+
+No Java installation required — a bundled JRE is included.
+
+<details>
+<summary>Build from source</summary>
+
+Requires Java 21+ and Maven 3.9+.
 
 ```bash
 git clone https://github.com/urunsiyabend/SiyoCompiler.git
 cd SiyoCompiler
 mvn package -DskipTests
+export PATH="$PWD/bin:$PATH"
 ```
 
-Add `bin/` to your PATH:
+</details>
+
+**Uninstall:**
 
 ```bash
-export PATH="$PWD/bin:$PATH"    # Unix / macOS / Git Bash
-```
-
-Or on Windows CMD:
-
-```cmd
-set PATH=%cd%\bin;%PATH%
+rm -rf ~/.siyo  # Linux/macOS — also remove PATH lines from .bashrc/.zshrc
 ```
 
 ## Usage
 
 ```bash
-# Run (compiles to bytecode, executes)
+# Create a new project
+siyoc new my-app
+cd my-app
+
+# Run project (reads siyo.toml, resolves deps, runs main)
+siyoc run
+
+# Run a single file
 siyoc run hello.siyo
 
 # Compile to .class file
@@ -151,6 +172,23 @@ siyoc repl
 # With external JARs on the classpath
 siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 ```
+
+### Project structure
+
+`siyoc new` creates a project with automatic dependency management:
+
+```toml
+# siyo.toml
+[project]
+name = "my-app"
+version = "0.1.0"
+main = "src/main.siyo"
+
+[dependencies]
+"org.xerial:sqlite-jdbc" = "3.45.0"
+```
+
+Dependencies are downloaded from Maven Central on first `siyoc run` and cached in `~/.siyo/cache/`. Imports resolve relative to `src/` when a `siyo.toml` exists.
 
 ## Language Features
 
@@ -227,6 +265,7 @@ src/main/java/
     ├── binding/                        Binder, BoundScope, TypeResolver
     ├── lowering/                       Lowerer (control flow rewriting)
     ├── emitting/                       ASM bytecode emitter
+    ├── project/                        TomlParser, SiyoProject, DependencyResolver
     ├── Evaluator.java                  Interpreter
     ├── SiyoActor.java                  Actor runtime (mailbox, event loop)
     ├── SiyoChannel.java                Channel (SynchronousQueue / LinkedBlockingQueue)
@@ -252,7 +291,7 @@ mvn test
 - **[FUTURE.md](FUTURE.md)** — Roadmap from 0.1.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.1.0)
+## Known limitations (0.1.1)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
