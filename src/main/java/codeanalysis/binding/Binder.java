@@ -118,6 +118,14 @@ public class Binder {
      * @return The bound statement.
      */
     BoundStatement bindStatement(StatementSyntax syntax) {
+        BoundStatement result = bindStatementInternal(syntax);
+        if (result != null) {
+            try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    private BoundStatement bindStatementInternal(StatementSyntax syntax) {
         return switch (syntax.getType()) {
             case BlockStatement -> bindBlockStatement((BlockStatementSyntax)syntax);
             case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
@@ -251,6 +259,9 @@ public class Binder {
             _typeResolver.trackArrayType(variableSymbol, elemType);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
+        } else if (initializer instanceof BoundJavaMethodCallExpression javaArrCall && javaArrCall.getClassType() == SiyoArray.class) {
+            // Java methods returning arrays (e.g. File.listFiles()) → track as SiyoArray
+            _typeResolver.trackArrayType(variableSymbol, Object.class);
         } else if (initializer instanceof BoundJavaMethodCallExpression javaCall && javaCall.getClassInfo() != null) {
             // Track Java class for constructor results: mut file = File.new("x") -> file is File
             if (javaCall.isConstructor()) {
@@ -332,6 +343,14 @@ public class Binder {
      * @return The bound expression.
      */
     public BoundExpression bindExpression(ExpressionSyntax syntax) {
+        BoundExpression result = bindExpressionInternal(syntax);
+        if (result != null) {
+            try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    private BoundExpression bindExpressionInternal(ExpressionSyntax syntax) {
         return switch (syntax.getType()) {
             case ParenthesizedExpression -> bindParenthesizedExpression((ParanthesizedExpressionSyntax) syntax);
             case LiteralExpression -> bindLiteralExpression((LiteralExpressionSyntax) syntax);
@@ -341,6 +360,7 @@ public class Binder {
             case BinaryExpression -> bindBinaryExpression((BinaryExpressionSyntax) syntax);
             case CallExpression -> bindCallExpression((CallExpressionSyntax) syntax);
             case ArrayLiteralExpression -> bindArrayLiteralExpression((ArrayLiteralExpressionSyntax) syntax);
+            case MapLiteralExpression -> bindMapLiteralExpression((codeanalysis.syntax.MapLiteralExpressionSyntax) syntax);
             case IndexExpression -> bindIndexExpression((IndexExpressionSyntax) syntax);
             case MemberAccessExpression -> bindMemberAccessExpression((MemberAccessExpressionSyntax) syntax);
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
@@ -382,16 +402,9 @@ public class Binder {
         if (value == null) {
             value = 0;
         }
-        // String interpolation: "hello {name}, {count} items" → "hello " + toString(name) + ", " + toString(count) + " items"
-        if (value instanceof String str && str.contains("{")) {
-            BoundExpression result = desugarStringInterpolation(str, syntax);
-            if (result != null) return result;
-        }
-        // Clean escaped braces in non-interpolated strings
-        if (value instanceof String str && str.contains("\\")) {
-            String cleaned = str.replace("\\{", "{").replace("\\}", "}");
-            if (!cleaned.equals(str)) return new BoundLiteralExpression(cleaned);
-        }
+        // Note: string interpolation is now handled at lexer/parser level.
+        // The lexer splits "text {expr} text" into InterpolatedStringStart/Mid/End tokens,
+        // and the parser builds a binary + concatenation tree.
         return new BoundLiteralExpression(value);
     }
 
@@ -566,26 +579,41 @@ public class Binder {
         for (MatchArmSyntax arm : syntax.getArms()) {
             BoundExpression pattern = arm.isDefault() ? null : bindExpression(arm.getPattern());
             BoundExpression body;
+            List<BoundStatement> preStatements = new ArrayList<>();
             if (arm.getBody() instanceof BlockExpressionSyntax blockExpr) {
-                body = bindBlockExpressionBody(blockExpr.getBlock());
+                body = bindBlockExpressionBody(blockExpr.getBlock(), preStatements);
             } else {
                 body = bindExpression(arm.getBody());
             }
             if (resultType == null) resultType = body.getClassType();
-            arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault()));
+            arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(), preStatements));
         }
         if (resultType == null) resultType = Object.class;
         return new BoundMatchExpression(target, arms, resultType);
     }
 
-    private BoundExpression bindBlockExpressionBody(StatementSyntax block) {
-        // For block bodies in match arms, bind the block and return the last expression
+    private BoundExpression bindBlockExpressionBody(StatementSyntax block, List<BoundStatement> preStatements) {
+        // For block bodies in match arms, bind ALL statements in a new scope.
+        // Preceding statements go into preStatements; the last expression is the result.
         if (block instanceof BlockStatementSyntax bs && !bs.getStatements().isEmpty()) {
+            _scope = new BoundScope(_scope);
+            _moduleHandler.setScope(_scope);
             var stmts = bs.getStatements();
-            var last = stmts.get(stmts.size() - 1);
-            if (last instanceof ExpressionStatementSyntax exprStmt) {
-                return bindExpression(exprStmt.getExpression());
+            for (int i = 0; i < stmts.size() - 1; i++) {
+                preStatements.add(bindStatement(stmts.get(i)));
             }
+            var last = stmts.get(stmts.size() - 1);
+            BoundExpression result;
+            if (last instanceof ExpressionStatementSyntax exprStmt) {
+                result = bindExpression(exprStmt.getExpression());
+            } else {
+                // Last statement is not an expression — bind it as a statement and return 0
+                preStatements.add(bindStatement(last));
+                result = new BoundLiteralExpression(0);
+            }
+            _scope = _scope.getParent();
+            _moduleHandler.setScope(_scope);
+            return result;
         }
         return new BoundLiteralExpression(0);
     }
@@ -969,6 +997,12 @@ public class Binder {
             return bindChannelForIn(syntax, collection, itemName);
         }
 
+        // Map iteration: for key in map { ... } → for key in map.keys() { ... }
+        if (collection.getClassType() == SiyoMap.class) {
+            collection = new BoundCallExpression(BuiltinFunctions.MAP_KEYS,
+                    java.util.List.of(collection));
+        }
+
         int uid = _labelCounter++; // unique id to avoid variable name collisions
 
         // Create index and collection variables with unique names
@@ -1070,6 +1104,20 @@ public class Binder {
         return new BoundContinueStatement(_loopStack.peek().continueLabel());
     }
 
+    private BoundExpression bindMapLiteralExpression(codeanalysis.syntax.MapLiteralExpressionSyntax syntax) {
+        List<BoundExpression> boundKeys = new ArrayList<>();
+        List<BoundExpression> boundValues = new ArrayList<>();
+
+        for (ExpressionSyntax key : syntax.getKeys()) {
+            boundKeys.add(bindExpression(key));
+        }
+        for (ExpressionSyntax value : syntax.getValues()) {
+            boundValues.add(bindExpression(value));
+        }
+
+        return new BoundMapLiteralExpression(boundKeys, boundValues);
+    }
+
     private BoundExpression bindArrayLiteralExpression(ArrayLiteralExpressionSyntax syntax) {
         List<BoundExpression> boundElements = new ArrayList<>();
         Class<?> elementType = null;
@@ -1104,6 +1152,10 @@ public class Binder {
             resultType = _typeResolver.resolveArrayElementType(target);
         } else if (target.getClassType() == String.class) {
             resultType = String.class;
+        } else if (target.getClassType() == Object.class) {
+            // Allow indexing Object at compile time (e.g. actor method returns, dynamic dispatch).
+            // At runtime this expects a SiyoArray — will ClassCast if not.
+            resultType = Object.class;
         } else {
             _diagnostics.reportCannotIndex(syntax.getOpenBracket().getSpan(), target.getClassType());
             return new BoundLiteralExpression(0);
@@ -1256,12 +1308,7 @@ public class Binder {
             return spawnExpr;
         }
 
-        // Block spawn must be inside scope
-        if (!_insideScope) {
-            _diagnostics.reportSpawnOutsideScope(syntax.getSpawnKeyword().getSpan());
-            return new BoundLiteralExpression(0);
-        }
-
+        // Block spawn: allowed inside scope (structured) or bare (fire-and-forget virtual thread)
         boolean wasInSpawn = _insideSpawn;
         _insideSpawn = true;
 
@@ -1323,9 +1370,11 @@ public class Binder {
             VariableSymbol var = varExpr.getVariable();
             if (!localVarNames.contains(var.getName())) {
                 captured.add(var);
-                // Reject mutable variables (except channels and synthetic loop vars)
+                // Reject mutable variables (except channels, actor handles, Object/dynamic types, and synthetic loop vars)
                 if (!var.isReadOnly() && var.getType() != SiyoChannel.class
-                        && !var.getName().startsWith("_idx") && !var.getName().startsWith("_col")) {
+                        && var.getType() != Object.class
+                        && !var.getName().startsWith("_idx") && !var.getName().startsWith("_col")
+                        && !isActorHandle(var)) {
                     mutableCaptures.add(var);
                 }
                 // Reject mutable containers even when imut — contents are mutable

@@ -383,9 +383,27 @@ public class Parser {
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         SyntaxToken colon = match(SyntaxType.ColonToken);
         // Allow 'fn' keyword as type name for closure parameters
+        // Supports: fn, fn(int) -> int, fn(int, string) -> bool, fn() -> string
         SyntaxToken type;
         if (current().getType() == SyntaxType.FnKeyword) {
             SyntaxToken fnToken = nextToken();
+            // Skip optional function type signature: fn(...) -> type
+            if (current().getType() == SyntaxType.OpenParenthesisToken) {
+                nextToken(); // consume (
+                // Skip parameter types until )
+                while (current().getType() != SyntaxType.CloseParenthesisToken &&
+                       current().getType() != SyntaxType.EOFToken) {
+                    nextToken();
+                }
+                if (current().getType() == SyntaxType.CloseParenthesisToken) {
+                    nextToken(); // consume )
+                }
+                // Skip -> returnType
+                if (current().getType() == SyntaxType.ArrowToken) {
+                    nextToken(); // consume ->
+                    nextToken(); // consume return type
+                }
+            }
             type = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
         } else {
             type = match(SyntaxType.IdentifierToken);
@@ -763,7 +781,9 @@ public class Parser {
             case NumberToken -> parseNumberLiteral();
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
+            case InterpolatedStringStartToken -> parseInterpolatedString();
             case OpenBracketToken -> parseArrayLiteral();
+            case OpenBraceToken -> parseMapLiteral();
             case FnKeyword -> {
                 yield parseLambdaExpression();
             }
@@ -844,6 +864,30 @@ public class Parser {
         }
 
         return expr;
+    }
+
+    private ExpressionSyntax parseMapLiteral() {
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+        List<ExpressionSyntax> keys = new ArrayList<>();
+        List<SyntaxToken> colons = new ArrayList<>();
+        List<ExpressionSyntax> values = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.CloseBraceToken
+                && current().getType() != SyntaxType.EOFToken) {
+            ExpressionSyntax key = parseExpression();
+            keys.add(key);
+            SyntaxToken colon = match(SyntaxType.ColonToken);
+            colons.add(colon);
+            ExpressionSyntax value = parseExpression();
+            values.add(value);
+
+            if (current().getType() != SyntaxType.CloseBraceToken) {
+                match(SyntaxType.CommaToken);
+            }
+        }
+
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new MapLiteralExpressionSyntax(openBrace, keys, colons, values, closeBrace);
     }
 
     private ExpressionSyntax parseArrayLiteral() {
@@ -967,6 +1011,57 @@ public class Parser {
     private ExpressionSyntax parseStringLiteral() {
         SyntaxToken stringToken = match(SyntaxType.StringToken);
         return new LiteralExpressionSyntax(stringToken);
+    }
+
+    /**
+     * Parses an interpolated string: "text {expr} text {expr} text"
+     * The lexer produces: InterpolatedStringStart, <expr tokens>, InterpolatedStringMid/End, ...
+     * We build a chain of binary + expressions to concatenate all parts.
+     */
+    private ExpressionSyntax parseInterpolatedString() {
+        SyntaxToken startToken = nextToken(); // consume InterpolatedStringStartToken
+        ExpressionSyntax result = new LiteralExpressionSyntax(
+                new SyntaxToken(SyntaxType.StringToken, startToken.getPosition(),
+                        "\"" + startToken.getValue() + "\"", startToken.getValue()));
+
+        while (true) {
+            // Parse the expression inside interpolation
+            ExpressionSyntax expr = parseExpression();
+
+            // Wrap in toString: String + expr → auto-converted by binder
+            SyntaxToken plusToken = new SyntaxToken(SyntaxType.PlusToken, 0, "+", null);
+            result = new BinaryExpressionSyntax(result, plusToken, expr);
+
+            // Next should be InterpolatedStringMidToken or InterpolatedStringEndToken
+            if (current().getType() == SyntaxType.InterpolatedStringMidToken) {
+                SyntaxToken midToken = nextToken();
+                String midText = (String) midToken.getValue();
+                if (!midText.isEmpty()) {
+                    SyntaxToken midPlus = new SyntaxToken(SyntaxType.PlusToken, 0, "+", null);
+                    ExpressionSyntax midLiteral = new LiteralExpressionSyntax(
+                            new SyntaxToken(SyntaxType.StringToken, midToken.getPosition(),
+                                    "\"" + midText + "\"", midText));
+                    result = new BinaryExpressionSyntax(result, midPlus, midLiteral);
+                }
+                // Continue — next interpolation expression follows
+            } else if (current().getType() == SyntaxType.InterpolatedStringEndToken) {
+                SyntaxToken endToken = nextToken();
+                String endText = (String) endToken.getValue();
+                if (!endText.isEmpty()) {
+                    SyntaxToken endPlus = new SyntaxToken(SyntaxType.PlusToken, 0, "+", null);
+                    ExpressionSyntax endLiteral = new LiteralExpressionSyntax(
+                            new SyntaxToken(SyntaxType.StringToken, endToken.getPosition(),
+                                    "\"" + endText + "\"", endText));
+                    result = new BinaryExpressionSyntax(result, endPlus, endLiteral);
+                }
+                break; // done
+            } else {
+                // Unexpected token — error recovery
+                break;
+            }
+        }
+
+        return result;
     }
 
     /**

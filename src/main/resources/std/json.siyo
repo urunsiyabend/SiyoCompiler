@@ -1,0 +1,199 @@
+{
+    fn _skipWs(s: string, pos: int[]) {
+        while pos[0] < len(s) {
+            mut ch = substring(s, pos[0], pos[0] + 1)
+            if ch != " " {
+                if ch != "\n" {
+                    if ch != "\t" {
+                        if ch != "\r" {
+                            break
+                        }
+                    }
+                }
+            }
+            pos[0] += 1
+        }
+    }
+
+    fn _parseStr(s: string, pos: int[]) -> string {
+        pos[0] += 1
+        mut result = ""
+        while pos[0] < len(s) {
+            mut ch = substring(s, pos[0], pos[0] + 1)
+            if ch == "\"" {
+                pos[0] += 1
+                return result
+            }
+            if ch == "\\" {
+                pos[0] += 1
+                mut esc = substring(s, pos[0], pos[0] + 1)
+                if esc == "n" { result = result + "\n" }
+                else if esc == "t" { result = result + "\t" }
+                else if esc == "\\" { result = result + "\\" }
+                else if esc == "\"" { result = result + "\"" }
+                else { result = result + esc }
+            } else {
+                result = result + ch
+            }
+            pos[0] += 1
+        }
+        return result
+    }
+
+    fn _isDigit(ch: string) -> bool {
+        return contains("0123456789", ch)
+    }
+
+    fn _parseNum(s: string, pos: int[]) -> string {
+        mut start = pos[0]
+        if pos[0] < len(s) {
+            if substring(s, pos[0], pos[0] + 1) == "-" { pos[0] += 1 }
+        }
+        while pos[0] < len(s) {
+            mut ch = substring(s, pos[0], pos[0] + 1)
+            if _isDigit(ch) { pos[0] += 1 }
+            else if ch == "." { pos[0] += 1 }
+            else { break }
+        }
+        return substring(s, start, pos[0])
+    }
+
+    fn _parseValue(s: string, pos: int[]) -> string {
+        _skipWs(s, pos)
+        if pos[0] >= len(s) { return "null" }
+        mut ch = substring(s, pos[0], pos[0] + 1)
+
+        if ch == "\"" {
+            return "S:" + _parseStr(s, pos)
+        }
+        if ch == "t" {
+            pos[0] += 4
+            return "B:true"
+        }
+        if ch == "f" {
+            pos[0] += 5
+            return "B:false"
+        }
+        if ch == "n" {
+            pos[0] += 4
+            return "N:null"
+        }
+        if ch == "{" {
+            // Skip nested object — store as raw JSON
+            mut depth = 0
+            mut start = pos[0]
+            while pos[0] < len(s) {
+                mut c = substring(s, pos[0], pos[0] + 1)
+                if c == "{" { depth += 1 }
+                if c == "}" { depth -= 1 }
+                pos[0] += 1
+                if depth == 0 { break }
+            }
+            return "O:" + substring(s, start, pos[0])
+        }
+        if ch == "[" {
+            // Skip nested array — store as raw JSON
+            mut depth = 0
+            mut start = pos[0]
+            while pos[0] < len(s) {
+                mut c = substring(s, pos[0], pos[0] + 1)
+                if c == "[" { depth += 1 }
+                if c == "]" { depth -= 1 }
+                pos[0] += 1
+                if depth == 0 { break }
+            }
+            return "A:" + substring(s, start, pos[0])
+        }
+        // Number
+        return "I:" + _parseNum(s, pos)
+    }
+
+    fn parse(s: string) -> map {
+        mut pos = [0]
+        _skipWs(s, pos)
+        mut m = map()
+
+        if pos[0] >= len(s) { return m }
+        if substring(s, pos[0], pos[0] + 1) != "{" { return m }
+        pos[0] += 1
+
+        mut first = true
+        while pos[0] < len(s) {
+            _skipWs(s, pos)
+            if substring(s, pos[0], pos[0] + 1) == "}" { break }
+
+            if !first {
+                if substring(s, pos[0], pos[0] + 1) == "," { pos[0] += 1 }
+            }
+            first = false
+
+            _skipWs(s, pos)
+            mut key = _parseStr(s, pos)
+            _skipWs(s, pos)
+            pos[0] += 1
+
+            mut tagged = _parseValue(s, pos)
+            mut tag = substring(tagged, 0, 2)
+            mut val = substring(tagged, 2, len(tagged))
+
+            if tag == "S:" { m.set(key, val) }
+            else if tag == "B:" {
+                if val == "true" { m.set(key, true) }
+                else { m.set(key, false) }
+            }
+            else if tag == "N:" { m.set(key, null) }
+            else if tag == "I:" {
+                if contains(val, ".") { m.set(key, parseFloat(val)) }
+                else { m.set(key, parseInt(val)) }
+            }
+            else if tag == "O:" { m.set(key, val) }
+            else if tag == "A:" { m.set(key, val) }
+            else { m.set(key, val) }
+        }
+        return m
+    }
+
+    fn _escapeStr(s: string) -> string {
+        mut result = ""
+        for mut i = 0 i < len(s) i = i + 1 {
+            mut ch = substring(s, i, i + 1)
+            if ch == "\"" { result = result + "\\\"" }
+            else if ch == "\\" { result = result + "\\\\" }
+            else if ch == "\n" { result = result + "\\n" }
+            else if ch == "\t" { result = result + "\\t" }
+            else { result = result + ch }
+        }
+        return result
+    }
+
+    fn stringify(m: map) -> string {
+        mut result = "{"
+        mut keys = m.keys()
+        for mut i = 0 i < len(keys) i = i + 1 {
+            if i > 0 { result = result + "," }
+            mut k = toString(keys[i])
+            mut v = m.get(keys[i])
+            result = result + "\"" + _escapeStr(k) + "\":"
+
+            if v == null { result = result + "null" }
+            else if v == true { result = result + "true" }
+            else if v == false { result = result + "false" }
+            else {
+                mut vs = toString(v)
+                mut asInt = parseInt(vs)
+                if toString(asInt) == vs {
+                    result = result + vs
+                } else {
+                    mut asFloat = parseFloat(vs)
+                    if toString(asFloat) == vs {
+                        result = result + vs
+                    } else {
+                        result = result + "\"" + _escapeStr(vs) + "\""
+                    }
+                }
+            }
+        }
+        result = result + "}"
+        return result
+    }
+}

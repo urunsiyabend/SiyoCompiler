@@ -16,6 +16,12 @@ import java.util.Iterator;
  * @version 1.0
  */
 public abstract class BoundNode {
+    /** Source character offset for line-number emission. -1 means unknown. */
+    private int _sourceOffset = -1;
+
+    public int getSourceOffset() { return _sourceOffset; }
+    public void setSourceOffset(int offset) { _sourceOffset = offset; }
+
     /**
      * Gets the type of the bound node.
      *

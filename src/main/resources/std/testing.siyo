@@ -1,0 +1,46 @@
+{
+    fn assert(condition: bool, msg: string) {
+        if !condition {
+            println("  FAIL: " + msg)
+            error("assertion failed: " + msg)
+        }
+    }
+
+    fn assertEqual(actual: string, expected: string, msg: string) {
+        if actual != expected {
+            mut detail = msg + " — expected " + expected + ", got " + actual
+            println("  FAIL: " + detail)
+            error("assertion failed: " + detail)
+        }
+    }
+
+    fn test(name: string, body: fn() -> bool) {
+        try {
+            mut ok = body()
+            if ok {
+                println("  PASS: " + name)
+            } else {
+                println("  FAIL: " + name)
+            }
+        } catch e {
+            println("  FAIL: " + name + " — " + e)
+        }
+    }
+
+    fn run(name: string, tests: fn()[]) {
+        println("=== " + name + " ===")
+        mut passed = 0
+        mut failed = 0
+        for mut i = 0 i < len(tests) i = i + 1 {
+            try {
+                tests[i]()
+                passed += 1
+            } catch e {
+                failed += 1
+            }
+        }
+        mut total = passed + failed
+        println("")
+        println(toString(passed) + " passed, " + toString(failed) + " failed, " + toString(total) + " total")
+    }
+}

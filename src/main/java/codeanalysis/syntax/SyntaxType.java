@@ -17,6 +17,15 @@ public enum SyntaxType {
     /* Represents a string token. */
     StringToken,
 
+    /* Represents the start of an interpolated string: "text { */
+    InterpolatedStringStartToken,
+
+    /* Represents a middle segment of an interpolated string: } text { */
+    InterpolatedStringMidToken,
+
+    /* Represents the end of an interpolated string: } text" */
+    InterpolatedStringEndToken,
+
     /* Represents a float token. */
     FloatToken,
 
@@ -325,4 +334,7 @@ public enum SyntaxType {
 
     /* Represents a 'null' keyword. */
     NullKeyword,
+
+    /* Represents a map literal expression ({"key": value}). */
+    MapLiteralExpression,
     }

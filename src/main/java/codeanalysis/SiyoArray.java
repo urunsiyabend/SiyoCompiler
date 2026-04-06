@@ -80,4 +80,26 @@ public class SiyoArray extends AbstractList<Object> implements List<Object> {
     public int hashCode() {
         return _elements.hashCode();
     }
+
+    /**
+     * Convert a Java array (Object[] or primitive[]) to a SiyoArray.
+     * Used by the bytecode emitter to wrap Java interop array returns.
+     */
+    public static SiyoArray fromJavaArray(Object javaArray) {
+        if (javaArray == null) return new SiyoArray(List.of(), Object.class);
+        if (javaArray instanceof Object[] arr) {
+            return new SiyoArray(java.util.Arrays.asList(arr), Object.class);
+        }
+        int len = java.lang.reflect.Array.getLength(javaArray);
+        ArrayList<Object> elements = new ArrayList<>(len);
+        for (int i = 0; i < len; i++) {
+            Object elem = java.lang.reflect.Array.get(javaArray, i);
+            if (elem instanceof Byte b) elements.add((int) b);
+            else if (elem instanceof Short s) elements.add((int) s);
+            else if (elem instanceof Float f) elements.add((double) f);
+            else if (elem instanceof Character c) elements.add(String.valueOf(c));
+            else elements.add(elem);
+        }
+        return new SiyoArray(elements, Object.class);
+    }
 }

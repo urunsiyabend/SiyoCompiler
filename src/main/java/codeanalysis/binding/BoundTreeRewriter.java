@@ -237,6 +237,7 @@ public abstract class BoundTreeRewriter {
             case VariableExpression -> rewriteVariableExpression((BoundVariableExpression) node);
             case CallExpression -> rewriteCallExpression((BoundCallExpression) node);
             case ArrayLiteralExpression -> node;
+            case MapLiteralExpression -> node;
             case IndexExpression -> node;
             case MemberAccessExpression -> node;
             case StructLiteralExpression -> node;

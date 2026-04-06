@@ -50,12 +50,28 @@ public class Main {
         }
 
         if (cargs.length >= 2 && cargs[0].equals("run")) {
-            compileAndRun(cargs[1]); // bytecode default (26x faster)
+            // Check if second arg is a .siyo file or a project-mode command
+            if (cargs[1].endsWith(".siyo")) {
+                // siyoc run file.siyo [args...] — single-file mode
+                if (cargs.length > 2) {
+                    _programArgs = java.util.Arrays.copyOfRange(cargs, 2, cargs.length);
+                }
+                compileAndRun(cargs[1]);
+            } else {
+                // siyoc run build — project mode with args
+                _programArgs = java.util.Arrays.copyOfRange(cargs, 1, cargs.length);
+                runProject();
+            }
             return;
         }
         // siyoc run (no args) — project mode via siyo.toml
         if (cargs.length == 1 && cargs[0].equals("run")) {
             runProject();
+            return;
+        }
+        // siyoc test [file] — resolve deps from siyo.toml, then run test file
+        if (cargs.length >= 1 && cargs[0].equals("test")) {
+            runTest(cargs.length >= 2 ? cargs[1] : null);
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("interpret")) {
@@ -75,6 +91,36 @@ public class Main {
             return;
         }
         repl();
+    }
+
+    private static void runTest(String testFile) {
+        java.nio.file.Path cwd = java.nio.file.Paths.get(System.getProperty("user.dir"));
+        SiyoProject project = SiyoProject.load(cwd);
+        if (project != null) {
+            project.resolveDependencies();
+            SiyoProject.setCurrent(project);
+        }
+
+        // Find test file
+        String path;
+        if (testFile != null) {
+            path = testFile;
+        } else {
+            // Default: src/test.siyo
+            java.nio.file.Path defaultTest = cwd.resolve("src").resolve("test.siyo");
+            if (!java.nio.file.Files.exists(defaultTest)) {
+                System.err.println("Error: no test file found. Use: siyoc test <file> or create src/test.siyo");
+                System.exit(1);
+            }
+            path = defaultTest.toString();
+        }
+
+        if (!java.nio.file.Files.exists(java.nio.file.Paths.get(path))) {
+            System.err.println("Error: test file not found: " + path);
+            System.exit(1);
+        }
+
+        compileAndRun(path);
     }
 
     private static void runProject() {
@@ -99,6 +145,8 @@ public class Main {
 
         compileAndRun(mainFile.toString());
     }
+
+    private static String[] _programArgs = new String[0];
 
     private static void compileAndRun(String path) {
         try {
@@ -138,9 +186,12 @@ public class Main {
                             for (var entry : module.getFunctionBodies().entrySet()) {
                                 loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
                             }
-                            codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(
-                                    new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>()),
-                                    loweredBodies);
+                            // Use module's top-level block so module-level variables become static fields
+                            codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
+                                    ? module.getTopLevelBlock()
+                                    : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
+                            codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
+                            depEmitter.setModuleClass(true);
                             byte[] depBytes = depEmitter.emit(module.getClassName());
                             return defineClass(name, depBytes, 0, depBytes.length);
                         }
@@ -151,7 +202,7 @@ public class Main {
 
             Thread.currentThread().setContextClassLoader(loader);
             Class<?> cls = loader.loadClass(className);
-            cls.getMethod("main", String[].class).invoke(null, (Object) new String[]{});
+            cls.getMethod("main", String[].class).invoke(null, (Object) _programArgs);
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
                 e.getCause().printStackTrace(System.err);
@@ -198,9 +249,11 @@ public class Main {
                 for (var entry : module.getFunctionBodies().entrySet()) {
                     loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
                 }
-                codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(
-                        new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>()),
-                        loweredBodies);
+                codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
+                        ? module.getTopLevelBlock()
+                        : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
+                codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
+                depEmitter.setModuleClass(true);
                 byte[] depBytes = depEmitter.emit(module.getClassName());
                 String depPath = module.getClassName() + ".class";
                 java.nio.file.Files.write(java.nio.file.Paths.get(depPath), depBytes);
@@ -252,7 +305,7 @@ public class Main {
         Compilation previous = null;
         Scanner scanner = new Scanner(System.in);
 
-        System.out.println("Siyo REPL v0.1.0 (type 'exit' to quit)");
+        System.out.println("Siyo REPL v0.2.0 (type 'exit' to quit)");
 
         while (true) {
             System.out.print(builder.length() == 0 ? ">>> " : "... ");

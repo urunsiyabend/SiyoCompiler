@@ -1,0 +1,57 @@
+{
+    import java "java.lang.StringBuilder"
+
+    fn builder() -> object {
+        return StringBuilder.new()
+    }
+
+    fn lines(s: string) -> string[] {
+        return split(s, "\n")
+    }
+
+    fn join(arr: string[], sep: string) -> string {
+        mut result = ""
+        for mut i = 0 i < len(arr) i = i + 1 {
+            if i > 0 {
+                result = result + sep
+            }
+            result = result + arr[i]
+        }
+        return result
+    }
+
+    fn repeat(s: string, n: int) -> string {
+        mut result = ""
+        for mut i = 0 i < n i = i + 1 {
+            result = result + s
+        }
+        return result
+    }
+
+    fn padLeft(s: string, width: int, ch: string) -> string {
+        mut result = s
+        while len(result) < width {
+            result = ch + result
+        }
+        return result
+    }
+
+    fn padRight(s: string, width: int, ch: string) -> string {
+        mut result = s
+        while len(result) < width {
+            result = result + ch
+        }
+        return result
+    }
+
+    fn chars(s: string) -> string[] {
+        mut result = [""]
+        mut actual = [""]
+        for mut i = 0 i < len(s) i = i + 1 {
+            push(actual, substring(s, i, i + 1))
+        }
+        // Remove initial empty element
+        removeAt(actual, 0)
+        return actual
+    }
+}

@@ -132,6 +132,13 @@ public class Compilation {
         BoundBlockStatement statement = getStatement();
         Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
         codeanalysis.emitting.Emitter emitter = new codeanalysis.emitting.Emitter(statement, functions);
+        // Pass source text for line number emission
+        if (_syntaxTree.getText() != null) {
+            String fileName = _filePath != null
+                    ? java.nio.file.Paths.get(_filePath).getFileName().toString()
+                    : className + ".siyo";
+            emitter.setSourceText(_syntaxTree.getText(), fileName);
+        }
         for (var entry : getGlobalScope().getStructTypes().entrySet()) {
             if (entry.getValue().isActor()) {
                 emitter.registerActorType(entry.getKey());

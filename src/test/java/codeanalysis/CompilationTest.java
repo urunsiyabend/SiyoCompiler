@@ -150,6 +150,36 @@ class CompilationTest {
             {"ToDouble", "println(toString(toDouble(42)))"},
             // fn returning fn (closure factory)
             {"ClosureFactory", "fn makeMultiplier(factor: int) -> fn(int) -> int {\nreturn fn(x: int) -> int { x * factor }\n}\nimut triple = makeMultiplier(3)\nprintln(toString(triple(5)))"},
+            // println with non-string args
+            {"PrintlnInt", "println(42)"},
+            {"PrintlnBool", "println(true)"},
+            {"PrintlnFloat", "println(3.14)"},
+            // string + int concatenation
+            {"StringPlusInt", "println(\"count: \" + toString(42))"},
+            {"StringConcatInt", "mut x = 5\nprintln(\"x=\" + toString(x))"},
+            {"StringPlusIntDirect", "mut n = 42\nprintln(\"val=\" + n)"},
+            // Top-level code without { } wrapper
+            {"NoWrapSimple", "println(\"hello\")"},
+            {"NoWrapMulti", "mut x = 1\nmut y = 2\nprintln(toString(x + y))"},
+            {"NoWrapFnAndCall", "fn double(n: int) -> int { n * 2 }\nprintln(toString(double(5)))"},
+            {"NoWrapStructAndUse", "struct P { x: int }\nmut p = P { x: 42 }\nprintln(toString(p.x))"},
+            // empty array literal
+            {"EmptyArray", "mut arr = []\npush(arr, 10)\npush(arr, 20)\nprintln(toString(len(arr)))"},
+            // return empty array
+            {"ReturnEmptyArray", "fn empty() -> object { return [] }\nimut a = empty()\nprintln(toString(len(a)))"},
+            // map literals
+            {"MapLiteral", "mut m = {\"a\": 1, \"b\": 2}\nprintln(toString(m.get(\"a\")))"},
+            {"EmptyMapLiteral", "mut m = {}\nm.set(\"x\", 42)\nprintln(toString(m.get(\"x\")))"},
+            {"MapLiteralMultiType", "mut m = {\"name\": \"Alice\", \"age\": toString(30)}\nprintln(m.get(\"name\"))"},
+            // triple-quote strings
+            {"TripleQuote", "mut s = \"\"\"\nline1\nline2\n\"\"\"\nprintln(s)"},
+            // compound assignment on struct fields
+            {"StructCompound", "struct C { count: int }\nmut c = C { count: 0 }\nc.count += 5\nc.count += 3\nprintln(toString(c.count))"},
+            // struct field in string interpolation
+            {"StructInterpolation", "struct P { name: string }\nmut p = P { name: \"World\" }\nprintln(\"Hello, ${p.name}!\")"},
+            {"StructIntInterp", "struct S { val: int }\nmut s = S { val: 42 }\nprintln(\"val=${s.val}\")"},
+            // for-in map iteration
+            {"ForInMap", "mut m = {\"x\": 1}\nfor k in m {\nprintln(k)\n}"},
         };
     }
 }

@@ -2,6 +2,7 @@ package codeanalysis.emitting;
 
 import codeanalysis.*;
 import codeanalysis.binding.*;
+import codeanalysis.text.SourceText;
 import codeanalysis.JavaMethodSignature;
 import org.objectweb.asm.*;
 
@@ -34,6 +35,10 @@ public class Emitter {
     private boolean _tryCatchImplicitReturn = false;
     private Class<?> _tryCatchReturnType = null;
     private java.util.Set<VariableSymbol> _spawnCapturedVars = null;
+    private SourceText _sourceText = null;
+    private String _sourceFileName = null;
+    private int _lastEmittedLine = -1;
+    private boolean _isModuleClass = false;
 
     // Lambda/closure tracking for bytecode emission
     private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
@@ -43,6 +48,15 @@ public class Emitter {
     public Emitter(BoundBlockStatement statement, Map<FunctionSymbol, BoundBlockStatement> functions) {
         _statement = statement;
         _functions = functions;
+    }
+
+    public void setSourceText(SourceText sourceText, String fileName) {
+        _sourceText = sourceText;
+        _sourceFileName = fileName;
+    }
+
+    public void setModuleClass(boolean isModule) {
+        _isModuleClass = isModule;
     }
 
     public DiagnosticBox getDiagnostics() {
@@ -70,6 +84,9 @@ public class Emitter {
         };
         _classWriter = cw;
         cw.visit(V21, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
+        if (_sourceFileName != null) {
+            cw.visitSource(_sourceFileName, null);
+        }
 
         // First pass: collect global variables and lambdas
         collectGlobalVariables(_statement);
@@ -91,12 +108,28 @@ public class Emitter {
         emitConstructor(cw);
 
         // Generate user-defined functions as static methods
+        // Skip module functions — they are emitted in their own module class.
+        // A function belongs to a module if it has moduleName set (qualified import)
+        // OR if its body is shared with a qualified module function (unqualified cross-ref copy).
+        java.util.Set<BoundBlockStatement> moduleBodies = new java.util.HashSet<>();
         for (Map.Entry<FunctionSymbol, BoundBlockStatement> entry : _functions.entrySet()) {
-            emitFunction(cw, entry.getKey(), entry.getValue(), className);
+            if (entry.getKey().getModuleName() != null) {
+                moduleBodies.add(entry.getValue());
+            }
+        }
+        for (Map.Entry<FunctionSymbol, BoundBlockStatement> entry : _functions.entrySet()) {
+            FunctionSymbol func = entry.getKey();
+            if (func.getModuleName() != null) continue;
+            if (moduleBodies.contains(entry.getValue())) continue; // unqualified copy of module func
+            emitFunction(cw, func, entry.getValue(), className);
         }
 
         // Generate main method FIRST (collects lambdas/spawns during emission)
-        emitMainMethod(cw, className);
+        if (_isModuleClass) {
+            emitModuleInitializer(cw, className);
+        } else {
+            emitMainMethod(cw, className);
+        }
 
         // Generate lambda methods (discovered during main emission)
         for (int i = 0; i < _lambdas.size(); i++) {
@@ -132,8 +165,8 @@ public class Emitter {
             emitSortHelper(cw);
         }
 
-        // Generate shared Scanner field if needed
-        if (_needsScanner) {
+        // Generate shared Scanner field if needed (skip for module classes — they have their own <clinit>)
+        if (_needsScanner && !_isModuleClass) {
             cw.visitField(ACC_STATIC, "$scanner", "Ljava/util/Scanner;", null, null).visitEnd();
             MethodVisitor clinit = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
             clinit.visitCode();
@@ -161,6 +194,42 @@ public class Emitter {
         mv.visitEnd();
     }
 
+    /**
+     * For module classes: emit a <clinit> that initializes module-level variables.
+     */
+    private void emitModuleInitializer(ClassWriter cw, String className) {
+        if (_statement.getStatements().isEmpty() && !_needsScanner) return;
+
+        // Check if there are any variable declarations to initialize
+        boolean hasVarDecls = false;
+        for (BoundStatement stmt : _statement.getStatements()) {
+            if (stmt instanceof BoundVariableDeclaration) {
+                hasVarDecls = true;
+                break;
+            }
+        }
+        if (!hasVarDecls) return;
+
+        _mv = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
+        _mv.visitCode();
+        _locals.clear();
+        _labels.clear();
+        _nextLocal = 0;
+        _inMainMethod = true; // allow global field access
+        _lastEmittedLine = -1;
+
+        for (BoundStatement stmt : _statement.getStatements()) {
+            if (stmt instanceof BoundVariableDeclaration) {
+                emitStatement(stmt);
+            }
+        }
+
+        _mv.visitInsn(RETURN);
+        _mv.visitMaxs(0, 0);
+        _mv.visitEnd();
+        _inMainMethod = false;
+    }
+
     private void emitMainMethod(ClassWriter cw, String className) {
         _mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "main", "([Ljava/lang/String;)V", null, null);
         _mv.visitCode();
@@ -169,6 +238,11 @@ public class Emitter {
         _nextLocal = 1; // slot 0 is args
         _inMainMethod = true;
         _currentActorTypeName = null; // main method is not inside any actor
+        _lastEmittedLine = -1;
+
+        // Store program args in SiyoRuntime for os.args() access
+        _mv.visitVarInsn(ALOAD, 0);
+        _mv.visitFieldInsn(PUTSTATIC, "codeanalysis/SiyoRuntime", "programArgs", "[Ljava/lang/String;");
 
         // For main method: print the last expression value if non-void
         var statements = _statement.getStatements();
@@ -205,6 +279,7 @@ public class Emitter {
         _labels.clear();
         _nextLocal = 0;
         _inMainMethod = false; // user functions should not access global fields by name
+        _lastEmittedLine = -1;
 
         // Track if this is an actor impl method (self is raw struct, not SiyoActor handle)
         _currentActorTypeName = null;
@@ -296,6 +371,7 @@ public class Emitter {
     // ========== Statement Emission ==========
 
     private void emitStatement(BoundStatement node) {
+        emitLineNumber(node);
         switch (node.getType()) {
             case BlockStatement -> emitBlockStatement((BoundBlockStatement) node);
             case ExpressionStatement -> emitExpressionStatement((BoundExpressionStatement) node);
@@ -459,6 +535,7 @@ public class Emitter {
             case BinaryExpression -> emitBinaryExpression((BoundBinaryExpression) node);
             case CallExpression -> emitCallExpression((BoundCallExpression) node);
             case ArrayLiteralExpression -> emitArrayLiteralExpression((BoundArrayLiteralExpression) node);
+            case MapLiteralExpression -> emitMapLiteralExpression((BoundMapLiteralExpression) node);
             case IndexExpression -> emitIndexExpression((BoundIndexExpression) node);
             case IndexAssignmentExpression -> emitIndexAssignmentExpression((BoundIndexAssignmentExpression) node);
             case StructLiteralExpression -> emitStructLiteralExpression((BoundStructLiteralExpression) node);
@@ -901,7 +978,8 @@ public class Emitter {
             Label nextArm = new Label();
             _mv.visitJumpInsn(IFEQ, nextArm); // not equal → skip
 
-            // Match: emit body, jump to end
+            // Match: emit pre-statements (lowered) then body, jump to end
+            emitMatchArmPreStatements(arm.preStatements());
             emitExpression(arm.body());
             _mv.visitJumpInsn(GOTO, endLabel);
             _mv.visitLabel(nextArm);
@@ -909,12 +987,23 @@ public class Emitter {
 
         // Default arm or null
         if (defaultArm != null) {
+            emitMatchArmPreStatements(defaultArm.preStatements());
             emitExpression(defaultArm.body());
         } else {
             _mv.visitInsn(ACONST_NULL);
         }
 
         _mv.visitLabel(endLabel);
+    }
+
+    private void emitMatchArmPreStatements(java.util.List<BoundStatement> preStatements) {
+        if (preStatements.isEmpty()) return;
+        // Lower pre-statements (if/while/for → labels + gotos) before emitting
+        BoundBlockStatement block = new BoundBlockStatement(new java.util.ArrayList<>(preStatements));
+        BoundBlockStatement lowered = codeanalysis.lowering.Lowerer.lower(block);
+        for (BoundStatement stmt : lowered.getStatements()) {
+            emitStatement(stmt);
+        }
     }
 
     private void emitStringConcat(BoundBinaryExpression node) {
@@ -953,8 +1042,8 @@ public class Emitter {
         int index = _lambdas.indexOf(node);
         if (index < 0) { _lambdas.add(node); index = _lambdas.size() - 1; }
 
-        // Create Object[2] = {Integer(lambdaId), Object[]{captured}}
-        _mv.visitLdcInsn(2);
+        // Create Object[3] = {Integer(lambdaId), Object[]{captured}, String(className)}
+        _mv.visitLdcInsn(3);
         _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
 
         // [0] = lambdaId
@@ -979,11 +1068,17 @@ public class Emitter {
             _mv.visitInsn(AASTORE);
         }
         _mv.visitInsn(AASTORE);
-        // Stack: Object[2] (the closure representation)
+
+        // [2] = origin class name (for cross-module closure dispatch)
+        _mv.visitInsn(DUP);
+        _mv.visitLdcInsn(2);
+        _mv.visitLdcInsn(_className);
+        _mv.visitInsn(AASTORE);
+        // Stack: Object[3] (the closure representation)
     }
 
     private void emitClosureCall(BoundClosureCallExpression node) {
-        // closure is Object[2] = {Integer(lambdaId), Object[]{captured}}
+        // closure is Object[3] = {Integer(lambdaId), Object[]{captured}, String(className)}
         emitExpression(node.getClosure());
         int closureLocal = _nextLocal++;
         _mv.visitVarInsn(ASTORE, closureLocal);
@@ -1021,12 +1116,38 @@ public class Emitter {
         int argsLocal = _nextLocal++;
         _mv.visitVarInsn(ASTORE, argsLocal);
 
-        // Call dispatch: closureDispatch$(lambdaId, captured, args)
+        // Check if closure has origin class info (cross-module dispatch)
+        // closure[2] contains the class name string if present
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitInsn(ARRAYLENGTH);
+        _mv.visitLdcInsn(3);
+        Label sameClassLabel = new Label();
+        _mv.visitJumpInsn(IF_ICMPLT, sameClassLabel);
+
+        // Cross-module: use SiyoRuntime.dispatchClosure
+        _mv.visitVarInsn(ALOAD, closureLocal);
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitLdcInsn(2);
+        _mv.visitInsn(AALOAD);
+        _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+        _mv.visitVarInsn(ILOAD, lambdaIdLocal);
+        _mv.visitVarInsn(ALOAD, capturedLocal);
+        _mv.visitVarInsn(ALOAD, argsLocal);
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "dispatchClosure",
+                "(Ljava/lang/String;I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+        Label endLabel = new Label();
+        _mv.visitJumpInsn(GOTO, endLabel);
+
+        // Same-class: direct static call (fast path)
+        _mv.visitLabel(sameClassLabel);
         _mv.visitVarInsn(ILOAD, lambdaIdLocal);
         _mv.visitVarInsn(ALOAD, capturedLocal);
         _mv.visitVarInsn(ALOAD, argsLocal);
         _mv.visitMethodInsn(INVOKESTATIC, _className, "closureDispatch$",
                 "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+
+        _mv.visitLabel(endLabel);
     }
 
     private void emitScope(BoundScopeExpression node) {
@@ -1445,7 +1566,12 @@ public class Emitter {
     /** Convert Java return types to Siyo types on the stack */
     private void emitJavaReturnConversion(JavaMethodSignature sig) {
         String ret = sig.getReturnDescriptor();
-        if (ret.equals("J")) {} // long stays as long (native Siyo type now)
+        if (ret.startsWith("[")) {
+            // Java array → SiyoArray via static helper
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoArray", "fromJavaArray",
+                    "(Ljava/lang/Object;)Lcodeanalysis/SiyoArray;", false);
+        }
+        else if (ret.equals("J")) {} // long stays as long (native Siyo type now)
         else if (ret.equals("F")) _mv.visitInsn(F2D);      // float → double
         else if (ret.equals("B") || ret.equals("S")) {} // byte/short already widened to int by JVM
         else if (ret.equals("C")) _mv.visitInsn(I2C);      // keep as int (char → int)
@@ -1515,6 +1641,22 @@ public class Emitter {
         // SiyoArray on stack
     }
 
+    private void emitMapLiteralExpression(BoundMapLiteralExpression node) {
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoMap");
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoMap", "<init>", "()V", false);
+
+        for (int i = 0; i < node.getKeys().size(); i++) {
+            _mv.visitInsn(DUP);
+            emitExpression(node.getKeys().get(i));
+            emitBoxIfNeeded(node.getKeys().get(i).getClassType());
+            emitExpression(node.getValues().get(i));
+            emitBoxIfNeeded(node.getValues().get(i).getClassType());
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoMap", "set",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)V", false);
+        }
+    }
+
     private void emitIndexExpression(BoundIndexExpression node) {
         Class<?> targetType = node.getTarget().getClassType();
 
@@ -1529,6 +1671,10 @@ public class Emitter {
 
         // Array indexing: list.get(i) -> unbox
         emitExpression(node.getTarget());
+        if (targetType == Object.class) {
+            // Dynamic target (e.g. actor method return) — cast to List at runtime
+            _mv.visitTypeInsn(CHECKCAST, "java/util/List");
+        }
         emitExpression(node.getIndex());
         _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "get", "(I)Ljava/lang/Object;", true);
         emitUnboxIfNeeded(node.getClassType());
@@ -1658,19 +1804,13 @@ public class Emitter {
         }
 
         if (function == BuiltinFunctions.PARSE_INT) {
-            emitExpression(node.getArguments().get(0));
-            if (node.getArguments().get(0).getClassType() != String.class) {
-                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
-            }
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseInt",
                     "(Ljava/lang/String;)I", false);
             return;
         }
         if (function == BuiltinFunctions.PARSE_FLOAT) {
-            emitExpression(node.getArguments().get(0));
-            if (node.getArguments().get(0).getClassType() != String.class) {
-                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
-            }
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseDouble",
                     "(Ljava/lang/String;)D", false);
             return;
@@ -1681,10 +1821,7 @@ public class Emitter {
             return;
         }
         if (function == BuiltinFunctions.TO_INT_STR) {
-            emitExpression(node.getArguments().get(0));
-            if (node.getArguments().get(0).getClassType() != String.class) {
-                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
-            }
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "safeParseInt",
                     "(Ljava/lang/String;)I", false);
             return;
@@ -1712,6 +1849,12 @@ public class Emitter {
             emitExpression(node.getArguments().get(1)); // end
             _mv.visitMethodInsn(INVOKESTATIC, _className, "$range", "(II)Ljava/util/List;", false);
             _needsRangeHelper = true;
+            return;
+        }
+        if (function == BuiltinFunctions.MAP_KEYS) {
+            emitCoerceArg(node.getArguments().get(0), SiyoMap.class);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoMap", "keys",
+                    "()Lcodeanalysis/SiyoArray;", false);
             return;
         }
         if (function == BuiltinFunctions.NEW_MAP) {
@@ -1780,76 +1923,73 @@ public class Emitter {
             return;
         }
         if (function == BuiltinFunctions.SUBSTRING) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
-            emitExpression(node.getArguments().get(2));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), Integer.class);
+            emitCoerceArg(node.getArguments().get(2), Integer.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "substring", "(II)Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.CONTAINS) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "contains", "(Ljava/lang/CharSequence;)Z", false);
             return;
         }
 
         if (function == BuiltinFunctions.CHR) {
-            emitExpression(node.getArguments().get(0));
-            if (node.getArguments().get(0).getClassType() == Object.class) {
-                emitUnboxIfNeeded(Integer.class);
-            }
+            emitCoerceArg(node.getArguments().get(0), Integer.class);
             _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Character", "toString", "(I)Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.ORD) {
-            emitExpression(node.getArguments().get(0));
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitInsn(ICONST_0);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "charAt", "(I)C", false);
             return;
         }
         if (function == BuiltinFunctions.INDEX_OF) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "indexOf", "(Ljava/lang/String;)I", false);
             return;
         }
         if (function == BuiltinFunctions.STARTS_WITH) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "startsWith", "(Ljava/lang/String;)Z", false);
             return;
         }
         if (function == BuiltinFunctions.ENDS_WITH) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "endsWith", "(Ljava/lang/String;)Z", false);
             return;
         }
         if (function == BuiltinFunctions.REPLACE) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
-            emitExpression(node.getArguments().get(2));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
+            emitCoerceArg(node.getArguments().get(2), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "replace", "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.TRIM) {
-            emitExpression(node.getArguments().get(0));
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.TO_UPPER) {
-            emitExpression(node.getArguments().get(0));
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "toUpperCase", "()Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.TO_LOWER) {
-            emitExpression(node.getArguments().get(0));
+            emitCoerceArg(node.getArguments().get(0), String.class);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "toLowerCase", "()Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.SPLIT) {
-            emitExpression(node.getArguments().get(0));
-            emitExpression(node.getArguments().get(1));
+            emitCoerceArg(node.getArguments().get(0), String.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
             _mv.visitMethodInsn(INVOKESTATIC, "java/util/regex/Pattern", "quote", "(Ljava/lang/String;)Ljava/lang/String;", false);
             _mv.visitInsn(ICONST_M1);
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "split", "(Ljava/lang/String;I)[Ljava/lang/String;", false);
@@ -1933,22 +2073,12 @@ public class Emitter {
         // User-defined functions: push args and invoke static method
         for (int ai = 0; ai < node.getArguments().size(); ai++) {
             BoundExpression arg = node.getArguments().get(ai);
-            emitExpression(arg);
-            // Type coercion: if arg is Object but param expects String, cast
+            // Type coercion: if arg is Object but param expects a specific type, cast
             if (ai < function.getParameters().size()) {
                 Class<?> paramType = function.getParameters().get(ai).getType();
-                Class<?> argType = arg.getClassType();
-                if (argType != paramType && argType == Object.class) {
-                    if (paramType == Integer.class) emitUnboxIfNeeded(Integer.class);
-                    else if (paramType == Long.class) emitUnboxIfNeeded(Long.class);
-                    else if (paramType == Double.class) emitUnboxIfNeeded(Double.class);
-                    else if (paramType == Boolean.class) emitUnboxIfNeeded(Boolean.class);
-                    else if (paramType == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
-                    else if (paramType == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoArray");
-                    else if (paramType == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
-                    else if (paramType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
-                    else if (paramType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
-                }
+                emitCoerceArg(arg, paramType);
+            } else {
+                emitExpression(arg);
             }
         }
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
@@ -1965,6 +2095,18 @@ public class Emitter {
     }
 
     // ========== Helpers ==========
+
+    private void emitLineNumber(BoundNode node) {
+        if (_sourceText == null || _mv == null) return;
+        int offset = node.getSourceOffset();
+        if (offset < 0) return;
+        int line = _sourceText.getLineIndex(offset) + 1; // 1-based
+        if (line == _lastEmittedLine) return; // avoid duplicate entries
+        _lastEmittedLine = line;
+        Label lineLabel = new Label();
+        _mv.visitLabel(lineLabel);
+        _mv.visitLineNumber(line, lineLabel);
+    }
 
     private boolean isComparisonOperator(BoundBinaryOperatorType type) {
         return type == BoundBinaryOperatorType.Equals || type == BoundBinaryOperatorType.NotEquals
@@ -2177,6 +2319,29 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
         }
         // Object.class and others: leave as Object on stack
+    }
+
+    /**
+     * Emit an argument expression and coerce it from Object to the expected type if needed.
+     * This is the generalized replacement for the old per-builtin CHECKCAST logic.
+     */
+    private void emitCoerceArg(BoundExpression arg, Class<?> expectedType) {
+        emitExpression(arg);
+        Class<?> argType = arg.getClassType();
+        if (argType == expectedType || expectedType == Object.class) return;
+        if (argType == Object.class) {
+            if (expectedType == Integer.class) emitUnboxIfNeeded(Integer.class);
+            else if (expectedType == Long.class) emitUnboxIfNeeded(Long.class);
+            else if (expectedType == Double.class) emitUnboxIfNeeded(Double.class);
+            else if (expectedType == Boolean.class) emitUnboxIfNeeded(Boolean.class);
+            else if (expectedType == String.class) _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+            else if (expectedType == SiyoArray.class) _mv.visitTypeInsn(CHECKCAST, "java/util/List");
+            else if (expectedType == SiyoMap.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoMap");
+            else if (expectedType == SiyoSet.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoSet");
+            else if (expectedType == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
+            else if (expectedType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
+            else if (expectedType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        }
     }
 
     private void emitBoxIfNeeded(Class<?> type) {

@@ -20,6 +20,19 @@ public class Lexer {
     private SyntaxType _type;
     private Object _value;
 
+    // String interpolation mode stack: each entry is a brace depth counter.
+    // When inside an interpolated string and we hit {, we push a new depth=1.
+    // Normal } decrements; when depth reaches 0, we resume string lexing.
+    private final java.util.ArrayDeque<Integer> _interpStack = new java.util.ArrayDeque<>();
+    // Track whether current interpolation is inside a triple-quote string,
+    // so continuation after } knows to look for """ instead of " as closing delimiter.
+    private int _tripleQuoteInterpolationDepth = 0;
+    // For $name interpolation: after emitting the string-part token, we need
+    // getNextToken() to read an identifier, then resume the string.
+    private boolean _pendingSimpleInterpRead = false;
+    private boolean _pendingSimpleInterpResume = false;
+    private boolean _pendingSimpleInterpIsTripleQuote = false;
+
     /**
      * Initializes a new instance of the {@code Lexer} class with the specified text to analyze.
      *
@@ -90,6 +103,51 @@ public class Lexer {
         _start = _position;
         _type = SyntaxType.BadToken;
         _value = null;
+
+        // Handle $name interpolation phase 1: read the identifier token
+        if (_pendingSimpleInterpRead) {
+            _pendingSimpleInterpRead = false;
+            _pendingSimpleInterpResume = true;
+            readKeywordOrIdentifier();
+            int length = _position - _start;
+            String text = _text.toString(_start, _start + length);
+            return new SyntaxToken(_type, _start, text, _value);
+        }
+
+        // Handle $name interpolation phase 2: resume string after identifier
+        if (_pendingSimpleInterpResume) {
+            _pendingSimpleInterpResume = false;
+            if (_pendingSimpleInterpIsTripleQuote) {
+                readTripleQuoteStringContent(false);
+            } else {
+                readStringContent(false);
+            }
+            int length = _position - _start;
+            String text = _text.toString(_start, _start + length);
+            return new SyntaxToken(_type, _start, text, _value);
+        }
+
+        // If inside ${expr} interpolation and we see }, check if this closes the interpolation
+        if (!_interpStack.isEmpty() && currentChar() == '}') {
+            int depth = _interpStack.peek() - 1;
+            if (depth == 0) {
+                // Closing } of interpolation — resume string lexing
+                _interpStack.pop();
+                next(); // consume }
+                readInterpolatedStringContinuation();
+                int length = _position - _start;
+                String text = _text.toString(_start, _start + length);
+                return new SyntaxToken(_type, _start, text, _value);
+            } else {
+                _interpStack.pop();
+                _interpStack.push(depth);
+            }
+        }
+
+        // If inside interpolation and we see {, increment brace depth
+        if (!_interpStack.isEmpty() && currentChar() == '{') {
+            _interpStack.push(_interpStack.pop() + 1);
+        }
 
         switch (currentChar()) {
             case '\0' -> {
@@ -262,20 +320,144 @@ public class Lexer {
 
     /**
      * Reads a string token from the text being analyzed and moves the cursor.
-     * Handles escape sequences: \n, \t, \\, \", \0.
+     * Handles escape sequences and string interpolation using a mode stack.
+     *
+     * For plain strings: emits StringToken.
+     * For interpolated strings: emits InterpolatedStringStartToken, then normal code tokens
+     * are lexed by getNextToken() until matching }, then readInterpolatedStringContinuation()
+     * emits InterpolatedStringMidToken or InterpolatedStringEndToken.
      */
     private void readStringToken() {
+        // Check for triple-quote multi-line string: """..."""
+        // Only trigger if """ is followed by newline or """ (empty multi-line string)
+        if (peek(1) == '"' && peek(2) == '"'
+                && (peek(3) == '\n' || peek(3) == '\r' || (peek(3) == '"' && peek(4) == '"' && peek(5) == '"'))) {
+            readTripleQuoteString();
+            return;
+        }
         // Skip opening quote
         next();
+        readStringContent(true);
+    }
 
+    private void readTripleQuoteString() {
+        next(); next(); next(); // skip opening """
+        // Skip leading newline after opening """
+        if (currentChar() == '\r') next();
+        if (currentChar() == '\n') next();
+
+        readTripleQuoteStringContent(true);
+    }
+
+    /**
+     * Core triple-quote string content reader. Like readStringContent but uses """ as
+     * closing delimiter and allows newlines. Supports interpolation via $name / ${expr}.
+     * @param isStart true if this is the opening of a new triple-quote string
+     */
+    private void readTripleQuoteStringContent(boolean isStart) {
         StringBuilder sb = new StringBuilder();
-        boolean done = false;
 
-        while (!done) {
-            switch (currentChar()) {
+        while (true) {
+            char ch = currentChar();
+            if (ch == '\0') {
+                _diagnostics.reportUnterminatedString(new TextSpan(_start, _position - _start));
+                _type = isStart ? SyntaxType.StringToken : SyntaxType.InterpolatedStringEndToken;
+                _value = sb.toString();
+                return;
+            }
+            if (ch == '"' && peek(1) == '"' && peek(2) == '"') {
+                next(); next(); next(); // skip closing """
+
+                // Strip trailing newline before closing """
+                if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
+                    sb.setLength(sb.length() - 1);
+                    if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\r') {
+                        sb.setLength(sb.length() - 1);
+                    }
+                }
+
+                if (isStart) {
+                    _type = SyntaxType.StringToken;
+                } else {
+                    _type = SyntaxType.InterpolatedStringEndToken;
+                }
+                _value = sb.toString();
+                return;
+            }
+            if (ch == '\\') {
+                next();
+                switch (currentChar()) {
+                    case 'n' -> { sb.append('\n'); next(); }
+                    case 'r' -> { sb.append('\r'); next(); }
+                    case 't' -> { sb.append('\t'); next(); }
+                    case '\\' -> { sb.append('\\'); next(); }
+                    case '"' -> { sb.append('"'); next(); }
+                    case '0' -> { sb.append('\0'); next(); }
+                    case '$' -> { sb.append('$'); next(); }
+                    case '{' -> { sb.append('{'); next(); }
+                    case '}' -> { sb.append('}'); next(); }
+                    default -> {
+                        _diagnostics.reportInvalidEscapeCharacter(new TextSpan(_position - 1, 2), currentChar());
+                        next();
+                    }
+                }
+            } else if (ch == '$') {
+                char afterDollar = peek(1);
+                if (afterDollar == '{') {
+                    // ${expr} — expression interpolation
+                    next(); next(); // consume $ and {
+                    _interpStack.push(1);
+                    _tripleQuoteInterpolationDepth++;
+                    _type = isStart ? SyntaxType.InterpolatedStringStartToken : SyntaxType.InterpolatedStringMidToken;
+                    _value = sb.toString();
+                    return;
+                } else if (Character.isLetter(afterDollar) || afterDollar == '_') {
+                    // $name — simple variable interpolation
+                    next(); // consume $
+                    _pendingSimpleInterpRead = true;
+                    _pendingSimpleInterpIsTripleQuote = true;
+                    _type = isStart ? SyntaxType.InterpolatedStringStartToken : SyntaxType.InterpolatedStringMidToken;
+                    _value = sb.toString();
+                    return;
+                } else {
+                    sb.append('$');
+                    next();
+                }
+            } else {
+                sb.append(ch);
+                next();
+            }
+        }
+    }
+
+    /**
+     * Called when resuming string lexing after a } closes an interpolation.
+     * Emits InterpolatedStringMidToken or InterpolatedStringEndToken.
+     */
+    private void readInterpolatedStringContinuation() {
+        if (_tripleQuoteInterpolationDepth > 0) {
+            _tripleQuoteInterpolationDepth--;
+            readTripleQuoteStringContent(false);
+        } else {
+            readStringContent(false);
+        }
+    }
+
+    /**
+     * Core string content reader. Reads characters until closing " or $ interpolation.
+     * @param isStart true if this is the opening of a new string (after the opening ")
+     */
+    private void readStringContent(boolean isStart) {
+        StringBuilder sb = new StringBuilder();
+
+        while (true) {
+            char ch = currentChar();
+            switch (ch) {
                 case '\0', '\r', '\n' -> {
                     _diagnostics.reportUnterminatedString(new TextSpan(_start, _position - _start));
-                    done = true;
+                    _type = isStart ? SyntaxType.StringToken : SyntaxType.InterpolatedStringEndToken;
+                    _value = sb.toString();
+                    return;
                 }
                 case '\\' -> {
                     next();
@@ -286,27 +468,54 @@ public class Lexer {
                         case '\\' -> { sb.append('\\'); next(); }
                         case '"' -> { sb.append('"'); next(); }
                         case '0' -> { sb.append('\0'); next(); }
-                        case '{' -> { sb.append("\\{"); next(); } // escaped brace — keep marker for interpolation skip
-                        case '}' -> { sb.append("\\}"); next(); }
+                        case '$' -> { sb.append('$'); next(); }
+                        case '{' -> { sb.append('{'); next(); }
+                        case '}' -> { sb.append('}'); next(); }
                         default -> {
                             _diagnostics.reportInvalidEscapeCharacter(new TextSpan(_position - 1, 2), currentChar());
                             next();
                         }
                     }
                 }
+                case '$' -> {
+                    char afterDollar = peek(1);
+                    if (afterDollar == '{') {
+                        // ${expr} — expression interpolation
+                        next(); next(); // consume $ and {
+                        _interpStack.push(1);
+                        _type = isStart ? SyntaxType.InterpolatedStringStartToken : SyntaxType.InterpolatedStringMidToken;
+                        _value = sb.toString();
+                        return;
+                    } else if (Character.isLetter(afterDollar) || afterDollar == '_') {
+                        // $name — simple variable interpolation
+                        next(); // consume $
+                        _pendingSimpleInterpRead = true;
+                        _pendingSimpleInterpIsTripleQuote = false;
+                        _type = isStart ? SyntaxType.InterpolatedStringStartToken : SyntaxType.InterpolatedStringMidToken;
+                        _value = sb.toString();
+                        return;
+                    } else {
+                        // Plain $ character
+                        sb.append('$');
+                        next();
+                    }
+                }
                 case '"' -> {
-                    next();
-                    done = true;
+                    next(); // consume closing "
+                    if (isStart) {
+                        _type = SyntaxType.StringToken;
+                    } else {
+                        _type = SyntaxType.InterpolatedStringEndToken;
+                    }
+                    _value = sb.toString();
+                    return;
                 }
                 default -> {
-                    sb.append(currentChar());
+                    sb.append(ch);
                     next();
                 }
             }
         }
-
-        _type = SyntaxType.StringToken;
-        _value = sb.toString();
     }
 
     /**

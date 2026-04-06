@@ -128,6 +128,9 @@ public class ModuleHandler {
                 ? moduleName.substring(moduleName.lastIndexOf('.') + 1)
                 : moduleName;
         String className = Character.toUpperCase(shortName.charAt(0)) + shortName.substring(1);
+        if (moduleName.startsWith("std/") || moduleName.startsWith("std.")) {
+            className = "Siyo_" + className;
+        }
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
             // Register with qualified name: module.func
@@ -243,6 +246,20 @@ public class ModuleHandler {
             return candidate.toAbsolutePath().toString();
         }
 
+        // 5. Standard library: std/ from classpath resources or dev filesystem
+        if (pathName.startsWith("std/")) {
+            // Dev mode: check std/ relative to CWD (for development)
+            candidate = java.nio.file.Paths.get(projectRoot, "src", "main", "resources", pathName + ".siyo");
+            if (java.nio.file.Files.exists(candidate)) {
+                return candidate.toAbsolutePath().toString();
+            }
+            // Production: check classpath resource (inside JAR)
+            String resourcePath = pathName + ".siyo";
+            if (ModuleHandler.class.getClassLoader().getResource(resourcePath) != null) {
+                return "classpath:" + resourcePath;
+            }
+        }
+
         return null;
     }
 
@@ -250,7 +267,16 @@ public class ModuleHandler {
         try {
             if (_registry != null) _registry.markInProgress(filePath);
 
-            String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
+            String source;
+            if (filePath.startsWith("classpath:")) {
+                String resourcePath = filePath.substring("classpath:".length());
+                try (java.io.InputStream is = ModuleHandler.class.getClassLoader().getResourceAsStream(resourcePath)) {
+                    if (is == null) throw new java.io.FileNotFoundException("Resource not found: " + resourcePath);
+                    source = new String(is.readAllBytes());
+                }
+            } else {
+                source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
+            }
             codeanalysis.syntax.SyntaxTree tree = codeanalysis.syntax.SyntaxTree.parse(source);
 
             // Create a dedicated binder for the module so we can access its struct types
@@ -273,13 +299,25 @@ public class ModuleHandler {
                 return null;
             }
 
-            String className = Character.toUpperCase(moduleName.charAt(0)) + moduleName.substring(1);
+            // Generate a valid JVM class name — prefix std modules to avoid collisions (e.g., Math → Siyo_Math)
+            String classBase = shortName;
+            String className = Character.toUpperCase(classBase.charAt(0)) + classBase.substring(1);
+            if (moduleName.startsWith("std/") || moduleName.startsWith("std.")) {
+                className = "Siyo_" + className;
+            }
 
             Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>(moduleBinder._functionBodies);
             List<FunctionSymbol> functions = new ArrayList<>(bodies.keySet());
             Map<String, StructSymbol> structs = new HashMap<>(moduleBinder.getStructTypes());
 
-            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies, structs);
+            // Preserve the module's top-level block so module-level variables
+            // can be emitted as static fields on the module class.
+            BoundBlockStatement topLevelBlock = null;
+            if (statement instanceof BoundBlockStatement blk) {
+                topLevelBlock = codeanalysis.lowering.Lowerer.lower(blk);
+            }
+
+            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies, structs, topLevelBlock);
             if (_registry != null) {
                 _registry.register(filePath, module);
                 _registry.markComplete(filePath);

@@ -188,6 +188,13 @@ public class BuiltinFunctions {
             SiyoMap.class
     );
 
+    // Internal builtin: convert map to keys array (used by for-in desugaring)
+    public static final FunctionSymbol MAP_KEYS = new FunctionSymbol(
+            "$mapKeys",
+            List.of(new ParameterSymbol("map", SiyoMap.class)),
+            SiyoArray.class
+    );
+
     public static final FunctionSymbol NEW_SET = new FunctionSymbol(
             "set",
             List.of(),
@@ -250,7 +257,7 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
     }
 

@@ -1,0 +1,74 @@
+{
+    import java "java.io.FileWriter"
+    import java "java.io.BufferedReader"
+    import java "java.io.FileReader"
+    import java "java.io.File"
+
+    fn readFile(path: string) -> string {
+        mut reader = BufferedReader.new(FileReader.new(path))
+        mut result = ""
+        mut line = reader.readLine()
+        while line != null {
+            if len(result) > 0 {
+                result = result + "\n"
+            }
+            result = result + line
+            line = reader.readLine()
+        }
+        reader.close()
+        return result
+    }
+
+    fn writeFile(path: string, content: string) {
+        mut writer = FileWriter.new(path)
+        writer.write(content)
+        writer.close()
+    }
+
+    fn appendFile(path: string, content: string) {
+        mut writer = FileWriter.new(path, true)
+        writer.write(content)
+        writer.close()
+    }
+
+    fn readLines(path: string) -> string[] {
+        mut reader = BufferedReader.new(FileReader.new(path))
+        mut lines = [""]
+        mut line = reader.readLine()
+        while line != null {
+            push(lines, line)
+            line = reader.readLine()
+        }
+        reader.close()
+        // Remove initial empty element
+        removeAt(lines, 0)
+        return lines
+    }
+
+    fn fileExists(path: string) -> bool {
+        mut f = File.new(path)
+        return f.exists()
+    }
+
+    fn listDir(path: string) -> string[] {
+        mut result = [""]
+        removeAt(result, 0)
+        mut dir = File.new(path)
+        if !dir.exists() { return result }
+        mut names = dir.list()
+        for i in range(0, len(names)) {
+            push(result, names[i])
+        }
+        return result
+    }
+
+    fn mkdir(path: string) {
+        mut dir = File.new(path)
+        dir.mkdirs()
+    }
+
+    fn delete(path: string) -> bool {
+        mut f = File.new(path)
+        return f.delete()
+    }
+}

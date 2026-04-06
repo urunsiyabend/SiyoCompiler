@@ -1,0 +1,56 @@
+{
+    import java "java.net.URL"
+    import java "java.net.HttpURLConnection"
+    import java "java.io.BufferedReader"
+    import java "java.io.InputStreamReader"
+    import java "java.io.OutputStreamWriter"
+
+    fn get(url: string) -> string {
+        return httpGet(url)
+    }
+
+    fn post(url: string, body: string) -> string {
+        return httpPost(url, body)
+    }
+
+    fn put(url: string, body: string) -> string {
+        mut u = URL.new(url)
+        mut conn = u.openConnection()
+        conn.setDoOutput(true)
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("X-HTTP-Method-Override", "PUT")
+        mut writer = OutputStreamWriter.new(conn.getOutputStream())
+        writer.write(body)
+        writer.close()
+        mut reader = BufferedReader.new(InputStreamReader.new(conn.getInputStream()))
+        mut result = ""
+        mut line = reader.readLine()
+        while line != null {
+            if len(result) > 0 {
+                result = result + "\n"
+            }
+            result = result + line
+            line = reader.readLine()
+        }
+        reader.close()
+        return result
+    }
+
+    fn delete(url: string) -> string {
+        mut u = URL.new(url)
+        mut conn = u.openConnection()
+        conn.setRequestProperty("X-HTTP-Method-Override", "DELETE")
+        mut reader = BufferedReader.new(InputStreamReader.new(conn.getInputStream()))
+        mut result = ""
+        mut line = reader.readLine()
+        while line != null {
+            if len(result) > 0 {
+                result = result + "\n"
+            }
+            result = result + line
+            line = reader.readLine()
+        }
+        reader.close()
+        return result
+    }
+}

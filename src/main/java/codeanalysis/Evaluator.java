@@ -197,6 +197,7 @@ public class Evaluator {
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
             case CallExpression -> evaluateCallExpression((BoundCallExpression) node);
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
+            case MapLiteralExpression -> evaluateMapLiteralExpression((codeanalysis.binding.BoundMapLiteralExpression) node);
             case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
@@ -648,11 +649,17 @@ public class Evaluator {
         Object defaultResult = null;
         for (var arm : node.getArms()) {
             if (arm.isDefault()) {
+                if (!arm.preStatements().isEmpty()) {
+                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
+                }
                 defaultResult = evaluateExpression(arm.body());
                 continue;
             }
             Object pattern = evaluateExpression(arm.pattern());
             if (java.util.Objects.equals(target, pattern)) {
+                if (!arm.preStatements().isEmpty()) {
+                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
+                }
                 return evaluateExpression(arm.body());
             }
         }
@@ -684,9 +691,7 @@ public class Evaluator {
             // Not an actor — fall through to scope spawn
         }
 
-        if (_scopeThreads == null) {
-            throw new Exception("spawn must be inside a scope block");
-        }
+        // Bare spawn (outside scope) is fire-and-forget; inside scope, thread is tracked for joining
 
         // Capture current variable values for the spawn body
         java.util.Map<VariableSymbol, Object> capturedSnapshot = new java.util.HashMap<>();
@@ -721,7 +726,10 @@ public class Evaluator {
             }
         });
 
-        _scopeThreads.add(thread);
+        if (_scopeThreads != null) {
+            _scopeThreads.add(thread);
+        }
+        // Bare spawn (outside scope) — thread runs detached (fire-and-forget)
         return null;
     }
 
@@ -862,6 +870,16 @@ public class Evaluator {
             fields.put(entry.getKey(), evaluateExpression(entry.getValue()));
         }
         return new SiyoStruct(node.getStructType(), fields);
+    }
+
+    private Object evaluateMapLiteralExpression(codeanalysis.binding.BoundMapLiteralExpression node) throws Exception {
+        SiyoMap map = new SiyoMap();
+        for (int i = 0; i < node.getKeys().size(); i++) {
+            Object key = evaluateExpression(node.getKeys().get(i));
+            Object value = evaluateExpression(node.getValues().get(i));
+            map.set(key, value);
+        }
+        return map;
     }
 
     private Object evaluateArrayLiteralExpression(BoundArrayLiteralExpression node) throws Exception {
@@ -1009,6 +1027,10 @@ public class Evaluator {
                 }
             });
             return null;
+        }
+        if (function == BuiltinFunctions.MAP_KEYS) {
+            SiyoMap map = (SiyoMap) arguments[0];
+            return map.keys();
         }
         if (function == BuiltinFunctions.NEW_MAP) {
             return new SiyoMap();

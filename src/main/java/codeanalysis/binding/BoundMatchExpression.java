@@ -12,7 +12,12 @@ public class BoundMatchExpression extends BoundExpression {
     private final List<BoundMatchArm> _arms;
     private final Class<?> _type;
 
-    public record BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault) {}
+    public record BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault,
+                                    List<BoundStatement> preStatements) {
+        public BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault) {
+            this(pattern, body, isDefault, List.of());
+        }
+    }
 
     public BoundMatchExpression(BoundExpression target, List<BoundMatchArm> arms, Class<?> type) {
         _target = target;

@@ -29,6 +29,7 @@ public enum BoundNodeType {
     BreakStatement,
     ContinueStatement,
     ArrayLiteralExpression,
+    MapLiteralExpression,
     IndexExpression,
     MemberAccessExpression,
     StructDeclaration,
