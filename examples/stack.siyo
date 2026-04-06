@@ -51,7 +51,7 @@ fn stackToString(s: Stack) -> string {
         if i > 0 { result += ", " }
         result += toString(s.data[i])
     }
-    result + "] (top=" + toString(s.top) + ")"
+    "$result] (top=${s.top})"
 }
 
 // Test
@@ -60,12 +60,12 @@ stackPush(s, 10)
 stackPush(s, 20)
 stackPush(s, 30)
 
-println("After push 10, 20, 30: " + stackToString(s))
-println("Peek: " + toString(stackPeek(s)))
-println("Pop: " + toString(stackPop(s)))
-println("Pop: " + toString(stackPop(s)))
-println("After 2 pops: " + stackToString(s))
-println("Size: " + toString(stackSize(s)))
-println("Is empty: " + toString(stackIsEmpty(s)))
-println("Pop last: " + toString(stackPop(s)))
-println("Is empty: " + toString(stackIsEmpty(s)))
+println("After push 10, 20, 30: ${stackToString(s)}")
+println("Peek: ${stackPeek(s)}")
+println("Pop: ${stackPop(s)}")
+println("Pop: ${stackPop(s)}")
+println("After 2 pops: ${stackToString(s)}")
+println("Size: ${stackSize(s)}")
+println("Is empty: ${stackIsEmpty(s)}")
+println("Pop last: ${stackPop(s)}")
+println("Is empty: ${stackIsEmpty(s)}")

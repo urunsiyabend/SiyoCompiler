@@ -1,9 +1,31 @@
-// Module with function names that conflict with builtins
-fn len(x: int) -> int {
-    // Custom "len" - NOT the builtin
-    x * 2
-}
+{
+    fn repeat(s: string, n: int) -> string {
+        mut result = ""
+        for mut i = 0 i < n i = i + 1 {
+            result = result + s
+        }
+        return result
+    }
 
-fn contains(x: int, y: int) -> bool {
-    x > y
+    fn padLeft(s: string, width: int, ch: string) -> string {
+        mut result = s
+        while len(result) < width {
+            result = ch + result
+        }
+        return result
+    }
+
+    fn join(arr: string[], sep: string) -> string {
+        mut result = ""
+        for mut i = 0 i < len(arr) i = i + 1 {
+            if i > 0 { result = result + sep }
+            result = result + arr[i]
+        }
+        return result
+    }
+
+    // Numeric contains — different from builtin string contains
+    fn contains(x: int, y: int) -> bool {
+        x > y
+    }
 }

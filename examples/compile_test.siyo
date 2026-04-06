@@ -8,5 +8,5 @@ fn factorial(n: int) -> int {
 }
 
 println("Hello from compiled Siyo!")
-println(toString(add(3, 4)))
-println(toString(factorial(10)))
+println("3 + 4 = ${add(3, 4)}")
+println("10! = ${factorial(10)}")

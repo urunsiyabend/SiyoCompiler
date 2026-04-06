@@ -1,10 +1,11 @@
-// REST API v2 - Rewritten with built-in string functions
+// REST API v2 - Rewritten with std/json and string interpolation
 // Run: siyoc -cp lib/sqlite-jdbc.jar run examples/rest_api_v2.siyo
 import java "org.sqlite.JDBC"
 import java "java.sql.DriverManager"
 import java "java.net.ServerSocket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
+import "std/json"
 
 // ========== JSON ==========
 
@@ -13,7 +14,7 @@ fn jsonStr(key: string, value: string) -> string {
 }
 
 fn jsonInt(key: string, value: int) -> string {
-    "\"" + key + "\":" + value
+    "\"$key\":$value"
 }
 
 fn jsonObj(fields: string[]) -> string {
@@ -25,34 +26,34 @@ fn jsonObj(fields: string[]) -> string {
     result + "}"
 }
 
-fn jsonFieldValue(json: string, field: string) -> string {
+fn jsonFieldValue(jsonStr: string, field: string) -> string {
     mut key = "\"" + field + "\":"
-    mut idx = indexOf(json, key)
+    mut idx = indexOf(jsonStr, key)
     if idx < 0 return ""
     mut start = idx + len(key)
 
     // Skip whitespace
-    while start < len(json) {
-        if json[start] != " " { break }
+    while start < len(jsonStr) {
+        if jsonStr[start] != " " { break }
         start += 1
     }
 
     // String value
-    if json[start] == "\"" {
+    if jsonStr[start] == "\"" {
         start += 1
-        mut end = indexOf(substring(json, start, len(json)), "\"")
-        return substring(json, start, start + end)
+        mut end = indexOf(substring(jsonStr, start, len(jsonStr)), "\"")
+        return substring(jsonStr, start, start + end)
     }
 
     // Number value
     mut end = start
-    while end < len(json) {
-        mut ch = json[end]
+    while end < len(jsonStr) {
+        mut ch = jsonStr[end]
         if ch == "," { break }
         if ch == "}" { break }
         end += 1
     }
-    trim(substring(json, start, end))
+    trim(substring(jsonStr, start, end))
 }
 
 // ========== HTTP ==========
@@ -88,13 +89,7 @@ fn pathBase(path: string) -> string {
 }
 
 fn respond(status: int, statusText: string, body: string) -> string {
-    mut r = "HTTP/1.1 " + status + " " + statusText + "\r\n"
-    r += "Content-Type: application/json\r\n"
-    r += "Content-Length: " + len(body) + "\r\n"
-    r += "Access-Control-Allow-Origin: *\r\n"
-    r += "Connection: close\r\n\r\n"
-    r += body
-    r
+    "HTTP/1.1 $status $statusText\r\nContent-Type: application/json\r\nContent-Length: ${len(body)}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n$body"
 }
 
 // ========== Database ==========
@@ -119,7 +114,7 @@ fn dbQueryInt(sql: string) -> int {
 }
 
 fn dbInsert(name: string, email: string, age: int) -> int {
-    dbExec("INSERT INTO users (name, email, age) VALUES ('" + name + "','" + email + "'," + age + ")")
+    dbExec("INSERT INTO users (name, email, age) VALUES ('$name','$email',$age)")
     dbQueryInt("SELECT last_insert_rowid()")
 }
 
@@ -127,48 +122,48 @@ fn dbAllUsers() -> string {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
     mut stmt = conn.createStatement()
     mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
-    mut json = "["
+    mut result = "["
     mut first = true
     while rs.next() {
-        if !first { json += "," }
+        if !first { result += "," }
         first = false
         mut fields = [jsonInt("id", rs.getInt("id")),
                       jsonStr("name", rs.getString("name")),
                       jsonStr("email", rs.getString("email")),
                       jsonInt("age", rs.getInt("age"))]
-        json += jsonObj(fields)
+        result += jsonObj(fields)
     }
-    json += "]"
+    result += "]"
     stmt.close()
     conn.close()
-    json
+    result
 }
 
 fn dbSearch(name: string) -> string {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
     mut stmt = conn.createStatement()
-    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%" + name + "%'")
-    mut json = "["
+    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%$name%'")
+    mut result = "["
     mut first = true
     while rs.next() {
-        if !first { json += "," }
+        if !first { result += "," }
         first = false
         mut fields = [jsonInt("id", rs.getInt("id")),
                       jsonStr("name", rs.getString("name")),
                       jsonStr("email", rs.getString("email")),
                       jsonInt("age", rs.getInt("age"))]
-        json += jsonObj(fields)
+        result += jsonObj(fields)
     }
-    json += "]"
+    result += "]"
     stmt.close()
     conn.close()
-    json
+    result
 }
 
 fn dbDelete(id: int) -> bool {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api_v2.db")
     mut stmt = conn.createStatement()
-    mut n = stmt.executeUpdate("DELETE FROM users WHERE id=" + id)
+    mut n = stmt.executeUpdate("DELETE FROM users WHERE id=$id")
     stmt.close()
     conn.close()
     n > 0
@@ -266,6 +261,6 @@ while true {
         out.flush()
         socket.close()
 
-        println(method + " " + path + " -> " + len(response) + "b")
+        println("$method $path -> ${len(response)}b")
     }
 }

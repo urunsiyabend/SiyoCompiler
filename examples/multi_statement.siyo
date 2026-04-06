@@ -1,4 +1,4 @@
-// No need for outer { } anymore!
+import "std/math"
 
 struct Point {
     x: int,
@@ -6,20 +6,20 @@ struct Point {
 }
 
 fn distance(p: Point) -> float {
-    // Pythagorean theorem (approximation since we don't have sqrt)
+    // Pythagorean theorem using math.sqrt
     mut dx = toFloat(p.x * p.x)
     mut dy = toFloat(p.y * p.y)
-    dx + dy
+    math.sqrt(dx + dy)
 }
 
 fn pointToString(p: Point) -> string {
-    "(" + toString(p.x) + ", " + toString(p.y) + ")"
+    "(${p.x}, ${p.y})"
 }
 
 mut p1 = Point { x: 3, y: 4 }
 mut p2 = Point { x: 6, y: 8 }
 
-println("Point 1: " + pointToString(p1))
-println("Point 2: " + pointToString(p2))
-println("Distance^2 of p1: " + toString(distance(p1)))
-println("Distance^2 of p2: " + toString(distance(p2)))
+println("Point 1: ${pointToString(p1)}")
+println("Point 2: ${pointToString(p2)}")
+println("Distance of p1: ${distance(p1)}")
+println("Distance of p2: ${distance(p2)}")

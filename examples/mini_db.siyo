@@ -1,29 +1,6 @@
 // Mini Database - SQL-like interface with file persistence
-// No external dependencies, pure JDK
-import java "java.io.FileWriter"
-import java "java.io.BufferedReader"
-import java "java.io.FileReader"
-import java "java.io.File"
-
-fn split(text: string, delimiter: string) -> string[] {
-    mut words = [""]
-    mut wordCount = 0
-    mut current = ""
-    for i in range(0, len(text)) {
-        mut ch = text[i]
-        if ch == delimiter {
-            if wordCount == 0 { words[0] = current }
-            else { push(words, current) }
-            wordCount = wordCount + 1
-            current = ""
-        } else {
-            current += ch
-        }
-    }
-    if wordCount == 0 { words[0] = current }
-    else { push(words, current) }
-    words
-}
+import "std/io"
+import "std/strings"
 
 // Database state
 mut dbFile = "mini.db"
@@ -36,7 +13,7 @@ fn dbCreate(cols: string[]) {
     columns = cols
     colCount = len(cols)
     rowCount = 0
-    println("Table created with " + colCount + " columns.")
+    println("Table created with $colCount columns.")
 }
 
 fn dbInsert(values: string) {
@@ -53,11 +30,7 @@ fn dbSelect(whereCol: string, whereVal: string) {
     }
 
     // Print header
-    mut header = ""
-    for c in columns {
-        if len(header) > 0 { header += " | " }
-        header += c
-    }
+    mut header = strings.join(columns, " | ")
     println(header)
     mut sep = ""
     for i in range(0, len(header)) { sep += "-" }
@@ -67,21 +40,16 @@ fn dbSelect(whereCol: string, whereVal: string) {
     mut found = 0
     for i in range(0, rowCount) {
         mut cols = split(rows[i], ",")
-        mut match = true
+        mut isMatch = true
         if colIdx >= 0 {
-            if cols[colIdx] != whereVal { match = false }
+            if cols[colIdx] != whereVal { isMatch = false }
         }
-        if match {
-            mut line = ""
-            for col in cols {
-                if len(line) > 0 { line += " | " }
-                line += col
-            }
-            println(line)
+        if isMatch {
+            println(strings.join(cols, " | "))
             found = found + 1
         }
     }
-    println("(" + found + " rows)")
+    println("($found rows)")
 }
 
 fn dbSelectAll() {
@@ -89,37 +57,30 @@ fn dbSelectAll() {
 }
 
 fn dbSave() {
-    mut writer = FileWriter.new(dbFile)
-    // Write header
-    mut header = ""
-    for i in range(0, colCount) {
-        if i > 0 { header += "," }
-        header += columns[i]
-    }
-    writer.write(header + "\n")
-    // Write rows
+    mut content = strings.join(columns, ",") + "\n"
     for i in range(0, rowCount) {
-        writer.write(rows[i] + "\n")
+        content += rows[i] + "\n"
     }
-    writer.close()
-    println("Saved " + rowCount + " rows to " + dbFile)
+    io.writeFile(dbFile, content)
+    println("Saved $rowCount rows to $dbFile")
 }
 
 fn dbLoad() {
-    mut reader = BufferedReader.new(FileReader.new(dbFile))
-    mut header = reader.readLine()
-    columns = split(header, ",")
+    mut lines = io.readLines(dbFile)
+    if len(lines) == 0 { return }
+
+    columns = split(lines[0], ",")
     colCount = len(columns)
     rowCount = 0
-    mut line = reader.readLine()
-    while line != null {
+
+    for i in range(1, len(lines)) {
+        mut line = lines[i]
+        if len(line) == 0 { continue }
         if rowCount == 0 { rows[0] = line }
         else { push(rows, line) }
         rowCount = rowCount + 1
-        line = reader.readLine()
     }
-    reader.close()
-    println("Loaded " + rowCount + " rows from " + dbFile)
+    println("Loaded $rowCount rows from $dbFile")
 }
 
 // Test
@@ -159,5 +120,5 @@ println("After reload:")
 dbSelectAll()
 
 // Cleanup
-File.new(dbFile).delete()
+io.writeFile(dbFile, "")
 println("\nDatabase cleaned up.")

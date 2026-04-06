@@ -1,6 +1,16 @@
+{
 import "math"
 
-println("abs(-42) = " + toString(math.abs(-42)))
-println("max(10, 20) = " + toString(math.max(10, 20)))
-println("min(10, 20) = " + toString(math.min(10, 20)))
-println("clamp(150, 0, 100) = " + toString(math.clamp(150, 0, 100)))
+mut v1 = math.abs(-42)
+println("abs(-42) = $v1")
+mut v2 = math.max(10, 20)
+println("max(10, 20) = $v2")
+mut v3 = math.min(10, 20)
+println("min(10, 20) = $v3")
+mut v4 = math.clamp(150, 0, 100)
+println("clamp(150, 0, 100) = $v4")
+mut v5 = math.gcd(12, 8)
+println("gcd(12, 8) = $v5")
+mut v6 = math.factorial(5)
+println("factorial(5) = $v6")
+}

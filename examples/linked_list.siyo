@@ -10,13 +10,15 @@
         Node { value: 30, next: -1 }
     ]
 
-    // Simple traversal without function
+    // Traversal with string interpolation
     mut sum = 0
     mut current = 0
     while current != -1 {
         mut node = nodes[current]
+        println("Node: ${node.value}")
         sum = sum + node.value
         current = node.next
     }
+    println("Sum: $sum")
     sum
 }

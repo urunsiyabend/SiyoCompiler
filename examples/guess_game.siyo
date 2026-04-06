@@ -23,7 +23,7 @@ while !guessed {
 
     if guess == secret {
         guessed = true
-        println("Correct! You got it in " + toString(attempts) + " attempts!")
+        println("Correct! You got it in $attempts attempts!")
     } else {
         if guess < secret {
             println("Too low! Try higher.")

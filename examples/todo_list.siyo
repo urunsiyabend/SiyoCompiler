@@ -9,10 +9,12 @@ struct Todo {
 }
 
 fn priorityName(p: int) -> string {
-    if p == Priority.Low return "Low"
-    if p == Priority.Medium return "Medium"
-    if p == Priority.High return "High"
-    "Unknown"
+    match p {
+        Priority.Low => "Low",
+        Priority.Medium => "Medium",
+        Priority.High => "High",
+        _ => "Unknown"
+    }
 }
 
 fn todoToString(t: Todo) -> string {
@@ -20,7 +22,7 @@ fn todoToString(t: Todo) -> string {
     if !t.done {
         status = "[ ]"
     }
-    status + " " + t.title + " (" + priorityName(t.priority) + ")"
+    "$status ${t.title} (${priorityName(t.priority)})"
 }
 
 fn countDone(todos: Todo[], count: int) -> int {
@@ -62,15 +64,15 @@ for mut i = 0 i < count i = i + 1 {
 
 println("")
 println("=== Stats ===")
-println("Total: " + toString(count))
-println("Done: " + toString(countDone(todos, count)))
-println("Remaining: " + toString(count - countDone(todos, count)))
-println("High priority: " + toString(countByPriority(todos, count, Priority.High)))
-println("Medium priority: " + toString(countByPriority(todos, count, Priority.Medium)))
-println("Low priority: " + toString(countByPriority(todos, count, Priority.Low)))
+println("Total: $count")
+println("Done: ${countDone(todos, count)}")
+println("Remaining: ${count - countDone(todos, count)}")
+println("High priority: ${countByPriority(todos, count, Priority.High)}")
+println("Medium priority: ${countByPriority(todos, count, Priority.Medium)}")
+println("Low priority: ${countByPriority(todos, count, Priority.Low)}")
 
 // Mark one as done
 todos[3].done = true
 println("")
 println("=== After completing 'Add modules' ===")
-println("Done: " + toString(countDone(todos, count)))
+println("Done: ${countDone(todos, count)}")

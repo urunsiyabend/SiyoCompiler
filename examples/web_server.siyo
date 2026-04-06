@@ -14,10 +14,11 @@ while running {
     // Read request
     mut reader = BufferedReader.new(InputStreamReader.new(client.getInputStream()))
     mut requestLine = reader.readLine()
-    println("Request: " + requestLine)
+    println("Request: $requestLine")
 
-    // Send response
-    mut response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h1>Hello from Siyo!</h1><p>This web server is written in Siyo lang.</p></body></html>"
+    // Send response with string interpolation
+    mut body = "<html><body><h1>Hello from Siyo!</h1><p>This web server is written in Siyo lang.</p></body></html>"
+    mut response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${len(body)}\r\nConnection: close\r\n\r\n$body"
     mut out = client.getOutputStream()
     mut bytes = response.getBytes()
     out.write(bytes)

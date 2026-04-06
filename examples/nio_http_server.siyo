@@ -1,6 +1,5 @@
 // Non-blocking NIO HTTP Server
 // Single-threaded event loop using java.nio Selector
-// Proper generics + as casting - no workarounds
 import java "java.nio.channels.ServerSocketChannel"
 import java "java.nio.channels.SocketChannel"
 import java "java.nio.channels.SelectionKey"
@@ -48,19 +47,19 @@ while true {
                     mut body = "<html><body>"
                     body += "<h1>Siyo NIO Server</h1>"
                     body += "<p>Non-blocking I/O, single-threaded event loop</p>"
-                    body += "<p>Request #" + requestCount + "</p>"
+                    body += "<p>Request #$requestCount</p>"
                     body += "<p>Powered by java.nio.channels.Selector</p>"
                     body += "</body></html>"
 
                     mut response = "HTTP/1.1 200 OK\r\n"
                     response += "Content-Type: text/html\r\n"
-                    response += "Content-Length: " + len(body) + "\r\n"
+                    response += "Content-Length: ${len(body)}\r\n"
                     response += "Connection: close\r\n\r\n"
                     response += body
 
                     mut out = ByteBuffer.wrap(response.getBytes())
                     channel.write(out)
-                    println("Request #" + requestCount + " served")
+                    println("Request #$requestCount served")
                 }
                 channel.close()
             } catch e {

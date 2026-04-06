@@ -8,17 +8,11 @@
     }
 
     fn charToDigit(c: string) -> int {
-        if c == "0" return 0
-        if c == "1" return 1
-        if c == "2" return 2
-        if c == "3" return 3
-        if c == "4" return 4
-        if c == "5" return 5
-        if c == "6" return 6
-        if c == "7" return 7
-        if c == "8" return 8
-        if c == "9" return 9
-        return -1
+        match c {
+            "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+            "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+            _ => -1
+        }
     }
 
     // Parse a number from string starting at position pos
@@ -48,14 +42,13 @@
     }
 
     // Evaluate expression with operator precedence
-    // Uses two-pass: first handle +/-, then */÷
     fn eval(expr: string) -> int {
         // Tokenize into numbers and operators
         mut numbers = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         mut ops = [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "]
         mut numCount = 0
         mut opCount = 0
-        mut pos = [0] // use array to pass by reference
+        mut pos = [0]
 
         skipSpaces(expr, pos, 0)
 
@@ -82,10 +75,10 @@
         mut i = 0
         while i < opCount {
             if ops[i] == "*" || ops[i] == "/" {
-                if ops[i] == "*" {
-                    numbers[i] = numbers[i] * numbers[i + 1]
-                } else {
-                    numbers[i] = numbers[i] / numbers[i + 1]
+                match ops[i] {
+                    "*" => { numbers[i] = numbers[i] * numbers[i + 1] },
+                    "/" => { numbers[i] = numbers[i] / numbers[i + 1] },
+                    _ => {}
                 }
                 // Shift remaining numbers and ops
                 mut j = i + 1
@@ -109,10 +102,10 @@
         mut result = numbers[0]
         i = 0
         while i < opCount {
-            if ops[i] == "+" {
-                result = result + numbers[i + 1]
-            } else {
-                result = result - numbers[i + 1]
+            match ops[i] {
+                "+" => { result = result + numbers[i + 1] },
+                "-" => { result = result - numbers[i + 1] },
+                _ => {}
             }
             i = i + 1
         }
@@ -121,12 +114,11 @@
     }
 
     // Test cases
-    mut results = ""
-    results = results + "3 + 4 = " + toString(eval("3 + 4"))
-    results = results + "\n10 - 3 = " + toString(eval("10 - 3"))
-    results = results + "\n3 + 4 * 2 = " + toString(eval("3 + 4 * 2"))
-    results = results + "\n10 * 2 + 5 = " + toString(eval("10 * 2 + 5"))
-    results = results + "\n100 / 10 - 5 = " + toString(eval("100 / 10 - 5"))
-    results = results + "\n2 * 3 + 4 * 5 = " + toString(eval("2 * 3 + 4 * 5"))
+    mut results = "3 + 4 = ${eval("3 + 4")}"
+    results = results + "\n10 - 3 = ${eval("10 - 3")}"
+    results = results + "\n3 + 4 * 2 = ${eval("3 + 4 * 2")}"
+    results = results + "\n10 * 2 + 5 = ${eval("10 * 2 + 5")}"
+    results = results + "\n100 / 10 - 5 = ${eval("100 / 10 - 5")}"
+    results = results + "\n2 * 3 + 4 * 5 = ${eval("2 * 3 + 4 * 5")}"
     results
 }

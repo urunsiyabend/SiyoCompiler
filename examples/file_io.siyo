@@ -1,25 +1,24 @@
-import java "java.io.FileWriter"
-import java "java.io.BufferedReader"
-import java "java.io.FileReader"
-import java "java.io.File"
+import "std/io"
 
 // Write a file
-mut writer = FileWriter.new("hello.txt")
-writer.write("Hello from Siyo!\nThis is line 2.\nLine 3 here.")
-writer.close()
+io.writeFile("hello.txt", "Hello from Siyo!\nThis is line 2.\nLine 3 here.")
 println("File written!")
 
-// Read it back
-mut reader = BufferedReader.new(FileReader.new("hello.txt"))
-mut line = reader.readLine()
-while line != null {
-    println("Read: " + line)
-    line = reader.readLine()
+// Read it back line by line
+mut lines = io.readLines("hello.txt")
+for line in lines {
+    println("Read: $line")
 }
-reader.close()
+
+// Verify file exists
+println("File exists: ${io.fileExists("hello.txt")}")
+
+// Append to file
+io.appendFile("hello.txt", "\nLine 4 appended.")
+mut content = io.readFile("hello.txt")
+println("After append:")
+println(content)
 
 // Clean up
-mut file = File.new("hello.txt")
-file.delete()
-file.delete()
-println("File deleted!")
+io.writeFile("hello.txt", "")
+println("File cleaned up!")

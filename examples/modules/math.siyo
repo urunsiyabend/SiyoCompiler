@@ -1,20 +1,38 @@
-fn abs(x: int) -> int {
-    if x < 0 return -x
-    x
-}
+{
+    fn abs(x: int) -> int {
+        if x < 0 { return -x }
+        return x
+    }
 
-fn max(a: int, b: int) -> int {
-    if a > b return a
-    b
-}
+    fn max(a: int, b: int) -> int {
+        if a > b { return a }
+        return b
+    }
 
-fn min(a: int, b: int) -> int {
-    if a < b return a
-    b
-}
+    fn min(a: int, b: int) -> int {
+        if a < b { return a }
+        return b
+    }
 
-fn clamp(x: int, lo: int, hi: int) -> int {
-    if x < lo return lo
-    if x > hi return hi
-    x
+    fn clamp(x: int, lo: int, hi: int) -> int {
+        if x < lo { return lo }
+        if x > hi { return hi }
+        return x
+    }
+
+    fn gcd(mut a: int, mut b: int) -> int {
+        if a < 0 { a = -a }
+        if b < 0 { b = -b }
+        while b != 0 {
+            mut temp = b
+            b = a % b
+            a = temp
+        }
+        return a
+    }
+
+    fn factorial(n: int) -> int {
+        if n <= 1 { return 1 }
+        return n * factorial(n - 1)
+    }
 }

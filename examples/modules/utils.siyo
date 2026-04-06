@@ -1,5 +1,12 @@
+{
 import "math"
 
 fn clampedAbs(x: int, maxVal: int) -> int {
     math.clamp(math.abs(x), 0, maxVal)
+}
+
+fn describe(x: int, maxVal: int) -> string {
+    mut result = clampedAbs(x, maxVal)
+    "clampedAbs($x, $maxVal) = $result"
+}
 }

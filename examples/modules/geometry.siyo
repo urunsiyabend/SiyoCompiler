@@ -1,3 +1,6 @@
+{
+import "std/math"
+
 struct Point {
     x: int,
     y: int
@@ -15,7 +18,7 @@ fn newPoint(x: int, y: int) -> Point {
 }
 
 fn pointToString(p: Point) -> string {
-    "(" + toString(p.x) + ", " + toString(p.y) + ")"
+    "(${p.x}, ${p.y})"
 }
 
 fn distance2(a: Point, b: Point) -> int {
@@ -26,4 +29,9 @@ fn distance2(a: Point, b: Point) -> int {
 
 fn area(r: Rect) -> int {
     r.w * r.h
+}
+
+fn rectToString(r: Rect) -> string {
+    "Rect(${r.x}, ${r.y}, ${r.w}x${r.h})"
+}
 }

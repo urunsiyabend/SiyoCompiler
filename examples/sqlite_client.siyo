@@ -24,15 +24,15 @@ println("")
 println("All users:")
 mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY name")
 while rs.next() {
-    println("  " + rs.getInt("id") + " | " + rs.getString("name") + " | " + rs.getInt("age") + " | " + rs.getString("city"))
+    println("  ${rs.getInt("id")} | ${rs.getString("name")} | ${rs.getInt("age")} | ${rs.getString("city")}")
 }
 
 // Aggregate
 println("")
 mut rs2 = stmt.executeQuery("SELECT COUNT(*) as cnt, AVG(age) as avg_age FROM users")
 rs2.next()
-println("Count: " + rs2.getInt("cnt"))
-println("Avg age: " + rs2.getDouble("avg_age"))
+println("Count: ${rs2.getInt("cnt")}")
+println("Avg age: ${rs2.getDouble("avg_age")}")
 
 // Update
 stmt.execute("UPDATE users SET age = 29 WHERE name = 'Alice'")
@@ -40,7 +40,7 @@ println("")
 println("After update Alice's age:")
 mut rs3 = stmt.executeQuery("SELECT name, age FROM users WHERE name = 'Alice'")
 rs3.next()
-println("  " + rs3.getString("name") + " age=" + rs3.getInt("age"))
+println("  ${rs3.getString("name")} age=${rs3.getInt("age")}")
 
 // Cleanup
 stmt.close()

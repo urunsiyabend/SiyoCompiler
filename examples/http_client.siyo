@@ -21,15 +21,15 @@ try {
     }
     reader.close()
 
-    println("Lines received: " + lineCount)
-    println("Body length: " + len(body))
+    println("Lines received: $lineCount")
+    println("Body length: ${len(body)}")
     println("")
     // Print first 300 chars
     if len(body) > 300 {
-        println(substring(body, 0, 300) + "...")
+        println("${substring(body, 0, 300)}...")
     } else {
         println(body)
     }
 } catch e {
-    println("Error: " + e)
+    println("Error: $e")
 }

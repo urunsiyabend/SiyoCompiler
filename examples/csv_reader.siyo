@@ -1,44 +1,31 @@
-// CSV Reader - reads and processes CSV data with Java I/O
-import java "java.io.FileWriter"
-import java "java.io.BufferedReader"
-import java "java.io.FileReader"
-import java "java.io.File"
+// CSV Reader - reads and processes CSV data with std/io and std/strings
+import "std/io"
+import "std/strings"
 
 // Create test CSV file
-mut writer = FileWriter.new("test_data.csv")
-writer.write("Name,Age,City,Score\n")
-writer.write("Alice,28,Istanbul,95\n")
-writer.write("Bob,32,Ankara,87\n")
-writer.write("Charlie,25,Izmir,92\n")
-writer.write("Diana,30,Bursa,88\n")
-writer.write("Eve,27,Antalya,91\n")
-writer.close()
+mut csvData = "Name,Age,City,Score\n"
+csvData += "Alice,28,Istanbul,95\n"
+csvData += "Bob,32,Ankara,87\n"
+csvData += "Charlie,25,Izmir,92\n"
+csvData += "Diana,30,Bursa,88\n"
+csvData += "Eve,27,Antalya,91"
+io.writeFile("test_data.csv", csvData)
 
 // Read and parse CSV
 println("=== CSV Reader ===")
-mut reader = BufferedReader.new(FileReader.new("test_data.csv"))
+mut allLines = io.readLines("test_data.csv")
 
-mut headerLine = reader.readLine()
+mut headerLine = allLines[0]
 mut headers = split(headerLine, ",")
-println("Columns: " + len(headers))
+println("Columns: ${len(headers)}")
 
-// Store raw lines
-mut lines = [""]
-mut lineCount = 0
-mut line = reader.readLine()
-while line != null {
-    if lineCount == 0 { lines[0] = line }
-    else { push(lines, line) }
-    lineCount = lineCount + 1
-    line = reader.readLine()
-}
-reader.close()
-println("Rows: " + lineCount)
+// Data lines (skip header)
+mut lineCount = len(allLines) - 1
+println("Rows: $lineCount")
 println("")
 
-// Print table
-for h in headers { print(h + "\t") }
-println("")
+// Print table header
+println(strings.join(headers, "\t"))
 for i in range(0, 40) { print("-") }
 println("")
 
@@ -46,10 +33,9 @@ mut totalScore = 0
 mut maxScore = 0
 mut maxName = ""
 
-for i in range(0, lineCount) {
-    mut cols = split(lines[i], ",")
-    for col in cols { print(col + "\t") }
-    println("")
+for i in range(1, len(allLines)) {
+    mut cols = split(allLines[i], ",")
+    println(strings.join(cols, "\t"))
 
     // Accumulate stats
     mut score = parseInt(cols[3])
@@ -63,10 +49,10 @@ for i in range(0, lineCount) {
 // Stats
 println("")
 println("=== Stats ===")
-println("Total score: " + totalScore)
-println("Average: " + toFloat(totalScore) / toFloat(lineCount))
-println("Top scorer: " + maxName + " (" + maxScore + ")")
+println("Total score: $totalScore")
+println("Average: ${toFloat(totalScore) / toFloat(lineCount)}")
+println("Top scorer: $maxName ($maxScore)")
 
 // Cleanup
-File.new("test_data.csv").delete()
+io.writeFile("test_data.csv", "")
 println("CSV file cleaned up.")

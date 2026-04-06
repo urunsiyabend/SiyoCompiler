@@ -3,16 +3,16 @@ import java "java.lang.System"
 
 // File operations
 mut file = File.new("test_output.txt")
-println("File: " + file.toString())
-println("Exists: " + toString(file.exists()))
-println("Absolute path: " + file.getAbsolutePath())
+println("File: ${file.toString()}")
+println("Exists: ${file.exists()}")
+println("Absolute path: ${file.getAbsolutePath()}")
 
 // System properties
 mut os = System.getProperty("os.name")
 mut javaVersion = System.getProperty("java.version")
-println("OS: " + os)
-println("Java: " + javaVersion)
+println("OS: $os")
+println("Java: $javaVersion")
 
 // Current time
 mut time = System.currentTimeMillis()
-println("Timestamp: " + toString(time))
+println("Timestamp: $time")

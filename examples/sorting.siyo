@@ -1,30 +1,19 @@
 {
-    fn bubbleSort(arr: int[], size: int) {
-        for mut i = 0 i < size - 1 i = i + 1 {
-            for mut j = 0 j < size - i - 1 j = j + 1 {
-                if arr[j] > arr[j + 1] {
-                    mut temp = arr[j]
-                    arr[j] = arr[j + 1]
-                    arr[j + 1] = temp
-                }
-            }
-        }
-    }
-
-    fn arrayToString(arr: int[], size: int) -> string {
-        mut result = "["
-        for mut i = 0 i < size i = i + 1 {
-            if i > 0 {
-                result = result + ", "
-            }
-            result = result + toString(arr[i])
-        }
-        result = result + "]"
-        return result
-    }
+    import "std/strings"
 
     mut numbers = [64, 34, 25, 12, 22, 11, 90]
-    mut size = len(numbers)
-    bubbleSort(numbers, size)
-    arrayToString(numbers, size)
+
+    // Use built-in sort with comparator lambda
+    sort(numbers, fn(a: int, b: int) -> int { a - b })
+
+    // Format as string
+    mut parts = [""]
+    for mut i = 0 i < len(numbers) i = i + 1 {
+        if i == 0 {
+            parts[0] = toString(numbers[i])
+        } else {
+            push(parts, toString(numbers[i]))
+        }
+    }
+    "[" + strings.join(parts, ", ") + "]"
 }

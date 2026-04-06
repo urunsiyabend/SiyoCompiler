@@ -1,16 +1,25 @@
+{
 import "math"
 import "strings"
 
-// math.abs and strings.len should NOT conflict with builtins
+// math.abs and strings functions should NOT conflict with builtins
 // Each is accessed via module prefix only
 
 // Built-in len works normally
-println("builtin len: " + toString(len("hello")))
+mut helloLen = len("hello")
+println("builtin len: $helloLen")
 
 // Module functions accessed via prefix
-println("math.abs(-5): " + toString(math.abs(-5)))
-println("strings.len(21): " + toString(strings.len(21)))
-println("strings.contains(10, 5): " + toString(strings.contains(10, 5)))
+mut absVal = math.abs(-5)
+println("math.abs(-5): $absVal")
+mut cmpVal = strings.contains(10, 5)
+println("strings.contains(10, 5): $cmpVal")
+mut repVal = strings.repeat("ha", 3)
+println("strings.repeat: $repVal")
 
 // math.max and math.min
-println("math.max(3, 7): " + toString(math.max(3, 7)))
+mut maxVal = math.max(3, 7)
+println("math.max(3, 7): $maxVal")
+mut gcdVal = math.gcd(15, 10)
+println("math.gcd(15, 10): $gcdVal")
+}

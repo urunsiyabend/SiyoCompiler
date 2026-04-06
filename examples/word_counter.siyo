@@ -1,39 +1,5 @@
 // Word frequency counter - demonstrates string processing
-
-fn split(text: string, delimiter: string) -> string[] {
-    mut words = [""]  // start with empty placeholder
-    mut wordCount = 0
-    mut current = ""
-
-    for i in range(0, len(text)) {
-        mut ch = text[i]
-        if ch == delimiter {
-            if len(current) > 0 {
-                if wordCount == 0 {
-                    words[0] = current
-                } else {
-                    push(words, current)
-                }
-                wordCount += 1
-                current = ""
-            }
-        } else {
-            current += ch
-        }
-    }
-
-    // Don't forget the last word
-    if len(current) > 0 {
-        if wordCount == 0 {
-            words[0] = current
-        } else {
-            push(words, current)
-        }
-        wordCount += 1
-    }
-
-    return words
-}
+import "std/strings"
 
 fn countWord(words: string[], target: string) -> int {
     mut count = 0
@@ -49,14 +15,14 @@ fn countWord(words: string[], target: string) -> int {
 mut text = "the quick brown fox jumps over the lazy dog the fox the dog"
 mut words = split(text, " ")
 
-println("Text: " + text)
-println("Word count: " + toString(len(words)))
+println("Text: $text")
+println("Word count: ${len(words)}")
 
 // Count specific words
 mut targets = ["the", "fox", "dog", "quick"]
 for target in targets {
     mut count = countWord(words, target)
-    println("  '" + target + "' appears " + toString(count) + " time(s)")
+    println("  '$target' appears $count time(s)")
 }
 
 // Find unique words
@@ -80,4 +46,4 @@ for word in words {
     }
 }
 
-println("Unique words: " + toString(uniqueCount))
+println("Unique words: $uniqueCount")

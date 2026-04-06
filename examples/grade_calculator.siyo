@@ -1,4 +1,4 @@
-// Student grade calculator using all new features
+// Student grade calculator using match expressions
 
 enum Grade { A, B, C, D, F }
 
@@ -25,11 +25,13 @@ fn assignGrade(avg: float) -> int {
 }
 
 fn gradeName(g: int) -> string {
-    if g == Grade.A return "A"
-    if g == Grade.B return "B"
-    if g == Grade.C return "C"
-    if g == Grade.D return "D"
-    "F"
+    match g {
+        Grade.A => "A",
+        Grade.B => "B",
+        Grade.C => "C",
+        Grade.D => "D",
+        _ => "F"
+    }
 }
 
 // Create students
@@ -50,7 +52,7 @@ for student in students {
 println("=== Grade Report ===")
 for student in students {
     mut avg = average(student.scores)
-    println(student.name + ": avg=" + toString(avg) + " grade=" + gradeName(student.grade))
+    println("${student.name}: avg=$avg grade=${gradeName(student.grade)}")
 }
 
 // Count by grade
@@ -65,5 +67,5 @@ for student in students {
         aCount += 1
     }
 }
-println("A students: " + toString(aCount))
-println("Passing: " + toString(passing) + "/" + toString(len(students)))
+println("A students: $aCount")
+println("Passing: $passing/${len(students)}")

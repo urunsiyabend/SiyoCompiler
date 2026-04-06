@@ -1,3 +1,4 @@
+{
 // Generic-ish collection utilities
 
 fn map_int(arr: int[], fn_double: bool) -> int[] {
@@ -26,10 +27,10 @@ fn filter_positive(arr: int[]) -> int[] {
             } else {
                 push(result, x)
             }
-            count += 1
+            count = count + 1
         }
     }
-    if count == 0 return []
+    if count == 0 { return result }
     result
 }
 
@@ -45,5 +46,6 @@ fn arrayToString(arr: int[]) -> string {
         if i > 0 { s += ", " }
         s += toString(arr[i])
     }
-    s + "]"
+    "$s]"
+}
 }

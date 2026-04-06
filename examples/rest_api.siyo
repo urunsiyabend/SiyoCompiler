@@ -7,6 +7,7 @@ import java "java.sql.ResultSet"
 import java "java.net.ServerSocket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
+import "std/json"
 
 // ========== JSON Helpers ==========
 
@@ -22,13 +23,13 @@ fn jsonEscape(s: string) -> string {
 }
 
 fn jsonObject(keys: string[], values: string[], count: int) -> string {
-    mut json = "{"
+    mut j = "{"
     for i in range(0, count) {
-        if i > 0 { json += "," }
-        json += "\"" + keys[i] + "\":" + values[i]
+        if i > 0 { j += "," }
+        j += "\"" + keys[i] + "\":" + values[i]
     }
-    json += "}"
-    json
+    j += "}"
+    j
 }
 
 fn jsonString(s: string) -> string {
@@ -36,48 +37,15 @@ fn jsonString(s: string) -> string {
 }
 
 fn jsonNumber(n: int) -> string {
-    "" + n
+    toString(n)
 }
 
-fn parseJsonField(json: string, fieldName: string) -> string {
-    mut search = "\"" + fieldName + "\":"
-    mut idx = -1
-    // Simple search
-    for i in range(0, len(json) - len(search)) {
-        mut match = true
-        for j in range(0, len(search)) {
-            if json[i + j] != search[j] { match = false }
-        }
-        if match { idx = i + len(search) }
-    }
-    if idx < 0 return ""
-
-    // Skip whitespace
-    while json[idx] == " " { idx += 1 }
-
-    if json[idx] == "\"" {
-        // String value
-        idx += 1
-        mut result = ""
-        while idx < len(json) {
-            if json[idx] == "\"" { return result }
-            result += json[idx]
-            idx += 1
-        }
-        return result
-    }
-
-    // Number value
-    mut result = ""
-    while idx < len(json) {
-        mut ch = json[idx]
-        if ch == "," { return result }
-        if ch == "}" { return result }
-        if ch == " " { return result }
-        result += ch
-        idx += 1
-    }
-    result
+fn parseJsonField(jsonStr: string, fieldName: string) -> string {
+    // Use std/json to parse
+    mut parsed = json.parse(jsonStr)
+    mut val = parsed[fieldName]
+    if val == null return ""
+    val
 }
 
 // ========== HTTP Helpers ==========
@@ -114,11 +82,11 @@ fn parseQuery(path: string, param: string) -> string {
 
     mut query = substring(path, qIdx, len(path))
     for i in range(0, len(query) - len(search) + 1) {
-        mut match = true
+        mut isMatch = true
         for j in range(0, len(search)) {
-            if query[i + j] != search[j] { match = false }
+            if query[i + j] != search[j] { isMatch = false }
         }
-        if match {
+        if isMatch {
             mut val = ""
             mut k = i + len(search)
             while k < len(query) {
@@ -143,13 +111,7 @@ fn getPathBase(path: string) -> string {
 }
 
 fn httpResponse(status: int, statusText: string, body: string) -> string {
-    mut response = "HTTP/1.1 " + status + " " + statusText + "\r\n"
-    response += "Content-Type: application/json\r\n"
-    response += "Content-Length: " + len(body) + "\r\n"
-    response += "Access-Control-Allow-Origin: *\r\n"
-    response += "Connection: close\r\n\r\n"
-    response += body
-    response
+    "HTTP/1.1 $status $statusText\r\nContent-Type: application/json\r\nContent-Length: ${len(body)}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n$body"
 }
 
 // ========== Database ==========
@@ -166,7 +128,7 @@ fn dbInit() {
 fn dbInsertUser(name: string, email: string, age: int) -> int {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
     mut stmt = conn.createStatement()
-    stmt.execute("INSERT INTO users (name, email, age) VALUES ('" + name + "', '" + email + "', " + age + ")")
+    stmt.execute("INSERT INTO users (name, email, age) VALUES ('$name', '$email', $age)")
 
     mut rs = stmt.executeQuery("SELECT last_insert_rowid()")
     rs.next()
@@ -181,49 +143,49 @@ fn dbGetAllUsers() -> string {
     mut stmt = conn.createStatement()
     mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY id")
 
-    mut json = "["
+    mut result = "["
     mut first = true
     while rs.next() {
-        if !first { json += "," }
+        if !first { result += "," }
         first = false
 
         mut keys = ["id", "name", "email", "age"]
         mut vals = [jsonNumber(rs.getInt("id")), jsonString(rs.getString("name")),
                     jsonString(rs.getString("email")), jsonNumber(rs.getInt("age"))]
-        json += jsonObject(keys, vals, 4)
+        result += jsonObject(keys, vals, 4)
     }
-    json += "]"
+    result += "]"
     stmt.close()
     conn.close()
-    json
+    result
 }
 
 fn dbSearchUsers(name: string) -> string {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
     mut stmt = conn.createStatement()
-    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%" + name + "%' ORDER BY id")
+    mut rs = stmt.executeQuery("SELECT * FROM users WHERE name LIKE '%$name%' ORDER BY id")
 
-    mut json = "["
+    mut result = "["
     mut first = true
     while rs.next() {
-        if !first { json += "," }
+        if !first { result += "," }
         first = false
 
         mut keys = ["id", "name", "email", "age"]
         mut vals = [jsonNumber(rs.getInt("id")), jsonString(rs.getString("name")),
                     jsonString(rs.getString("email")), jsonNumber(rs.getInt("age"))]
-        json += jsonObject(keys, vals, 4)
+        result += jsonObject(keys, vals, 4)
     }
-    json += "]"
+    result += "]"
     stmt.close()
     conn.close()
-    json
+    result
 }
 
 fn dbDeleteUser(id: int) -> bool {
     mut conn = DriverManager.getConnection("jdbc:sqlite:api.db")
     mut stmt = conn.createStatement()
-    mut affected = stmt.executeUpdate("DELETE FROM users WHERE id = " + id)
+    mut affected = stmt.executeUpdate("DELETE FROM users WHERE id = $id")
     stmt.close()
     conn.close()
     affected > 0
@@ -277,7 +239,7 @@ fn handleRequest(method: string, path: string, body: string) -> string {
         // GET /stats
         if basePath == "/stats" {
             mut count = dbGetUserCount()
-            return httpResponse(200, "OK", "{\"user_count\":" + count + "}")
+            return httpResponse(200, "OK", "{\"user_count\":$count}")
         }
     }
 
@@ -288,7 +250,7 @@ fn handleRequest(method: string, path: string, body: string) -> string {
             mut id = parseInt(idStr)
             mut deleted = dbDeleteUser(id)
             if deleted {
-                return httpResponse(200, "OK", "{\"deleted\":" + id + "}")
+                return httpResponse(200, "OK", "{\"deleted\":$id}")
             }
             return httpResponse(404, "Not Found", "{\"error\":\"user not found\"}")
         }
@@ -372,5 +334,5 @@ while running {
     out.flush()
     socket.close()
 
-    println(method + " " + path + " → " + len(response) + " bytes")
+    println("$method $path -> ${len(response)} bytes")
 }

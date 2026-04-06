@@ -1,6 +1,6 @@
 {
     fn greet(name: string) -> string {
-        return "Hello, " + name + "!"
+        return "Hello, $name!"
     }
 
     fn factorial(n: int) -> int {
@@ -21,6 +21,8 @@
         sum = sum + arr[i]
     }
 
-    mut result = greet("World") + " Sum=" + toString(sum) + " Factorial(5)=" + toString(factorial(5))
+    mut greeting = greet("World")
+    mut fact5 = factorial(5)
+    mut result = "$greeting Sum=$sum Factorial(5)=$fact5"
     result
 }

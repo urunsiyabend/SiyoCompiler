@@ -1,117 +1,112 @@
-// Simple persistent Key-Value Store using file storage
-import java "java.io.FileWriter"
-import java "java.io.BufferedReader"
-import java "java.io.FileReader"
-import java "java.io.File"
+// Simple persistent Key-Value Store using std/io and std/json
+import "std/io"
+import "std/json"
 
-struct KVStore {
-    keys: string[],
-    values: string[],
-    count: int,
-    filename: string
-}
+// Use parallel arrays for keys/values
+mut storeKeys = [""]
+mut storeValues = [""]
+mut storeCount = 0
+mut storeFile = "store.db"
 
-fn kvNew(filename: string) -> KVStore {
-    KVStore { keys: [""], values: [""], count: 0, filename: filename }
-}
-
-fn kvSet(store: KVStore, key: string, value: string) {
-    // Check if key exists
-    for i in range(0, store.count) {
-        if store.keys[i] == key {
-            store.values[i] = value
+fn kvSet(key: string, value: string) {
+    for i in range(0, storeCount) {
+        if storeKeys[i] == key {
+            storeValues[i] = value
             return
         }
     }
-    // New key
-    if store.count == 0 {
-        store.keys[0] = key
-        store.values[0] = value
+    if storeCount == 0 {
+        storeKeys[0] = key
+        storeValues[0] = value
     } else {
-        push(store.keys, key)
-        push(store.values, value)
+        push(storeKeys, key)
+        push(storeValues, value)
     }
-    store.count = store.count + 1
+    storeCount = storeCount + 1
 }
 
-fn kvGet(store: KVStore, key: string) -> string {
-    for i in range(0, store.count) {
-        if store.keys[i] == key {
-            return store.values[i]
+fn kvGet(key: string) -> string {
+    for i in range(0, storeCount) {
+        if storeKeys[i] == key {
+            return storeValues[i]
         }
     }
     "NOT_FOUND"
 }
 
-fn kvDelete(store: KVStore, key: string) -> bool {
-    for i in range(0, store.count) {
-        if store.keys[i] == key {
-            // Shift elements
-            for j in range(i, store.count - 1) {
-                store.keys[j] = store.keys[j + 1]
-                store.values[j] = store.values[j + 1]
+fn kvDelete(key: string) -> bool {
+    for i in range(0, storeCount) {
+        if storeKeys[i] == key {
+            for j in range(i, storeCount - 1) {
+                storeKeys[j] = storeKeys[j + 1]
+                storeValues[j] = storeValues[j + 1]
             }
-            store.count = store.count - 1
+            storeCount = storeCount - 1
             return true
         }
     }
     false
 }
 
-fn kvSave(store: KVStore) {
-    mut writer = FileWriter.new(store.filename)
-    for i in range(0, store.count) {
-        writer.write(store.keys[i] + "=" + store.values[i] + "\n")
+fn kvSave() {
+    mut m = map()
+    for i in range(0, storeCount) {
+        m.set(storeKeys[i], storeValues[i])
     }
-    writer.close()
+    io.writeFile(storeFile, json.stringify(m))
 }
 
-fn kvPrint(store: KVStore) {
-    println("--- Store (" + store.count + " entries) ---")
-    for i in range(0, store.count) {
-        println("  " + store.keys[i] + " = " + store.values[i])
+fn kvPrint() {
+    println("--- Store ($storeCount entries) ---")
+    for i in range(0, storeCount) {
+        mut k = storeKeys[i]
+        mut v = storeValues[i]
+        println("  $k = $v")
     }
 }
 
 // Test
 println("=== Key-Value Store ===")
 
-mut db = kvNew("store.db")
-kvSet(db, "name", "Siyo")
-kvSet(db, "version", "0.1.0")
-kvSet(db, "language", "compiled")
-kvSet(db, "target", "JVM")
-kvPrint(db)
+kvSet("name", "Siyo")
+kvSet("version", "0.1.0")
+kvSet("language", "compiled")
+kvSet("target", "JVM")
+kvPrint()
 
 println("")
-println("GET name: " + kvGet(db, "name"))
-println("GET missing: " + kvGet(db, "missing"))
+mut val1 = kvGet("name")
+println("GET name: $val1")
+mut val2 = kvGet("missing")
+println("GET missing: $val2")
 
 // Update
-kvSet(db, "version", "0.1.1")
+kvSet("version", "0.1.1")
 println("After update version:")
-println("GET version: " + kvGet(db, "version"))
+mut val3 = kvGet("version")
+println("GET version: $val3")
 
 // Delete
-kvDelete(db, "language")
+kvDelete("language")
 println("")
-println("After delete 'language':")
-kvPrint(db)
+println("After delete language:")
+kvPrint()
 
-// Save and verify file
-kvSave(db)
+// Save and verify
+kvSave()
 println("")
-println("Saved to " + db.filename)
+println("Saved to $storeFile")
 
-// Read back
-mut reader = BufferedReader.new(FileReader.new("store.db"))
+mut content = io.readFile(storeFile)
 println("File contents:")
-mut line = reader.readLine()
-while line != null {
-    println("  " + line)
-    line = reader.readLine()
-}
-reader.close()
+println("  " + content)
 
-File.new("store.db").delete()
+// Parse back
+mut parsed = json.parse(content)
+mut parsedName = toString(parsed.get("name"))
+println("Parsed name: $parsedName")
+
+// Cleanup
+import java "java.io.File"
+File.new(storeFile).delete()
 println("Cleaned up.")
