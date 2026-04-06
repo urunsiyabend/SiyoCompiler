@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.1.0)
+# Siyo Language Grammar (0.2.0)
 
 ## Lexical Grammar
 
@@ -67,7 +67,7 @@
 - **Integer**: `42`, `-7`
 - **Float**: `3.14`, `0.5`
 - **Long**: returned by Java interop (e.g. `System.currentTimeMillis()`)
-- **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` and interpolation `"x = {expr}"`
+- **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$` and interpolation `"x = $name"` / `"x = ${expr}"`
 - **Boolean**: `true`, `false`
 - **Null**: `null`
 - **Array**: `[1, 2, 3]`, `[]`

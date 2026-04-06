@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.1.1-green" alt="v0.1.1">
-  <img src="https://img.shields.io/badge/tests-1402%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.2.0-green" alt="v0.2.0">
+  <img src="https://img.shields.io/badge/tests-1474%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -181,7 +181,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.1.0"
+version = "0.2.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -207,7 +207,7 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Actors** | `actor struct`, `spawn Actor.new(...)`, sync calls, async `send` |
 | **Java interop** | `import java "java.net.Socket"`, constructors, static & instance methods |
 | **Modules** | `import "file"` |
-| **String interpolation** | `"Hello, {name}! You are {age} years old."` |
+| **String interpolation** | `"Hello, $name! You are $age years old."` / `"${expr}"` |
 
 ### Standard Library — 37 built-in functions
 
@@ -288,15 +288,15 @@ mvn test
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.1.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.2.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.1.1)
+## Known limitations (0.2.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
 - No implicit `int + double` promotion (use `toDouble(n)`)
-- No map/set literal syntax — use `map()` / `set()` + method calls
+- No set literal syntax — use `set()` + `.add()`
 - No hex literals, no `do-while`
 - Closure captures are read-only
 - No generics, no interfaces

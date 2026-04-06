@@ -1,6 +1,6 @@
 # Siyo Compiler — Roadmap
 
-## 0.1.0 (Current Release)
+## 0.1.1 (Previous Release)
 
 ### Language Features
 - **Types**: `int`, `long`, `bool`, `float` (double), `string`, arrays, structs, enums, `null`
@@ -16,7 +16,7 @@
 - **Actors**: `actor struct`, `spawn Actor.new(...)`, synchronous calls, `send` (fire-and-forget)
 - **Java Interop**: `import java "class"`, constructors, static/instance methods
 - **Modules**: `import "file"` for Siyo modules
-- **Strings**: interpolation (`"x = {expr}"`), escape sequences, full builtin set
+- **Strings**: interpolation (`"x = $name"` / `"x = ${expr}"`), escape sequences, full builtin set
 
 ### Built-in Functions (37)
 `len`, `toString`, `parseInt`, `parseFloat`, `parseLong`, `toInt` (double/string), `toFloat`, `toDouble`, `toLong`, `print`, `println`, `input`, `error`, `range`, `push`, `pop`, `removeAt`, `sort`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`, `map`, `set`, `channel`, `random`, `httpGet`, `httpPost`, `canRead`
@@ -31,39 +31,54 @@
 - **43 compilation tests** verifying bytecode matches interpreter output
 - **29 example programs**
 
-### Known Limitations (0.1.0)
+### Known Limitations (0.1.x)
 - No `int + double` mixed-type arithmetic (explicit conversion required)
 - No map literal syntax (`{"key": val}`) — use `map()` + method calls
 - No `set(1, 2, 3)` varargs — use `set()` then `.add()`
 - No hex literals (`0xFF`)
 - No `do-while` loops
 - No nested function type annotations (`-> fn(int) -> fn(int) -> int`)
-- No function calls inside string interpolation (`"{f(x)}"`)
 - No enum types in function parameters — use int
 
 ---
 
-## 0.2.0 — Type System & Ergonomics
+## 0.2.0 (Current Release) — Ergonomics & Reliability
 
-### Mixed-Type Arithmetic
-- `int + double` auto-promotion
-- `int + long` auto-widening
-- Implicit numeric conversions where safe
+### Compiler Improvements
+- **Generalized type coercion**: Single `emitCoerceArg()` replaces per-builtin CHECKCAST logic. String builtins (contains, substring, indexOf, etc.) now work with Object-typed arguments from maps, actors, etc.
+- **Source maps / line numbers**: Bytecode now includes LineNumberTable entries. Stack traces show source file and line numbers instead of raw JVM dumps.
+- **Module-level mutable variables**: `mut` variables at module top level now work correctly in bytecode — emitted as static fields on the module class with `<clinit>` initialization.
 
-### Map & Set Literals
-- `{"key": value}` map literal syntax
-- `{1, 2, 3}` set literal syntax
-- String indexing for maps: `m["key"]`
+### New Syntax
+- **Map literals**: `{"key": value, "key2": value2}` and `{}` for empty maps
+- **Triple-quote strings**: `"""..."""` for multi-line string literals
+- **Top-level code without `{ }`**: Wrapping braces no longer required at file level
 
-### Hex & Binary Literals
-- `0xFF`, `0b1010`
+### New Features
+- **`for key in map`**: Map iteration over keys
+- **`os.args()`**: Command-line arguments now accessible (previously returned empty)
+- **`println(42)`**: println auto-converts any type (boxing + Object overload)
+- **`"text" + intVar`**: String concatenation with non-string types
+- **Empty array literals**: `mut arr = []` and `return []` work correctly
 
-### Do-While
-- `do { ... } while condition`
+### Pain Points Tracked for Future Releases
 
-### Improved Error Messages
-- Source location in runtime errors
-- Suggestion-based diagnostics
+#### Tier 2 — Important (0.3.0)
+- Nested JSON parse/stringify broken in std/json
+- JDBC / complex Java interop VerifyError
+- Actor method always returns Object (needs tracked return type)
+- Cross-module closure dispatch uses reflection
+
+#### Tier 3 — Nice to Have (0.3.0+)
+- Module aliasing (`import "std/math" as m`)
+- Closure capture mutation (currently read-only)
+- Generics / parameterized types
+- Type casting / `as` operator
+- Default parameter values, named arguments
+- Char type, destructuring, selective imports
+- std/time, regex support, test discovery
+- LSP server, code formatter
+- `imut` → `const`/`let`/`val` keyword
 
 ---
 
@@ -78,10 +93,6 @@
 - `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`
 - `forEach(arr, fn)`
 - Method chaining
-
-### String Interpolation Enhancement
-- Allow function calls inside `{}`
-- Multi-line strings
 
 ---
 
