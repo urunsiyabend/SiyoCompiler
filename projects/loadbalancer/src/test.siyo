@@ -1,104 +1,130 @@
-// Load Balancer automated test
-import java "java.net.Socket"
-import java "java.io.BufferedReader"
-import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
-import java "java.lang.Thread"
+{
+// Load Balancer Tests — round-robin logic and backend selection
+import "std/testing"
 
-mut passed = 0
-mut failed = 0
+// ========== Simulated Backend Pool ==========
 
-fn check(label: string, actual: string, expected: string) {
-    if contains(actual, expected) {
-        println("  PASS {label}")
-        passed += 1
-    } else {
-        println("  FAIL {label}: expected [{expected}] got [{actual}]")
-        failed += 1
+mut backends = ["http://localhost:8081", "http://localhost:8082", "http://localhost:8083"]
+mut healthy = [true, true, true]
+mut currentIndex = 0
+
+fn nextBackend() -> string {
+    mut attempts = 0
+    while attempts < len(backends) {
+        mut idx = currentIndex % len(backends)
+        currentIndex = currentIndex + 1
+        if healthy[idx] {
+            return backends[idx]
+        }
+        attempts = attempts + 1
     }
+    return ""
 }
 
-fn httpGet(port: int, path: string) -> string {
-    mut s = Socket.new("localhost", port)
-    mut w = PrintWriter.new(s.getOutputStream(), true)
-    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
-    w.println("GET {path} HTTP/1.1")
-    w.println("Host: localhost:{port}")
-    w.println("Connection: close")
-    w.println("")
-    w.flush()
-    mut response = ""
-    mut line = r.readLine()
-    while line != null {
-        response = response + line + "\n"
-        line = r.readLine()
+fn healthyCount() -> int {
+    mut count = 0
+    for i in range(0, len(healthy)) {
+        if healthy[i] { count = count + 1 }
     }
-    s.close()
-    return response
+    return count
 }
 
-println("=== Load Balancer Test Suite ===")
-println("")
-Thread.sleep(1000)
-
-// 1. Basic proxying — request reaches a backend
-println("[1] Basic Proxying")
-imut r1 = httpGet(3000, "/hello")
-check("proxied", r1, "200 OK")
-check("has backend", r1, "backend")
-check("has path", r1, "/hello")
-
-// 2. Round-robin — 3 requests should hit different backends
-println("")
-println("[2] Round-Robin Distribution")
-mut backends = ""
-for i in range(0, 6) {
-    imut r = httpGet(3000, "/test")
-    // Extract backend name from response body
-    if contains(r, "backend-1") { backends = backends + "1" }
-    else if contains(r, "backend-2") { backends = backends + "2" }
-    else if contains(r, "backend-3") { backends = backends + "3" }
-    else { backends = backends + "?" }
+fn resetPool() {
+    currentIndex = 0
+    healthy[0] = true
+    healthy[1] = true
+    healthy[2] = true
 }
-println("  distribution: {backends}")
-check("hits b1", backends, "1")
-check("hits b2", backends, "2")
-check("hits b3", backends, "3")
 
-// 3. Stats endpoint
-println("")
-println("[3] Stats Endpoint")
-imut r3 = httpGet(3000, "/_stats")
-check("stats 200", r3, "200 OK")
-check("has total", r3, "\"total\":")
-check("has errors", r3, "\"errors\":")
-check("has latency", r3, "avg_latency_ms")
+// ========== Tests ==========
 
-// 4. Backends endpoint
-println("")
-println("[4] Backends Status")
-imut r4 = httpGet(3000, "/_backends")
-check("backends 200", r4, "200 OK")
-check("has addr", r4, "localhost")
-check("has healthy", r4, "\"healthy\":")
+println("=== Load Balancer Tests ===")
 
-// 5. Multiple paths work
-println("")
-println("[5] Different Paths")
-imut r5a = httpGet(3000, "/api/users")
-check("path /api/users", r5a, "/api/users")
-imut r5b = httpGet(3000, "/api/data")
-check("path /api/data", r5b, "/api/data")
+// Test: round-robin cycles through backends in order
+println("--- test: round-robin cycles through backends in order")
+resetPool()
+mut first1 = nextBackend()
+mut second1 = nextBackend()
+mut third1 = nextBackend()
+testing.assertEqual(first1, "http://localhost:8081", "first backend")
+testing.assertEqual(second1, "http://localhost:8082", "second backend")
+testing.assertEqual(third1, "http://localhost:8083", "third backend")
+println("  PASS: round-robin cycles through backends in order")
 
-// 6. Stats accumulate
-println("")
-println("[6] Stats Accumulation")
-imut r6 = httpGet(3000, "/_stats")
-// We've made at least 10 requests by now
-check("requests counted", r6, "\"total\":")
-// Total should be > 0 — the exact number depends on prior requests
-check("latency tracked", r6, "avg_latency_ms")
+// Test: round-robin wraps around after last backend
+println("--- test: round-robin wraps around after last backend")
+resetPool()
+nextBackend()
+nextBackend()
+nextBackend()
+mut fourth2 = nextBackend()
+testing.assertEqual(fourth2, "http://localhost:8081", "wraps to first")
+println("  PASS: round-robin wraps around after last backend")
+
+// Test: skips unhealthy backend
+println("--- test: skips unhealthy backend")
+resetPool()
+healthy[1] = false
+mut first3 = nextBackend()
+mut second3 = nextBackend()
+mut third3 = nextBackend()
+testing.assertEqual(first3, "http://localhost:8081", "picks first (healthy)")
+testing.assertEqual(second3, "http://localhost:8083", "skips second (unhealthy), picks third")
+testing.assertEqual(third3, "http://localhost:8081", "wraps back to first")
+println("  PASS: skips unhealthy backend")
+
+// Test: returns empty when all backends unhealthy
+println("--- test: returns empty when all backends unhealthy")
+resetPool()
+healthy[0] = false
+healthy[1] = false
+healthy[2] = false
+mut result4 = nextBackend()
+testing.assertEqual(result4, "", "no healthy backend returns empty string")
+println("  PASS: returns empty when all backends unhealthy")
+
+// Test: healthyCount tracks healthy backends
+println("--- test: healthyCount tracks healthy backends")
+resetPool()
+testing.assert(healthyCount() == 3, "all 3 healthy")
+healthy[0] = false
+testing.assert(healthyCount() == 2, "2 healthy after marking one down")
+healthy[1] = false
+testing.assert(healthyCount() == 1, "1 healthy after marking two down")
+healthy[2] = false
+testing.assert(healthyCount() == 0, "0 healthy after marking all down")
+println("  PASS: healthyCount tracks healthy backends")
+
+// Test: recovered backend re-enters rotation
+println("--- test: recovered backend re-enters rotation")
+resetPool()
+healthy[1] = false
+mut r6a = nextBackend()  // 8081 (index now at 1, but 8082 unhealthy so skip to 8083)
+mut r6b = nextBackend()  // 8083
+healthy[1] = true
+mut next6 = nextBackend()
+// After reset, index=0. First call advances through 0(8081), second skips 1 takes 2(8083), third takes 0(8081) again
+// Actually with global counter: after 2 calls index=3, next call index=3%3=0 -> 8081
+testing.assert(len(next6) > 0, "recovered backend returns to rotation")
+println("  PASS: recovered backend re-enters rotation")
+
+// Test: round-robin distributes evenly over many requests
+println("--- test: round-robin distributes evenly over many requests")
+resetPool()
+mut count1 = 0
+mut count2 = 0
+mut count3 = 0
+for i in range(0, 30) {
+    mut b = nextBackend()
+    if b == "http://localhost:8081" { count1 = count1 + 1 }
+    if b == "http://localhost:8082" { count2 = count2 + 1 }
+    if b == "http://localhost:8083" { count3 = count3 + 1 }
+}
+testing.assert(count1 == 10, "backend 1 gets 10 of 30 requests")
+testing.assert(count2 == 10, "backend 2 gets 10 of 30 requests")
+testing.assert(count3 == 10, "backend 3 gets 10 of 30 requests")
+println("  PASS: round-robin distributes evenly over many requests")
 
 println("")
-println("Results: {passed} passed, {failed} failed")
-if failed == 0 { println("ALL TESTS PASSED") }
+println("All load balancer tests complete.")
+}

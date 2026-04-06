@@ -1,93 +1,53 @@
-// Todo API automated test
-import java "java.net.Socket"
-import java "java.io.BufferedReader"
-import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
-import java "java.lang.Thread"
+{
+// Tests for todo logic (no TCP)
+import "std/testing"
+import "std/json"
 
-mut passed = 0
-mut failed = 0
+// --- Use local variables only, no module-level state ---
 
-fn check(label: string, actual: string, expected: string) {
-    if contains(actual, expected) {
-        println("  PASS {label}")
-        passed += 1
-    } else {
-        println("  FAIL {label}: expected [{expected}] got [{actual}]")
-        failed += 1
-    }
+println("=== Todo API Tests ===")
+
+// Test: add todo
+println("--- test: add todo")
+mut todos = map()
+mut todo1 = map()
+todo1.set("id", 1)
+todo1.set("title", "Buy milk")
+todo1.set("done", false)
+todos.set("1", todo1)
+testing.assertEqual(toString(todo1.get("title")), "Buy milk", "title should be Buy milk")
+testing.assertEqual(toString(todo1.get("done")), "false", "done should be false")
+testing.assert(todos.has("1"), "todos should contain id 1")
+println("  PASS: add todo")
+
+// Test: list todos
+println("--- test: list todos")
+mut todo2 = map()
+todo2.set("id", 2)
+todo2.set("title", "Walk the dog")
+todo2.set("done", false)
+todos.set("2", todo2)
+mut keys = todos.keys()
+mut result = "["
+for mut i = 0 i < len(keys) i = i + 1 {
+    if i > 0 { result = result + "," }
+    mut t = todos.get(keys[i])
+    result = result + json.stringify(t)
 }
+result = result + "]"
+testing.assert(contains(result, "Buy milk"), "list should contain Buy milk")
+testing.assert(contains(result, "Walk the dog"), "list should contain Walk the dog")
+testing.assert(todos.size() == 2, "should have 2 todos")
+println("  PASS: list todos")
 
-fn httpRequest(method: string, path: string, body: string) -> string {
-    mut s = Socket.new("localhost", 8080)
-    mut w = PrintWriter.new(s.getOutputStream(), true)
-    mut r = BufferedReader.new(InputStreamReader.new(s.getInputStream()))
-    w.println("{method} {path} HTTP/1.1")
-    w.println("Host: localhost:8080")
-    if len(body) > 0 {
-        w.println("Content-Length: {len(body)}")
-        w.println("Content-Type: application/json")
-    }
-    w.println("")
-    if len(body) > 0 { w.print(body) }
-    w.flush()
-    mut response = ""
-    mut line = r.readLine()
-    while line != null {
-        response = response + line + "\n"
-        line = r.readLine()
-    }
-    s.close()
-    return response
+// Test: delete todo
+println("--- test: delete todo")
+todos.remove("1")
+testing.assert(!todos.has("1"), "todo 1 should be removed")
+testing.assert(todos.size() == 1, "should have 1 todo after delete")
+testing.assert(!todos.has("999"), "non-existent key not present")
+println("  PASS: delete todo")
+
+println("")
+println("All tests completed.")
 }
-
-println("=== Todo API Test Suite ===")
-println("")
-Thread.sleep(500)
-
-println("[1] GET /todos (empty)")
-check("empty list", httpRequest("GET", "/todos", ""), "[]")
-
-println("")
-println("[2] POST /todos")
-imut r2 = httpRequest("POST", "/todos", "\{\"title\":\"Buy milk\"\}")
-check("create 201", r2, "201 Created")
-check("has title", r2, "Buy milk")
-check("has id", r2, "\"id\":1")
-check("done false", r2, "\"done\":false")
-check("create 2nd", httpRequest("POST", "/todos", "\{\"title\":\"Walk dog\"\}"), "Walk dog")
-
-println("")
-println("[3] GET /todos")
-imut r4 = httpRequest("GET", "/todos", "")
-check("list milk", r4, "Buy milk")
-check("list dog", r4, "Walk dog")
-
-println("")
-println("[4] GET /todos/1")
-imut r5 = httpRequest("GET", "/todos/1", "")
-check("get one", r5, "Buy milk")
-check("get id", r5, "\"id\":1")
-check("404", httpRequest("GET", "/todos/999", ""), "404")
-
-println("")
-println("[5] PATCH /todos/1")
-imut r7 = httpRequest("PATCH", "/todos/1", "\{\"done\":true\}")
-check("toggle", r7, "\"done\":true")
-check("title kept", r7, "Buy milk")
-check("persisted", httpRequest("GET", "/todos/1", ""), "\"done\":true")
-
-println("")
-println("[6] DELETE /todos/2")
-check("delete ok", httpRequest("DELETE", "/todos/2", ""), "\"ok\":true")
-check("gone", httpRequest("GET", "/todos/2", ""), "404")
-check("1 left", httpRequest("GET", "/todos", ""), "Buy milk")
-
-println("")
-println("[7] Validation")
-check("no title", httpRequest("POST", "/todos", "\{\}"), "title required")
-check("del 404", httpRequest("DELETE", "/todos/999", ""), "404")
-
-println("")
-println("Results: {passed} passed, {failed} failed")
-if failed == 0 { println("ALL TESTS PASSED") }

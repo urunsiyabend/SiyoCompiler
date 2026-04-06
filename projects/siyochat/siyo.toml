@@ -1,0 +1,7 @@
+[project]
+name = "siyochat"
+version = "0.2.0"
+main = "src/main.siyo"
+
+[dependencies]
+"org.xerial:sqlite-jdbc" = "3.45.3.0"

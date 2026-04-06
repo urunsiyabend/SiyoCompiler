@@ -1,0 +1,226 @@
+{
+// Markdown and front matter parser
+
+import "std/strings"
+
+// Parse front matter between --- markers
+// Returns a map with key-value pairs, body stored under "_body"
+fn parseFrontMatter(text: string) -> object {
+    mut meta = map()
+    mut lines = split(text, "\n")
+
+    if len(lines) < 2 { return meta }
+    if trim(lines[0]) != "---" {
+        meta.set("_body", text)
+        return meta
+    }
+
+    // Find closing ---
+    mut bodyStart = -1
+    for i in range(1, len(lines)) {
+        if trim(lines[i]) == "---" {
+            bodyStart = i + 1
+            break
+        }
+        // Parse key: value
+        mut line = lines[i]
+        mut colonIdx = indexOf(line, ":")
+        if colonIdx > 0 {
+            mut key = trim(substring(line, 0, colonIdx))
+            mut value = trim(substring(line, colonIdx + 1, len(line)))
+            meta.set(key, value)
+        }
+    }
+
+    // Store the body content (everything after second ---)
+    if bodyStart > 0 {
+        mut body = ""
+        for i in range(bodyStart, len(lines)) {
+            if i > bodyStart { body = body + "\n" }
+            body = body + lines[i]
+        }
+        meta.set("_body", body)
+    } else {
+        meta.set("_body", text)
+    }
+
+    return meta
+}
+
+// Convert basic Markdown to HTML
+fn markdownToHtml(md: string) -> string {
+    mut lines = split(md, "\n")
+    mut html = ""
+    mut inParagraph = false
+
+    for i in range(0, len(lines)) {
+        mut line = lines[i]
+        mut trimmed = trim(line)
+
+        // Empty line ends paragraph
+        if len(trimmed) == 0 {
+            if inParagraph {
+                html = html + "</p>\n"
+                inParagraph = false
+            }
+            continue
+        }
+
+        // Headings (check ### before ## before #)
+        if startsWith(trimmed, "### ") {
+            if inParagraph {
+                html = html + "</p>\n"
+                inParagraph = false
+            }
+            mut content = substring(trimmed, 4, len(trimmed))
+            content = processInline(content)
+            html = html + "<h3>" + content + "</h3>\n"
+            continue
+        }
+        if startsWith(trimmed, "## ") {
+            if inParagraph {
+                html = html + "</p>\n"
+                inParagraph = false
+            }
+            mut content = substring(trimmed, 3, len(trimmed))
+            content = processInline(content)
+            html = html + "<h2>" + content + "</h2>\n"
+            continue
+        }
+        if startsWith(trimmed, "# ") {
+            if inParagraph {
+                html = html + "</p>\n"
+                inParagraph = false
+            }
+            mut content = substring(trimmed, 2, len(trimmed))
+            content = processInline(content)
+            html = html + "<h1>" + content + "</h1>\n"
+            continue
+        }
+
+        // Regular text -> paragraph
+        if !inParagraph {
+            html = html + "<p>"
+            inParagraph = true
+        } else {
+            html = html + " "
+        }
+        html = html + processInline(trimmed)
+    }
+
+    if inParagraph {
+        html = html + "</p>\n"
+    }
+
+    return html
+}
+
+// Process inline markdown: bold, italic, code, links
+fn processInline(text: string) -> string {
+    mut result = text
+
+    // Code: `code`
+    result = processBackticks(result)
+    // Bold: **text**
+    result = processDelimiter(result, "**", "<strong>", "</strong>")
+    // Italic: *text*
+    result = processDelimiter(result, "*", "<em>", "</em>")
+    // Links: [text](url)
+    result = processLinks(result)
+
+    return result
+}
+
+// Process backtick code spans
+fn processBackticks(text: string) -> string {
+    mut result = ""
+    mut i = 0
+    mut chars = strings.chars(text)
+    mut inCode = false
+
+    while i < len(chars) {
+        if chars[i] == "`" {
+            if inCode {
+                result = result + "</code>"
+                inCode = false
+            } else {
+                result = result + "<code>"
+                inCode = true
+            }
+        } else {
+            result = result + chars[i]
+        }
+        i = i + 1
+    }
+
+    return result
+}
+
+// Process paired delimiters like ** or *
+fn processDelimiter(text: string, delim: string, openTag: string, closeTag: string) -> string {
+    mut result = ""
+    mut remaining = text
+    mut open = false
+
+    while contains(remaining, delim) {
+        mut idx = indexOf(remaining, delim)
+        result = result + substring(remaining, 0, idx)
+        if open {
+            result = result + closeTag
+            open = false
+        } else {
+            result = result + openTag
+            open = true
+        }
+        remaining = substring(remaining, idx + len(delim), len(remaining))
+    }
+    result = result + remaining
+
+    if open {
+        result = result + closeTag
+    }
+
+    return result
+}
+
+// Process markdown links: [text](url)
+fn processLinks(text: string) -> string {
+    mut result = ""
+    mut remaining = text
+
+    while contains(remaining, "[") {
+        mut bracketIdx = indexOf(remaining, "[")
+        result = result + substring(remaining, 0, bracketIdx)
+
+        mut afterBracket = substring(remaining, bracketIdx + 1, len(remaining))
+        mut closeBracket = indexOf(afterBracket, "]")
+        if closeBracket < 0 {
+            result = result + "["
+            remaining = afterBracket
+            continue
+        }
+
+        mut linkText = substring(afterBracket, 0, closeBracket)
+        mut afterClose = substring(afterBracket, closeBracket + 1, len(afterBracket))
+
+        if len(afterClose) > 0 {
+            if startsWith(afterClose, "(") {
+                mut parenClose = indexOf(afterClose, ")")
+                if parenClose > 0 {
+                    mut url = substring(afterClose, 1, parenClose)
+                    result = result + "<a href=\"" + url + "\">" + linkText + "</a>"
+                    remaining = substring(afterClose, parenClose + 1, len(afterClose))
+                    continue
+                }
+            }
+        }
+
+        result = result + "[" + linkText + "]"
+        remaining = afterClose
+    }
+
+    result = result + remaining
+    return result
+}
+
+}

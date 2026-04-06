@@ -1,0 +1,811 @@
+// siyocluster — Distributed Key-Value Store with Replication
+// Each node runs as a separate process communicating over TCP.
+// Primary node accepts writes and replicates to replicas.
+// Replicas serve reads locally, forward writes to primary.
+// Heartbeat-based failure detection + leader election (lowest port wins).
+//
+// Usage:
+//   siyoc run src/main.siyo 7001 primary
+//   siyoc run src/main.siyo 7002 replica localhost:7001
+//   siyoc run src/main.siyo 7003 replica localhost:7001
+//
+// Client protocol (line-based TCP):
+//   SET key value       -> OK
+//   GET key             -> value or (nil)
+//   DEL key             -> (deleted) or (nil)
+//   KEYS                -> key1, key2, ... or (empty)
+//   INFO                -> node role, peer count, key count
+//
+// Internal protocol (between nodes):
+//   REPLICATE SET key value
+//   REPLICATE DEL key
+//   HEARTBEAT node_id
+//   VOTE node_id
+//   PROMOTE node_id
+//   SYNC_REQUEST
+//   SYNC_DATA key value  (bulk sync, one per key)
+//   SYNC_END
+
+import "std/strings"
+import "std/os"
+import java "java.net.ServerSocket"
+import java "java.net.Socket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.OutputStreamWriter"
+import java "java.lang.Thread"
+import java "java.lang.System"
+
+// ==================== Store Actor ====================
+// Owns the key-value data. All reads/writes go through here.
+
+actor Store {
+    data: map
+}
+
+impl Store {
+    fn new() -> Store {
+        Store { data: map() }
+    }
+
+    fn get(self, key: string) -> string {
+        if self.data.has(key) {
+            return toString(self.data.get(key))
+        }
+        return "(nil)"
+    }
+
+    fn set(self, key: string, value: string) -> string {
+        self.data.set(key, value)
+        return "OK"
+    }
+
+    fn del(self, key: string) -> string {
+        if self.data.has(key) {
+            self.data.remove(key)
+            return "(deleted)"
+        }
+        return "(nil)"
+    }
+
+    fn keys(self) -> string {
+        if self.data.size() == 0 {
+            return "(empty)"
+        }
+        mut allKeys = self.data.keys()
+        mut result = [""]
+        for k in allKeys {
+            push(result, toString(k))
+        }
+        removeAt(result, 0)
+        return strings.join(result, ", ")
+    }
+
+    fn size(self) -> int {
+        return self.data.size()
+    }
+
+    fn getAll(self) -> string {
+        // Returns comma-separated list of all keys for sync
+        mut allKeys = self.data.keys()
+        if len(allKeys) == 0 {
+            return ""
+        }
+        mut result = [""]
+        for k in allKeys {
+            push(result, toString(k))
+        }
+        removeAt(result, 0)
+        return strings.join(result, ",")
+    }
+
+    fn getData(self, key: string) -> string {
+        // Same as get but returns empty for missing (used for sync)
+        if self.data.has(key) {
+            return toString(self.data.get(key))
+        }
+        return ""
+    }
+}
+
+// ==================== NodeState Actor ====================
+// Manages node state: role, peers, election status.
+// This is the coordinator — all state changes go through here.
+
+actor NodeState {
+    role: string,
+    nodeId: string,
+    port: int,
+    primaryAddr: string,
+    peers: object,
+    peerLastSeen: object,
+    electionInProgress: bool,
+    votesReceived: object
+}
+
+impl NodeState {
+    fn new(role: string, nodeId: string, port: int, primaryAddr: string) -> NodeState {
+        NodeState {
+            role: role,
+            nodeId: nodeId,
+            port: port,
+            primaryAddr: primaryAddr,
+            peers: set(),
+            peerLastSeen: map(),
+            electionInProgress: false,
+            votesReceived: set()
+        }
+    }
+
+    fn getRole(self) -> string {
+        return self.role
+    }
+
+    fn getNodeId(self) -> string {
+        return self.nodeId
+    }
+
+    fn getPort(self) -> int {
+        return self.port
+    }
+
+    fn getPrimaryAddr(self) -> string {
+        return self.primaryAddr
+    }
+
+    fn setPrimaryAddr(self, addr: string) -> string {
+        self.primaryAddr = addr
+        return "OK"
+    }
+
+    fn setRole(self, newRole: string) -> string {
+        mut oldRole = self.role
+        self.role = newRole
+        return oldRole
+    }
+
+    fn addPeer(self, peerAddr: string) -> string {
+        self.peers.add(peerAddr)
+        self.peerLastSeen.set(peerAddr, System.currentTimeMillis())
+        return "OK"
+    }
+
+    fn removePeer(self, peerAddr: string) -> string {
+        if self.peers.has(peerAddr) {
+            self.peers.remove(peerAddr)
+            if self.peerLastSeen.has(peerAddr) {
+                self.peerLastSeen.remove(peerAddr)
+            }
+        }
+        return "OK"
+    }
+
+    fn recordHeartbeat(self, peerAddr: string) -> string {
+        self.peerLastSeen.set(peerAddr, System.currentTimeMillis())
+        if !self.peers.has(peerAddr) {
+            self.peers.add(peerAddr)
+        }
+        return "OK"
+    }
+
+    fn getPeers(self) -> string {
+        // Return peers as comma-separated string to avoid Object indexing issues
+        mut peerList = self.peers.values()
+        if len(peerList) == 0 {
+            return ""
+        }
+        mut result = [""]
+        for i in range(0, len(peerList)) {
+            push(result, toString(peerList[i]))
+        }
+        removeAt(result, 0)
+        return strings.join(result, ",")
+    }
+
+    fn peerCount(self) -> int {
+        return self.peers.size()
+    }
+
+    fn getDeadPeers(self, timeoutMs: int) -> string {
+        // Returns comma-separated list of dead peers
+        mut now = System.currentTimeMillis()
+        mut dead = [""]
+        mut peerList = self.peers.values()
+        for i in range(0, len(peerList)) {
+            mut p = toString(peerList[i])
+            if self.peerLastSeen.has(p) {
+                mut lastSeen = self.peerLastSeen.get(p)
+                mut diff = now - parseLong(toString(lastSeen))
+                if diff > parseLong(toString(timeoutMs)) {
+                    push(dead, p)
+                }
+            }
+        }
+        removeAt(dead, 0)
+        if len(dead) == 0 {
+            return ""
+        }
+        return strings.join(dead, ",")
+    }
+
+    fn startElection(self) -> bool {
+        if self.electionInProgress {
+            return false
+        }
+        self.electionInProgress = true
+        self.votesReceived = set()
+        return true
+    }
+
+    fn receiveVote(self, fromNodeId: string) -> int {
+        self.votesReceived.add(fromNodeId)
+        return self.votesReceived.size()
+    }
+
+    fn endElection(self) -> string {
+        self.electionInProgress = false
+        self.votesReceived = set()
+        return "OK"
+    }
+
+    fn isElecting(self) -> bool {
+        return self.electionInProgress
+    }
+
+    fn info(self, keyCount: int) -> string {
+        mut peerCount = toString(self.peers.size())
+        mut kc = toString(keyCount)
+        mut p = toString(self.port)
+        return "role=${self.role} node=${self.nodeId} port=$p primary=${self.primaryAddr} peers=$peerCount keys=$kc"
+    }
+}
+
+// ==================== TCP Helper Functions ====================
+
+fn sendTcpMessage(host: string, port: int, message: string) -> string {
+    // Send a single line to a TCP endpoint, read one line back
+    try {
+        mut sock = Socket.new(host, port)
+        mut writer = OutputStreamWriter.new(sock.getOutputStream())
+        mut reader = BufferedReader.new(InputStreamReader.new(sock.getInputStream()))
+        writer.write(message + "\n")
+        writer.flush()
+        mut response = reader.readLine()
+        sock.close()
+        if response == null {
+            return ""
+        }
+        return response
+    } catch e {
+        return "ERR:CONNECT"
+    }
+}
+
+fn sendTcpNoReply(host: string, port: int, message: string) -> bool {
+    // Send a single line, don't wait for response
+    try {
+        mut sock = Socket.new(host, port)
+        mut writer = OutputStreamWriter.new(sock.getOutputStream())
+        writer.write(message + "\n")
+        writer.flush()
+        sock.close()
+        return true
+    } catch e {
+        return false
+    }
+}
+
+fn parseHost(addr: string) -> string {
+    mut parts = split(addr, ":")
+    return parts[0]
+}
+
+fn parsePort(addr: string) -> int {
+    mut parts = split(addr, ":")
+    if len(parts) > 1 {
+        return parseInt(parts[1])
+    }
+    return 7001
+}
+
+// ==================== Replication Logic ====================
+
+fn replicateToAllPeers(nodeState: object, key: string, value: string, cmd: string) {
+    // Primary replicates writes to all known peers
+    mut peersStr = nodeState.getPeers()
+    if peersStr == "" { return }
+    mut peers = split(peersStr, ",")
+    for i in range(0, len(peers)) {
+        mut peerAddr = peers[i]
+        mut host = parseHost(peerAddr)
+        mut port = parsePort(peerAddr)
+        if cmd == "SET" {
+            sendTcpMessage(host, port, "REPLICATE SET $key $value")
+        } else if cmd == "DEL" {
+            sendTcpMessage(host, port, "REPLICATE DEL $key")
+        }
+    }
+}
+
+fn forwardWriteToPrimary(nodeState: object, command: string) -> string {
+    // Replica forwards write to primary
+    mut primaryAddr = nodeState.getPrimaryAddr()
+    if primaryAddr == "" {
+        return "ERR: no primary known"
+    }
+    mut host = parseHost(primaryAddr)
+    mut port = parsePort(primaryAddr)
+    mut result = sendTcpMessage(host, port, command)
+    if result == "ERR:CONNECT" {
+        return "ERR: primary unreachable"
+    }
+    return result
+}
+
+fn syncFromPrimary(store: object, nodeState: object) {
+    // Request full data sync from current primary
+    mut primaryAddr = nodeState.getPrimaryAddr()
+    if primaryAddr == "" {
+        println("[sync] No primary to sync from")
+        return
+    }
+    mut host = parseHost(primaryAddr)
+    mut port = parsePort(primaryAddr)
+
+    println("[sync] Requesting full sync from $primaryAddr")
+    try {
+        mut sock = Socket.new(host, port)
+        mut writer = OutputStreamWriter.new(sock.getOutputStream())
+        mut reader = BufferedReader.new(InputStreamReader.new(sock.getInputStream()))
+
+        writer.write("SYNC_REQUEST\n")
+        writer.flush()
+
+        mut line = reader.readLine()
+        mut syncCount = 0
+        while line != null {
+            if line == "SYNC_END" {
+                break
+            }
+            // Parse: SYNC_DATA key value
+            if startsWith(line, "SYNC_DATA ") {
+                mut rest = substring(line, 10, len(line))
+                mut parts = split(rest, " ")
+                if len(parts) >= 2 {
+                    mut key = parts[0]
+                    // Value may contain spaces
+                    mut valParts = [""]
+                    for j in range(1, len(parts)) {
+                        push(valParts, parts[j])
+                    }
+                    removeAt(valParts, 0)
+                    mut value = strings.join(valParts, " ")
+                    store.set(key, value)
+                    syncCount = syncCount + 1
+                }
+            }
+            line = reader.readLine()
+        }
+        sock.close()
+        println("[sync] Received $syncCount keys from primary")
+    } catch e {
+        println("[sync] Failed to sync from primary: $e")
+    }
+}
+
+// ==================== Heartbeat Logic ====================
+
+fn sendHeartbeats(nodeState: object, myAddr: string) {
+    mut peersStr = nodeState.getPeers()
+    if peersStr == "" { return }
+    mut peers = split(peersStr, ",")
+    for i in range(0, len(peers)) {
+        mut peerAddr = peers[i]
+        mut host = parseHost(peerAddr)
+        mut port = parsePort(peerAddr)
+        mut ok = sendTcpNoReply(host, port, "HEARTBEAT $myAddr")
+        if !ok {
+            println("[heartbeat] Failed to reach $peerAddr")
+        }
+    }
+}
+
+fn checkDeadPeers(nodeState: object, myAddr: string) {
+    mut role = nodeState.getRole()
+    mut deadStr = nodeState.getDeadPeers(6000)
+    if deadStr == "" { return }
+    mut deadPeers = split(deadStr, ",")
+    for i in range(0, len(deadPeers)) {
+        mut deadAddr = deadPeers[i]
+        println("[heartbeat] Peer $deadAddr appears dead")
+        mut primaryAddr = nodeState.getPrimaryAddr()
+        if deadAddr == primaryAddr {
+            if role == "replica" {
+                println("[election] Primary $deadAddr is dead — starting election")
+                nodeState.removePeer(deadAddr)
+                triggerElection(nodeState, myAddr)
+            }
+        } else {
+            nodeState.removePeer(deadAddr)
+        }
+    }
+}
+
+fn heartbeatLoop(nodeState: object, myAddr: string) {
+    while true {
+        Thread.sleep(toLong(2000))
+        sendHeartbeats(nodeState, myAddr)
+        checkDeadPeers(nodeState, myAddr)
+    }
+}
+
+// ==================== Leader Election ====================
+// Simple election: lowest port number wins.
+// When primary dies, replicas detect via heartbeat timeout.
+// Each replica proposes itself and collects votes.
+// Node with lowest port becomes primary.
+
+fn checkPeerPort(peerAddr: string, myAddr: string, lowestPort: int) -> bool {
+    mut peerPort = parsePort(peerAddr)
+    mut result = sendTcpMessage(parseHost(peerAddr), peerPort, "VOTE $myAddr")
+    if result == "ERR:CONNECT" { return false }
+    return peerPort < lowestPort
+}
+
+fn findLowestPort(nodeState: object, myAddr: string) -> string {
+    // PAIN POINT: Actor method calls on `object`-typed params return Object.
+    // Must explicitly convert with parseInt/toString for arithmetic.
+    mut myPort = parseInt(toString(nodeState.getPort()))
+    mut peersStr = toString(nodeState.getPeers())
+    if peersStr == "" { return myAddr }
+
+    mut lowestPort = myPort
+    mut lowestAddr = myAddr
+    mut peers = split(peersStr, ",")
+    for i in range(0, len(peers)) {
+        mut peerAddr = peers[i]
+        if checkPeerPort(peerAddr, myAddr, lowestPort) {
+            lowestPort = parsePort(peerAddr)
+            lowestAddr = peerAddr
+        }
+    }
+    return lowestAddr
+}
+
+fn promoteAsPrimary(nodeState: object, myAddr: string) {
+    mut myPort = parseInt(toString(nodeState.getPort()))
+    println("[election] WON — promoting self to primary (port $myPort)")
+    nodeState.setRole("primary")
+    nodeState.setPrimaryAddr(myAddr)
+    nodeState.endElection()
+
+    mut peersStr = nodeState.getPeers()
+    if peersStr != "" {
+        mut peers = split(peersStr, ",")
+        for i in range(0, len(peers)) {
+            mut peerAddr = peers[i]
+            sendTcpMessage(parseHost(peerAddr), parsePort(peerAddr), "PROMOTE $myAddr")
+        }
+    }
+}
+
+fn triggerElection(nodeState: object, myAddr: string) {
+    // PAIN POINT: startElection() returns bool via actor, but type is Object.
+    // toString comparison is the only safe way.
+    mut canStart = toString(nodeState.startElection())
+    if canStart != "true" {
+        println("[election] Election already in progress")
+        return
+    }
+
+    mut myPort = parseInt(toString(nodeState.getPort()))
+    println("[election] Proposing self (port $myPort) as new primary")
+
+    // Vote for self
+    nodeState.receiveVote(myAddr)
+
+    // Find who should be primary (lowest port)
+    mut winner = findLowestPort(nodeState, myAddr)
+
+    if winner == myAddr {
+        promoteAsPrimary(nodeState, myAddr)
+    } else {
+        println("[election] LOST — expecting $winner to become primary")
+        nodeState.endElection()
+    }
+}
+
+// ==================== Command Processing ====================
+
+fn processClientCommand(input: string, store: object, nodeState: object) -> string {
+    mut parts = split(input, " ")
+    if len(parts) == 0 {
+        return "ERR: empty command"
+    }
+    mut cmd = toUpper(parts[0])
+
+    return match cmd {
+        "GET" => {
+            if len(parts) < 2 {
+                return "ERR: GET requires a key"
+            }
+            // Reads served locally on any node
+            store.get(parts[1])
+        },
+        "SET" => {
+            if len(parts) < 3 {
+                return "ERR: SET requires key and value"
+            }
+            mut key = parts[1]
+            mut valParts = [""]
+            for j in range(2, len(parts)) {
+                push(valParts, parts[j])
+            }
+            removeAt(valParts, 0)
+            mut value = strings.join(valParts, " ")
+
+            mut role = nodeState.getRole()
+            // PAIN POINT: if/else is a statement, not an expression in Siyo.
+            // Can't use if/else as the last expression in a match arm.
+            // Must use a temp variable instead.
+            mut setResult = ""
+            if role == "primary" {
+                setResult = toString(store.set(key, value))
+                replicateToAllPeers(nodeState, key, value, "SET")
+            } else {
+                setResult = forwardWriteToPrimary(nodeState, input)
+            }
+            setResult
+        },
+        "DEL" => {
+            if len(parts) < 2 {
+                return "ERR: DEL requires a key"
+            }
+            mut key = parts[1]
+            mut role = nodeState.getRole()
+            mut delResult = ""
+            if role == "primary" {
+                delResult = toString(store.del(key))
+                replicateToAllPeers(nodeState, key, "", "DEL")
+            } else {
+                delResult = forwardWriteToPrimary(nodeState, input)
+            }
+            delResult
+        },
+        "KEYS" => {
+            store.keys()
+        },
+        "INFO" => {
+            mut keyCount = parseInt(toString(store.size()))
+            nodeState.info(keyCount)
+        },
+        _ => "ERR: unknown command '$cmd'"
+    }
+}
+
+fn processInternalCommand(input: string, store: object, nodeState: object, myAddr: string) -> string {
+    // Handle internal replication and cluster protocol
+    mut parts = split(input, " ")
+    if len(parts) == 0 {
+        return "ERR"
+    }
+    mut cmd = toUpper(parts[0])
+
+    return match cmd {
+        "REPLICATE" => {
+            if len(parts) < 2 {
+                return "ERR"
+            }
+            mut subCmd = toUpper(parts[1])
+            mut replResult = "ERR: unknown REPLICATE sub-command"
+            if subCmd == "SET" {
+                if len(parts) >= 4 {
+                    mut key = parts[2]
+                    mut valParts = [""]
+                    for j in range(3, len(parts)) {
+                        push(valParts, parts[j])
+                    }
+                    removeAt(valParts, 0)
+                    mut value = strings.join(valParts, " ")
+                    replResult = toString(store.set(key, value))
+                }
+            } else if subCmd == "DEL" {
+                if len(parts) >= 3 {
+                    replResult = toString(store.del(parts[2]))
+                }
+            }
+            replResult
+        },
+        "HEARTBEAT" => {
+            if len(parts) >= 2 {
+                mut fromAddr = parts[1]
+                nodeState.recordHeartbeat(fromAddr)
+            }
+            "PONG"
+        },
+        "VOTE" => {
+            // Another node is proposing itself during election
+            // Reply with our port so they can determine lowest
+            mut myPort = parseInt(toString(nodeState.getPort()))
+            "VOTE_ACK $myAddr"
+        },
+        "PROMOTE" => {
+            mut promResult = "ERR"
+            if len(parts) >= 2 {
+                mut newPrimaryAddr = parts[1]
+                println("[election] Received PROMOTE — new primary is $newPrimaryAddr")
+                nodeState.setPrimaryAddr(newPrimaryAddr)
+                nodeState.setRole("replica")
+                nodeState.addPeer(newPrimaryAddr)
+                nodeState.endElection()
+                promResult = "OK"
+            }
+            promResult
+        },
+        "SYNC_REQUEST" => {
+            // Return all data for full sync
+            // PAIN POINT: Can't return multi-line from a function easily.
+            // We'll handle this specially in the connection handler.
+            "__SYNC__"
+        },
+        _ => {
+            // Maybe it's a client command
+            processClientCommand(input, store, nodeState)
+        }
+    }
+}
+
+// ==================== Connection Handler ====================
+
+fn handleConnection(socket: object, store: object, nodeState: object, myAddr: string) {
+    try {
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+        mut writer = OutputStreamWriter.new(socket.getOutputStream())
+
+        mut line = reader.readLine()
+        while line != null {
+            mut trimmed = trim(line)
+            if len(trimmed) == 0 {
+                line = reader.readLine()
+                continue
+            }
+
+            // Check if this is a SYNC_REQUEST — needs special handling
+            if trimmed == "SYNC_REQUEST" {
+                // Send all key-value pairs
+                mut allKeysStr = store.getAll()
+                if allKeysStr != "" {
+                    mut allKeys = split(allKeysStr, ",")
+                    for i in range(0, len(allKeys)) {
+                        mut key = allKeys[i]
+                        mut value = store.getData(key)
+                        writer.write("SYNC_DATA $key $value\n")
+                    }
+                }
+                writer.write("SYNC_END\n")
+                writer.flush()
+                line = reader.readLine()
+                continue
+            }
+
+            // Check if this is an internal command
+            mut isInternal = false
+            if startsWith(trimmed, "REPLICATE ") { isInternal = true }
+            if startsWith(trimmed, "HEARTBEAT ") { isInternal = true }
+            if startsWith(trimmed, "VOTE ") { isInternal = true }
+            if startsWith(trimmed, "PROMOTE ") { isInternal = true }
+
+            mut response = ""
+            if isInternal {
+                response = processInternalCommand(trimmed, store, nodeState, myAddr)
+            } else if trimmed == "QUIT" {
+                writer.write("bye\n")
+                writer.flush()
+                break
+            } else {
+                response = processClientCommand(trimmed, store, nodeState)
+            }
+
+            writer.write(response + "\n")
+            writer.flush()
+            line = reader.readLine()
+        }
+
+        socket.close()
+    } catch e {
+        println("[conn] Client error: $e")
+        try {
+            socket.close()
+        } catch e2 {
+            // ignore
+        }
+    }
+}
+
+// ==================== Main ====================
+
+mut args = os.args()
+
+// PAIN POINT: os.args() doesn't include the script name in some modes,
+// and argument count varies. Need to handle flexibly.
+// Expected: [port, role, primaryAddr?]
+// With siyoc run: siyoc run src/main.siyo 7001 primary
+// os.args() returns the args after the script name.
+
+if len(args) < 2 {
+    println("Usage: siyoc run src/main.siyo <port> <primary|replica> [primary_host:primary_port]")
+    println("")
+    println("Examples:")
+    println("  siyoc run src/main.siyo 7001 primary")
+    println("  siyoc run src/main.siyo 7002 replica localhost:7001")
+    println("  siyoc run src/main.siyo 7003 replica localhost:7001")
+    os.exit(1)
+}
+
+mut port = parseInt(args[0])
+mut role = toLower(args[1])
+mut primaryAddr = ""
+imut myAddr = "localhost:$port"
+
+if role == "replica" {
+    if len(args) < 3 {
+        println("ERR: replica mode requires primary address (e.g., localhost:7001)")
+        os.exit(1)
+    }
+    primaryAddr = args[2]
+}
+
+if role == "primary" {
+    primaryAddr = myAddr
+}
+
+// Print banner
+println("=== SiyoCluster v0.1.0 ===")
+println("Node:    $myAddr")
+println("Role:    $role")
+if role == "replica" {
+    println("Primary: $primaryAddr")
+}
+println("")
+
+// Create core actors
+mut store = spawn Store.new()
+mut nodeState = spawn NodeState.new(role, myAddr, port, primaryAddr)
+
+// If replica, register with primary and request initial sync
+if role == "replica" {
+    println("[init] Connecting to primary at $primaryAddr...")
+    mut primaryHost = parseHost(primaryAddr)
+    mut primaryPort = parsePort(primaryAddr)
+
+    // Register ourselves as a peer on the primary
+    mut regResult = sendTcpMessage(primaryHost, primaryPort, "HEARTBEAT $myAddr")
+    if regResult == "ERR:CONNECT" {
+        println("[init] WARNING: Could not reach primary at $primaryAddr")
+        println("[init] Will retry via heartbeat...")
+    } else {
+        println("[init] Registered with primary")
+        // Also add primary as our peer
+        nodeState.addPeer(primaryAddr)
+        // Sync existing data from primary
+        syncFromPrimary(store, nodeState)
+    }
+}
+
+// Start heartbeat loop in background
+spawn {
+    heartbeatLoop(nodeState, myAddr)
+}
+
+// Start TCP server
+mut server = ServerSocket.new(port)
+println("[server] Listening on port $port")
+println("[server] Ready for connections")
+println("")
+
+while true {
+    mut socket = server.accept()
+    spawn {
+        handleConnection(socket, store, nodeState, myAddr)
+    }
+}

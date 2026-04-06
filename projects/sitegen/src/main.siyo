@@ -1,0 +1,172 @@
+{
+// Static Site Generator
+// Reads .md files from content/, applies HTML templates, outputs to dist/
+// Usage: siyoc run build  — generate site
+//        siyoc run clean  — remove dist/
+
+import "std/io"
+import "std/os"
+import "std/strings"
+import "parser"
+import "template"
+
+// ========== File System Helpers ==========
+
+fn listMdFiles(dirPath: string) -> string[] {
+    mut files = [""]
+    removeAt(files, 0)
+    mut names = io.listDir(dirPath)
+    if len(names) == 0 { return files }
+    for i in range(0, len(names)) {
+        if endsWith(names[i], ".md") {
+            push(files, dirPath + "/" + names[i])
+        }
+    }
+    return files
+}
+
+fn deleteDir(path: string) {
+    if !io.fileExists(path) {
+        println("Nothing to clean.")
+        return
+    }
+    mut children = io.listDir(path)
+    for i in range(0, len(children)) {
+        io.delete(path + "/" + children[i])
+    }
+    io.delete(path)
+    println("Cleaned " + path + "/")
+}
+
+// ========== Site Builder ==========
+
+fn buildSite() {
+    println("Building site...")
+
+    mut contentDir = "content"
+    mut distDir = "dist"
+
+    io.mkdir(distDir)
+
+    mut mdFiles = listMdFiles(contentDir)
+    if len(mdFiles) == 0 {
+        println("No .md files found in content/")
+        return
+    }
+
+    println("Found " + toString(len(mdFiles)) + " content file(s)")
+
+    // Collect post info for index
+    mut postTitles = [""]
+    mut postDates = [""]
+    mut postSlugs = [""]
+    removeAt(postTitles, 0)
+    removeAt(postDates, 0)
+    removeAt(postSlugs, 0)
+
+    mut pageHtml = template.pageTemplate()
+
+    for i in range(0, len(mdFiles)) {
+        mut filePath = mdFiles[i]
+        mut raw = io.readFile(filePath)
+
+        // Parse front matter and body
+        mut meta = parser.parseFrontMatter(raw)
+        mut title = toString(meta.get("title"))
+        mut date = toString(meta.get("date"))
+        mut body = toString(meta.get("_body"))
+
+        if title == "null" { title = "Untitled" }
+        if date == "null" { date = "" }
+
+        // Convert markdown body to HTML
+        mut contentHtml = parser.markdownToHtml(body)
+
+        // Build data map for template
+        mut data = map()
+        data.set("title", title)
+        data.set("date", date)
+        data.set("content", contentHtml)
+
+        // Also add any extra front matter keys
+        mut metaKeys = meta.keys()
+        for k in metaKeys {
+            mut ks = toString(k)
+            if ks != "_body" {
+                if !data.has(ks) {
+                    data.set(ks, toString(meta.get(ks)))
+                }
+            }
+        }
+
+        // Apply template
+        mut output = template.applyTemplate(pageHtml, data)
+
+        // Derive output filename: hello-world.md -> hello-world.html
+        mut baseName = filePath
+        mut slashIdx = indexOf(filePath, "/")
+        if slashIdx >= 0 {
+            baseName = substring(filePath, slashIdx + 1, len(filePath))
+        }
+        mut slug = substring(baseName, 0, len(baseName) - 3)
+        mut outPath = distDir + "/" + slug + ".html"
+
+        io.writeFile(outPath, output)
+        println("  " + baseName + " -> " + slug + ".html")
+
+        push(postTitles, title)
+        push(postDates, date)
+        push(postSlugs, slug)
+    }
+
+    // Build index page
+    buildIndex(distDir, postTitles, postDates, postSlugs)
+    println("Site built successfully! Output in dist/")
+}
+
+fn buildIndex(distDir: string, titles: string[], dates: string[], slugs: string[]) {
+    mut listHtml = ""
+    for i in range(0, len(titles)) {
+        listHtml = listHtml + "    <li>\n"
+        listHtml = listHtml + "      <a class=\"title\" href=\"" + slugs[i] + ".html\">" + titles[i] + "</a>\n"
+        if len(dates[i]) > 0 {
+            listHtml = listHtml + "      <span class=\"date\">" + dates[i] + "</span>\n"
+        }
+        listHtml = listHtml + "    </li>\n"
+    }
+
+    mut data = map()
+    data.set("title", "All Posts")
+    data.set("content", listHtml)
+
+    mut idxHtml = template.indexTemplate()
+    mut output = template.applyTemplate(idxHtml, data)
+
+    io.writeFile(distDir + "/index.html", output)
+    println("  index.html")
+}
+
+// ========== CLI ==========
+
+mut args = os.args()
+
+if len(args) == 0 {
+    println("Siyo Static Site Generator")
+    println("Usage:")
+    println("  siyoc run build  — generate site")
+    println("  siyoc run clean  — remove dist/")
+    os.exit(0)
+}
+
+mut command = toString(args[0])
+
+if command == "build" {
+    buildSite()
+} else if command == "clean" {
+    deleteDir("dist")
+} else {
+    println("Unknown command: " + command)
+    println("Available: build, clean")
+    os.exit(1)
+}
+}

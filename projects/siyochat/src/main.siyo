@@ -1,0 +1,257 @@
+// SiyoChat - Actor-based chat server with SQLite persistence
+// Run: siyoc -cp lib/sqlite-jdbc.jar run projects/siyochat
+import java "java.net.ServerSocket"
+import java "java.io.BufferedReader"
+import java "java.io.InputStreamReader"
+import java "java.io.OutputStreamWriter"
+import java "org.sqlite.JDBC"
+import java "java.sql.DriverManager"
+import "std/strings"
+
+// ========== Database helpers ==========
+
+fn dbExec(sql: string) {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:siyochat.db")
+    mut stmt = conn.createStatement()
+    stmt.execute(sql)
+    stmt.close()
+    conn.close()
+}
+
+fn dbSaveMessage(room: string, sender: string, text: string) {
+    mut conn = DriverManager.getConnection("jdbc:sqlite:siyochat.db")
+    mut stmt = conn.createStatement()
+    stmt.execute("INSERT INTO messages (room, sender, text) VALUES ('" + room + "','" + sender + "','" + text + "')")
+    stmt.close()
+    conn.close()
+}
+
+fn dbLoadHistory(room: string) -> string[] {
+    mut lines = [""]
+    removeAt(lines, 0)
+    mut conn = DriverManager.getConnection("jdbc:sqlite:siyochat.db")
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT sender, text FROM messages WHERE room='" + room + "' ORDER BY id DESC LIMIT 50")
+    while rs.next() {
+        mut line = "[" + rs.getString("sender") + "] " + rs.getString("text")
+        push(lines, line)
+    }
+    stmt.close()
+    conn.close()
+    lines
+}
+
+// ========== Room Actor ==========
+
+actor Room {
+    name: string,
+    members: map,
+    history: string[]
+}
+
+impl Room {
+    fn new(name: string) -> Room {
+        Room { name: name, members: map(), history: [""] }
+    }
+
+    fn join(self, nick: string, writer: object) {
+        self.members.set(nick, writer)
+        mut msg = "* $nick joined ${self.name}"
+        if len(self.history) == 1 {
+            if self.history[0] == "" {
+                removeAt(self.history, 0)
+            }
+        }
+        push(self.history, msg)
+        dbSaveMessage(self.name, "system", nick + " joined")
+        // Notify all members
+        mut keys = self.members.keys()
+        for i in range(0, len(keys)) {
+            mut k = keys[i]
+            try {
+                mut w = self.members.get(k) as OutputStreamWriter
+                w.write(msg + "\n")
+                w.flush()
+            } catch e {
+                // ignore write errors
+            }
+        }
+    }
+
+    fn leave(self, nick: string) {
+        if self.members.has(nick) {
+            self.members.remove(nick)
+            mut msg = "* $nick left ${self.name}"
+            push(self.history, msg)
+            dbSaveMessage(self.name, "system", nick + " left")
+            mut keys = self.members.keys()
+            for i in range(0, len(keys)) {
+                mut k = keys[i]
+                try {
+                    mut w = self.members.get(k) as OutputStreamWriter
+                    w.write(msg + "\n")
+                    w.flush()
+                } catch e {
+                    // ignore
+                }
+            }
+        }
+    }
+
+    fn broadcast(self, sender: string, msg: string) {
+        mut line = "[$sender] $msg"
+        push(self.history, line)
+        dbSaveMessage(self.name, sender, msg)
+        mut keys = self.members.keys()
+        for i in range(0, len(keys)) {
+            mut k = keys[i]
+            try {
+                mut w = self.members.get(k) as OutputStreamWriter
+                w.write(line + "\n")
+                w.flush()
+            } catch e {
+                // ignore
+            }
+        }
+    }
+
+    fn getHistory(self) -> string[] {
+        self.history
+    }
+}
+
+// ========== Server Actor ==========
+
+actor Server {
+    rooms: map
+}
+
+impl Server {
+    fn new() -> Server {
+        Server { rooms: map() }
+    }
+
+    fn getOrCreateRoom(self, name: string) -> object {
+        if !self.rooms.has(name) {
+            mut handle = spawn Room.new(name)
+            self.rooms.set(name, handle)
+        }
+        self.rooms.get(name)
+    }
+
+    fn listRooms(self) -> string {
+        mut keys = self.rooms.keys()
+        if len(keys) == 0 {
+            return "No rooms yet."
+        }
+        strings.join(keys, ", ")
+    }
+}
+
+// ========== Client handler ==========
+
+fn handleClient(socket: object, server: object) {
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    mut writer = OutputStreamWriter.new(socket.getOutputStream())
+
+    writer.write("Welcome to SiyoChat! Commands: JOIN <room> <nick>, MSG <text>, HISTORY, ROOMS, LEAVE\n")
+    writer.flush()
+
+    mut currentRoom = null
+    mut currentNick = ""
+    mut running = true
+
+    while running {
+        mut line = reader.readLine()
+        if line == null {
+            running = false
+        } else {
+            mut trimmed = trim(line)
+            if len(trimmed) == 0 {
+                // skip empty lines
+            } else if startsWith(trimmed, "JOIN ") {
+                mut rest = substring(trimmed, 5, len(trimmed))
+                mut parts = split(rest, " ")
+                if len(parts) >= 2 {
+                    mut roomName = parts[0]
+                    mut nick = parts[1]
+                    // Leave current room if in one
+                    if currentRoom != null {
+                        send currentRoom.leave(currentNick)
+                    }
+                    currentRoom = server.getOrCreateRoom(roomName)
+                    currentNick = nick
+                    currentRoom.join(nick, writer)
+                } else {
+                    writer.write("Usage: JOIN <room> <nick>\n")
+                    writer.flush()
+                }
+            } else if startsWith(trimmed, "MSG ") {
+                if currentRoom == null {
+                    writer.write("Join a room first: JOIN <room> <nick>\n")
+                    writer.flush()
+                } else {
+                    mut text = substring(trimmed, 4, len(trimmed))
+                    send currentRoom.broadcast(currentNick, text)
+                }
+            } else if trimmed == "HISTORY" {
+                if currentRoom == null {
+                    writer.write("Join a room first.\n")
+                    writer.flush()
+                } else {
+                    mut history = currentRoom.getHistory()
+                    for i in range(0, len(history)) {
+                        mut entry = history[i]
+                        if entry != "" {
+                            writer.write(entry + "\n")
+                        }
+                    }
+                    writer.flush()
+                }
+            } else if trimmed == "ROOMS" {
+                mut list = server.listRooms()
+                writer.write(list + "\n")
+                writer.flush()
+            } else if trimmed == "LEAVE" {
+                if currentRoom != null {
+                    send currentRoom.leave(currentNick)
+                    currentRoom = null
+                    currentNick = ""
+                    writer.write("Left the room.\n")
+                    writer.flush()
+                } else {
+                    writer.write("Not in a room.\n")
+                    writer.flush()
+                }
+            } else {
+                writer.write("Unknown command. Use: JOIN, MSG, HISTORY, ROOMS, LEAVE\n")
+                writer.flush()
+            }
+        }
+    }
+
+    // Cleanup on disconnect
+    if currentRoom != null {
+        send currentRoom.leave(currentNick)
+    }
+    socket.close()
+}
+
+// ========== Main ==========
+
+// Initialize database
+dbExec("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT, sender TEXT, text TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
+
+println("=== SiyoChat Server ===")
+println("Listening on port 4000...")
+
+mut serverActor = spawn Server.new()
+mut tcpServer = ServerSocket.new(4000)
+
+while true {
+    mut socket = tcpServer.accept()
+    println("Client connected: ${socket.getRemoteSocketAddress()}")
+    spawn {
+        handleClient(socket, serverActor)
+    }
+}

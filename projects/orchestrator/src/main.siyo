@@ -1,404 +1,324 @@
-// Siyo Task Orchestrator — mini Temporal/Celery
-// 7 actors: TaskStore, Scheduler, WorkerPool, Worker(x3), RetryManager, Notifier, ApiHandler
+// Task Orchestrator — HTTP API with SQLite persistence
+// POST /tasks, GET /tasks, POST /tasks/{id}/run|done|fail
 import java "java.net.ServerSocket"
-import java "java.net.Socket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
-import java "java.lang.System"
-import java "java.lang.Thread"
-import java "java.lang.Math"
-import "db"
-import "http"
+import java "java.io.OutputStreamWriter"
+import java "java.sql.DriverManager"
+import java "org.sqlite.JDBC"
+import "std/strings"
+import "std/json"
 
-// === TaskStore Actor ===
-// Single source of truth. All task mutations go through here.
+// ========== JSON Helpers ==========
 
-actor TaskStore {
-    connStr: string,
-    listeners: map
+mut LB = chr(123)
+mut RB = chr(125)
+
+fn jsonEscape(s: string) -> string {
+    mut result = ""
+    for mut i = 0 i < len(s) i = i + 1 {
+        mut ch = substring(s, i, i + 1)
+        if ch == "\"" { result = result + "\\\"" }
+        else if ch == "\\" { result = result + "\\\\" }
+        else { result = result + ch }
+    }
+    return result
 }
 
-impl TaskStore {
-    fn new(connStr: string) -> TaskStore {
-        TaskStore { connStr: connStr, listeners: map() }
-    }
+fn jsonStr(s: string) -> string {
+    return "\"" + jsonEscape(s) + "\""
+}
 
-    fn createTask(self, name: string, payload: string, maxRetries: int, delaySeconds: int, dependsOn: int) -> int {
-        imut runAt = System.currentTimeMillis() + toLong(delaySeconds * 1000)
-        db.exec(self.connStr, "INSERT INTO tasks (name, payload, max_retries, depends_on, run_at) VALUES ('" + name + "','" + payload + "'," + maxRetries + "," + dependsOn + "," + runAt + ")")
-        return db.queryInt(self.connStr, "SELECT MAX(id) FROM tasks")
-    }
+fn taskToJson(id: int, name: string, status: string, createdAt: string) -> string {
+    mut j = LB
+    j = j + "\"id\":" + toString(id)
+    j = j + ",\"name\":" + jsonStr(name)
+    j = j + ",\"status\":" + jsonStr(status)
+    j = j + ",\"created_at\":" + jsonStr(createdAt)
+    j = j + RB
+    return j
+}
 
-    fn getTask(self, id: int) -> string {
-        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE id = " + id)
-    }
+fn errorJson(msg: string) -> string {
+    return LB + "\"error\":" + jsonStr(msg) + RB
+}
 
-    fn listTasks(self) -> string {
-        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks ORDER BY id")
-    }
+fn messageJson(msg: string) -> string {
+    return LB + "\"message\":" + jsonStr(msg) + RB
+}
 
-    fn deadLetterTasks(self) -> string {
-        return db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'dead' ORDER BY id")
-    }
+// ========== HTTP Helpers ==========
 
-    fn cancelTask(self, id: int) -> bool {
-        imut status = db.queryStr(self.connStr, "SELECT status FROM tasks WHERE id = " + id)
-        if status == "pending" {
-            db.exec(self.connStr, "UPDATE tasks SET status = 'cancelled' WHERE id = " + id)
-            return true
+fn parseMethod(requestLine: string) -> string {
+    mut method = ""
+    for mut i = 0 i < len(requestLine) i = i + 1 {
+        mut ch = substring(requestLine, i, i + 1)
+        if ch == " " { return method }
+        method = method + ch
+    }
+    return method
+}
+
+fn parsePath(requestLine: string) -> string {
+    mut spaceCount = 0
+    mut path = ""
+    for mut i = 0 i < len(requestLine) i = i + 1 {
+        mut ch = substring(requestLine, i, i + 1)
+        if ch == " " {
+            spaceCount = spaceCount + 1
+        } else if spaceCount == 1 {
+            path = path + ch
         }
-        return false
     }
+    return path
+}
 
-    fn claimPending(self, workerId: string) -> string {
-        // Find a ready pending task: not delayed, dependency completed
-        imut now = System.currentTimeMillis()
-        imut rows = db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 20")
-        // Parse first eligible task from the JSON array
-        // PAIN POINT: No way to iterate query results row-by-row without raw JDBC
-        // PAIN POINT: Must re-query for each candidate's run_at and dependency check
-        imut ids = self.findPendingIds()
-        if len(ids) == 0 { return "" }
-        imut parts = split(ids, ",")
-        for i in range(0, len(parts)) {
-            imut tidStr = toString(parts[i])
-            imut tid = parseInt(tidStr)
-            // Check run_at
-            imut runAt = self.getRunAt(tid)
-            if runAt > now { continue }
-            // Check dependency
-            imut dep = db.queryInt(self.connStr, "SELECT depends_on FROM tasks WHERE id = " + tid)
-            if dep > 0 {
-                imut depStatus = db.queryStr(self.connStr, "SELECT status FROM tasks WHERE id = " + dep)
-                if depStatus != "completed" { continue }
-            }
-            // Claim it
-            imut name = db.queryStr(self.connStr, "SELECT name FROM tasks WHERE id = " + tid)
-            imut payload = db.queryStr(self.connStr, "SELECT payload FROM tasks WHERE id = " + tid)
-            db.exec(self.connStr, "UPDATE tasks SET status = 'running', worker = '" + workerId + "' WHERE id = " + tid)
-            return "{tid}|{name}|{payload}"
-        }
+fn httpResponse(statusCode: int, statusText: string, body: string) -> string {
+    mut resp = "HTTP/1.1 " + toString(statusCode) + " " + statusText + "\r\n"
+    resp = resp + "Content-Type: application/json\r\n"
+    resp = resp + "Content-Length: " + toString(len(body)) + "\r\n"
+    resp = resp + "Access-Control-Allow-Origin: *\r\n"
+    resp = resp + "Connection: close\r\n\r\n"
+    resp = resp + body
+    return resp
+}
+
+// ========== Database ==========
+
+mut DB_URL = "jdbc:sqlite:orchestrator.db"
+
+fn dbInit() {
+    mut conn = DriverManager.getConnection(DB_URL)
+    mut stmt = conn.createStatement()
+    stmt.execute("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT (datetime('now')))")
+    stmt.close()
+    conn.close()
+    println("Database initialized.")
+}
+
+fn dbCreateTask(name: string) -> string {
+    mut conn = DriverManager.getConnection(DB_URL)
+    mut stmt = conn.createStatement()
+    stmt.execute("INSERT INTO tasks (name, status, created_at) VALUES ('" + jsonEscape(name) + "', 'pending', datetime('now'))")
+    mut rs = stmt.executeQuery("SELECT last_insert_rowid()")
+    rs.next()
+    mut id = rs.getInt(1)
+    // Fetch the created row for full response
+    mut rs2 = stmt.executeQuery("SELECT id, name, status, created_at FROM tasks WHERE id = " + toString(id))
+    rs2.next()
+    mut taskName = rs2.getString("name")
+    mut taskStatus = rs2.getString("status")
+    mut taskCreatedAt = rs2.getString("created_at")
+    mut result = taskToJson(id, taskName, taskStatus, taskCreatedAt)
+    stmt.close()
+    conn.close()
+    return result
+}
+
+fn dbListTasks() -> string {
+    mut conn = DriverManager.getConnection(DB_URL)
+    mut stmt = conn.createStatement()
+    mut rs = stmt.executeQuery("SELECT id, name, status, created_at FROM tasks ORDER BY id")
+    mut result = "["
+    mut first = true
+    while rs.next() {
+        if !first { result = result + "," }
+        first = false
+        mut id = rs.getInt("id")
+        mut name = rs.getString("name")
+        mut status = rs.getString("status")
+        mut createdAt = rs.getString("created_at")
+        result = result + taskToJson(id, name, status, createdAt)
+    }
+    result = result + "]"
+    stmt.close()
+    conn.close()
+    return result
+}
+
+fn dbUpdateStatus(id: int, newStatus: string) -> string {
+    mut conn = DriverManager.getConnection(DB_URL)
+    mut stmt = conn.createStatement()
+    // Check current status for valid transitions
+    mut rs = stmt.executeQuery("SELECT id, name, status, created_at FROM tasks WHERE id = " + toString(id))
+    if !rs.next() {
+        stmt.close()
+        conn.close()
         return ""
     }
+    mut currentStatus = rs.getString("status")
+    mut taskName = rs.getString("name")
+    mut createdAt = rs.getString("created_at")
 
-    fn findPendingIds(self) -> string {
-        imut result = db.queryStr(self.connStr, "SELECT GROUP_CONCAT(id) FROM (SELECT id FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 20)")
-        if result == "null" { return "" }
-        return result
+    // Validate status transitions
+    mut valid = false
+    if newStatus == "running" {
+        if currentStatus == "pending" { valid = true }
+    } else if newStatus == "done" {
+        if currentStatus == "running" { valid = true }
+    } else if newStatus == "failed" {
+        if currentStatus == "running" { valid = true }
+        if currentStatus == "pending" { valid = true }
     }
 
-    fn getRunAt(self, id: int) -> long {
-        imut val = db.queryStr(self.connStr, "SELECT run_at FROM tasks WHERE id = " + id)
-        if len(val) == 0 { return toLong(0) }
-        return parseLong(val)
+    if !valid {
+        stmt.close()
+        conn.close()
+        return "INVALID:" + currentStatus
     }
 
-    fn completeTask(self, id: int, result: string) -> string {
-        db.exec(self.connStr, "UPDATE tasks SET status = 'completed', result = '" + result + "' WHERE id = " + id)
-        return "completed"
-    }
-
-    fn failTask(self, id: int, reason: string) -> string {
-        // Increment retries, set back to pending for retry or dead
-        imut retries = db.queryInt(self.connStr, "SELECT retries FROM tasks WHERE id = " + id)
-        imut maxRetries = db.queryInt(self.connStr, "SELECT max_retries FROM tasks WHERE id = " + id)
-        imut newRetries = retries + 1
-        if newRetries >= maxRetries {
-            db.exec(self.connStr, "UPDATE tasks SET status = 'dead', retries = " + newRetries + ", result = '" + reason + "' WHERE id = " + id)
-            return "dead"
-        }
-        // Exponential backoff: 1s, 2s, 4s, 8s...
-        mut backoffMs = 1000
-        for i in range(0, retries) { backoffMs = backoffMs * 2 }
-        imut runAt = System.currentTimeMillis() + toLong(backoffMs)
-        db.exec(self.connStr, "UPDATE tasks SET status = 'pending', retries = " + newRetries + ", run_at = " + runAt + ", worker = '' WHERE id = " + id)
-        return "retry"
-    }
-
-    fn getStats(self) -> string {
-        imut total = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks")
-        imut pending = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'pending'")
-        imut running = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'running'")
-        imut completed = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'completed'")
-        imut failed = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'dead'")
-        imut cancelled = db.queryInt(self.connStr, "SELECT COUNT(*) FROM tasks WHERE status = 'cancelled'")
-        return "\{\"total\":{total},\"pending\":{pending},\"running\":{running},\"completed\":{completed},\"dead\":{failed},\"cancelled\":{cancelled}\}"
-    }
-
-    fn addListener(self, event: string, ch: channel) -> string {
-        self.listeners.set(event, ch)
-        return "ok"
-    }
-
-    fn notifyEvent(self, event: string, taskId: int) -> string {
-        if self.listeners.has(event) {
-            imut ch = self.listeners.get(event)
-            ch.send("{event}:{taskId}")
-        }
-        return "ok"
-    }
+    stmt.executeUpdate("UPDATE tasks SET status = '" + newStatus + "' WHERE id = " + toString(id))
+    mut result = taskToJson(id, taskName, newStatus, createdAt)
+    stmt.close()
+    conn.close()
+    return result
 }
 
-// === Worker Actor ===
-// Simulates task execution. Random success/failure for testing.
+// ========== Routing ==========
 
-actor Worker {
-    store: TaskStore,
-    pool: object,
-    workerId: string,
-    busy: bool
+fn extractTaskId(path: string) -> int {
+    // /tasks/123/run -> extract 123
+    // Split by /: ["", "tasks", "123", "run"]
+    mut parts = split(path, "/")
+    if len(parts) >= 3 {
+        return parseInt(parts[2])
+    }
+    return -1
 }
 
-impl Worker {
-    fn new(store: TaskStore, pool: object, workerId: string) -> Worker {
-        Worker { store: store, pool: pool, workerId: workerId, busy: false }
+fn extractAction(path: string) -> string {
+    // /tasks/123/run -> extract "run"
+    mut parts = split(path, "/")
+    if len(parts) >= 4 {
+        return parts[3]
     }
-
-    fn execute(self, taskInfo: string) -> string {
-        // taskInfo = "id|name|payload"
-        imut parts = split(taskInfo, "|")
-        imut taskId = parseInt(toString(parts[0]))
-        imut taskName = toString(parts[1])
-        imut payload = toString(parts[2])
-        self.busy = true
-
-        // Simulate work: sleep 100-300ms
-        // PAIN POINT: No random() builtin — use currentTimeMillis % N as poor man's random
-        imut sleepMs = 100 + (System.currentTimeMillis() % toLong(200))
-        Thread.sleep(sleepMs)
-
-        // Simulate failure: tasks with "fail" in name always fail, others succeed
-        if contains(taskName, "fail") {
-            self.store.failTask(taskId, "simulated failure")
-            self.store.notifyEvent("failed", taskId)
-            return "failed"
-        }
-
-        imut result = "done:{payload}"
-        self.store.completeTask(taskId, result)
-        self.store.notifyEvent("completed", taskId)
-        return "completed"
-    }
-
-    fn isBusy(self) -> bool {
-        return self.busy
-    }
+    return ""
 }
 
-// === WorkerPool Actor ===
-// Manages N workers, distributes tasks round-robin.
-
-actor WorkerPool {
-    store: TaskStore,
-    workers: map,
-    workerIds: map,
-    count: int,
-    nextIdx: int,
-    active: int
-}
-
-impl WorkerPool {
-    fn new(store: TaskStore, count: int) -> WorkerPool {
-        WorkerPool { store: store, workers: map(), workerIds: map(), count: count, nextIdx: 0, active: 0 }
-    }
-
-    fn init(self) -> string {
-        imut myHandle = actorHandle(self)
-        for i in range(0, self.count) {
-            imut wid = "worker-{i}"
-            mut w = spawn Worker.new(self.store, myHandle, wid)
-            self.workers.set(wid, w)
-            self.workerIds.set(i, wid)
-        }
-        return "ok"
-    }
-
-    fn assignTask(self, taskInfo: string) -> string {
-        // Round-robin dispatch — send is fire-and-forget, returns immediately
-        imut idx = self.nextIdx % self.count
-        self.nextIdx = (self.nextIdx + 1) % self.count
-        imut wid = self.workerIds.getStr(idx)
-        imut w = self.workers.get(wid)
-        send w.execute(taskInfo)
-        return wid
-    }
-
-    fn workerDone(self, workerId: string) -> string {
-        self.active -= 1
-        return "ok"
-    }
-
-    fn getActive(self) -> int {
-        return self.active
-    }
-
-    fn getCount(self) -> int {
-        return self.count
-    }
-}
-
-// === Scheduler Actor ===
-// Periodic loop: pull pending tasks, assign to workers.
-
-actor Scheduler {
-    store: TaskStore,
-    pool: WorkerPool,
-    running: bool
-}
-
-impl Scheduler {
-    fn new(store: TaskStore, pool: WorkerPool) -> Scheduler {
-        Scheduler { store: store, pool: pool, running: true }
-    }
-
-    fn run(self) {
-        while self.running {
-            self.tick()
-            Thread.sleep(200)
-        }
-    }
-
-    fn tick(self) -> string {
-        for i in range(0, 3) {
-            imut taskInfo = self.store.claimPending("scheduler")
-            if len(taskInfo) == 0 { break }
-            imut assigned = self.pool.assignTask(taskInfo)
-        }
-        return "ok"
-    }
-
-    fn stop(self) -> string {
-        self.running = false
-        return "stopped"
-    }
-}
-
-// === API Handler Actor ===
-// HTTP server: one actor per request.
-
-actor ApiHandler {
-    store: TaskStore,
-    pool: WorkerPool,
-    connStr: string,
-    socket: object,
-    reqId: int
-}
-
-impl ApiHandler {
-    fn new(store: TaskStore, pool: WorkerPool, connStr: string, socket: object, reqId: int) -> ApiHandler {
-        ApiHandler { store: store, pool: pool, connStr: connStr, socket: socket, reqId: reqId }
-    }
-
-    fn run(self) {
-        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
-        imut requestLine = reader.readLine()
-        if requestLine == null {
-            self.socket.close()
-            return
-        }
-
-        imut method = http.parseMethod(requestLine)
-        imut path = http.parsePath(requestLine)
-        imut cl = http.readHeaders(reader)
-        mut body = ""
-        if cl > 0 { body = http.readBody(reader, cl) }
-
-        imut resp = match method {
-            "GET" => self.handleGet(path),
-            "POST" => self.handlePost(path, body),
-            "DELETE" => self.handleDelete(path),
-            _ => http.badRequest("\{\"error\":\"unsupported method\"\}")
-        }
-
-        mut out = self.socket.getOutputStream()
-        out.write(resp.getBytes())
-        out.flush()
-        self.socket.close()
-        println("[{self.reqId}] {method} {path}")
-    }
-
-    fn handleGet(self, path: string) -> string {
-        // Reads go directly to SQLite — don't block the TaskStore actor
+fn handleRequest(method: string, path: string, body: string) -> string {
+    // POST /tasks — create task
+    if method == "POST" {
         if path == "/tasks" {
-            return http.ok(db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks ORDER BY id"))
+            mut parsed = json.parse(body)
+            if parsed.has("name") {
+                mut name = toString(parsed.get("name"))
+                if len(name) == 0 {
+                    return httpResponse(400, "Bad Request", errorJson("name cannot be empty"))
+                }
+                mut result = dbCreateTask(name)
+                return httpResponse(201, "Created", result)
+            }
+            return httpResponse(400, "Bad Request", errorJson("name is required"))
         }
-        if path == "/dead-letter" {
-            return http.ok(db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE status = 'dead' ORDER BY id"))
-        }
-        if path == "/stats" {
-            imut taskStats = self.store.getStats()
-            imut active = self.pool.getActive()
-            imut workerCount = self.pool.getCount()
-            return http.ok("\{\"tasks\":{taskStats},\"workers\":\{\"total\":{workerCount},\"active\":{active}\}\}")
-        }
+
+        // POST /tasks/{id}/run|done|fail
         if startsWith(path, "/tasks/") {
-            imut id = parseInt(http.pathSegment(path, 2))
-            imut task = db.queryRows(self.connStr, "SELECT id, name, status, retries, max_retries, payload, result, depends_on FROM tasks WHERE id = " + id)
-            if task == "[]" { return http.notFound("\{\"error\":\"not found\"\}") }
-            return http.ok(task)
+            mut taskId = extractTaskId(path)
+            mut action = extractAction(path)
+            if taskId < 0 {
+                return httpResponse(400, "Bad Request", errorJson("invalid task id"))
+            }
+
+            mut newStatus = match action {
+                "run" => "running",
+                "done" => "done",
+                "fail" => "failed",
+                _ => ""
+            }
+
+            if newStatus == "" {
+                return httpResponse(400, "Bad Request", errorJson("unknown action: " + action))
+            }
+
+            mut result = dbUpdateStatus(taskId, newStatus)
+            if result == "" {
+                return httpResponse(404, "Not Found", errorJson("task not found"))
+            }
+            if startsWith(result, "INVALID:") {
+                mut current = substring(result, 8, len(result))
+                return httpResponse(409, "Conflict", errorJson("cannot transition from " + current + " to " + newStatus))
+            }
+            return httpResponse(200, "OK", result)
         }
-        return http.notFound("\{\"error\":\"not found\"\}")
     }
 
-    fn handlePost(self, path: string, body: string) -> string {
-        if path != "/tasks" { return http.notFound("\{\"error\":\"not found\"\}") }
-        imut name = http.parseField(body, "name")
-        if len(name) == 0 { return http.badRequest("\{\"error\":\"name required\"\}") }
-        imut payload = http.parseField(body, "payload")
-        imut maxRetriesStr = http.parseField(body, "max_retries")
-        imut delayStr = http.parseField(body, "delay_seconds")
-        imut depStr = http.parseField(body, "depends_on")
-        mut maxRetries = 3
-        if len(maxRetriesStr) > 0 { maxRetries = parseInt(maxRetriesStr) }
-        mut delay = 0
-        if len(delayStr) > 0 { delay = parseInt(delayStr) }
-        mut dep = 0
-        if len(depStr) > 0 { dep = parseInt(depStr) }
-        imut id = self.store.createTask(name, payload, maxRetries, delay, dep)
-        return http.created("\{\"id\":{id},\"status\":\"pending\"\}")
+    // GET /tasks — list all
+    if method == "GET" {
+        if path == "/tasks" {
+            mut result = dbListTasks()
+            return httpResponse(200, "OK", result)
+        }
     }
 
-    fn handleDelete(self, path: string) -> string {
-        if !startsWith(path, "/tasks/") { return http.notFound("\{\"error\":\"not found\"\}") }
-        imut id = parseInt(http.pathSegment(path, 2))
-        if self.store.cancelTask(id) {
-            return http.ok("\{\"id\":{id},\"status\":\"cancelled\"\}")
-        }
-        return http.badRequest("\{\"error\":\"cannot cancel (not pending)\"\}")
-    }
+    return httpResponse(404, "Not Found", errorJson("not found"))
 }
 
-// === Main ===
+// ========== Main Server ==========
 
-imut PORT = 6100
-imut CONN = "jdbc:sqlite:orchestrator.db"
+println("=== Task Orchestrator ===")
+dbInit()
 
-db.initSchema(CONN)
-println("DB initialized")
-
-mut store = spawn TaskStore.new(CONN)
-mut pool = spawn WorkerPool.new(store, 3)
-pool.init()
-println("Worker pool: 3 workers")
-
-mut scheduler = spawn Scheduler.new(store, pool)
-println("Scheduler started")
-
-mut server = ServerSocket.new(PORT)
-mut reqCount = 0
-
-println("=== Siyo Task Orchestrator === http://localhost:{PORT}")
-println("  POST /tasks   - submit task")
-println("  GET  /tasks   - list all")
-println("  GET  /tasks/N - get by id")
-println("  DEL  /tasks/N - cancel")
-println("  GET  /dead-letter")
-println("  GET  /stats")
+mut server = ServerSocket.new(5000)
+println("Listening on http://localhost:5000")
+println("")
+println("Endpoints:")
+println("  POST /tasks           — create task (body: {\"name\": \"...\"})")
+println("  GET  /tasks           — list all tasks")
+println("  POST /tasks/{id}/run  — mark as running")
+println("  POST /tasks/{id}/done — mark as done")
+println("  POST /tasks/{id}/fail — mark as failed")
 println("")
 
 while true {
     mut socket = server.accept()
-    reqCount += 1
-    spawn ApiHandler.new(store, pool, CONN, socket, reqCount)
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+    // Read request line
+    mut requestLine = reader.readLine()
+    if requestLine == null {
+        socket.close()
+        continue
+    }
+
+    mut method = parseMethod(requestLine)
+    mut path = parsePath(requestLine)
+
+    // Read headers
+    mut contentLength = 0
+    mut header = reader.readLine()
+    while header != null {
+        if len(header) == 0 { break }
+        if contains(header, "Content-Length") {
+            mut clValue = ""
+            mut afterColon = false
+            for mut i = 0 i < len(header) i = i + 1 {
+                mut ch = substring(header, i, i + 1)
+                if afterColon {
+                    if ch != " " { clValue = clValue + ch }
+                }
+                if ch == ":" { afterColon = true }
+            }
+            if clValue != "" { contentLength = parseInt(clValue) }
+        }
+        header = reader.readLine()
+    }
+
+    // Read body
+    mut body = ""
+    if contentLength > 0 {
+        for mut i = 0 i < contentLength i = i + 1 {
+            body = body + chr(reader.read())
+        }
+    }
+
+    // Handle request
+    mut response = handleRequest(method, path, body)
+
+    // Send response
+    mut out = socket.getOutputStream()
+    out.write(response.getBytes())
+    out.flush()
+    socket.close()
+
+    println(method + " " + path + " -> " + toString(len(response)) + " bytes")
 }

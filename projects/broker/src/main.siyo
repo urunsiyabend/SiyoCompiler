@@ -1,289 +1,195 @@
-// SiyoBroker — Mini pub/sub message broker (NATS/Redis-style)
-// Protocol (line-based TCP):
-//   PUBLISH topic message    → OK | ERR
-//   SUBSCRIBE topic          → OK subscribed to topic
-//   UNSUBSCRIBE topic        → OK unsubscribed
-//   QUEUE group topic        → OK queued group on topic
-//   TOPICS                   → topic1,topic2,...
-//   STATS                    → JSON stats
-//   QUIT                     → BYE
+// Pub/Sub Message Broker — actor-based, TCP, text protocol
+// Protocol: PUB topic message | SUB topic | UNSUB topic | STATS
 import java "java.net.ServerSocket"
-import java "java.net.Socket"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
-import java "java.lang.System"
-import java "java.lang.Thread"
+import java "java.io.OutputStreamWriter"
+import "std/strings"
 
-// === Broker Actor ===
-// subs: map of topic → SiyoSet of client IDs
-// queueGroups: map of "group:topic" → SiyoSet of client IDs
-// writers: map of clientId → PrintWriter
+// --------------- Broker Actor ---------------
 
 actor Broker {
-    subs: map,
-    writers: map,
-    queueGroups: map,
-    queueIdx: map,
+    subs: object,
     msgCount: int,
     subCount: int
 }
 
 impl Broker {
     fn new() -> Broker {
-        Broker {
-            subs: map(),
-            writers: map(),
-            queueGroups: map(),
-            queueIdx: map(),
-            msgCount: 0,
-            subCount: 0
-        }
-    }
-
-    fn addWriter(self, clientId: string, writer: object) -> string {
-        self.writers.set(clientId, writer)
-        return "ok"
-    }
-
-    fn removeWriter(self, clientId: string) -> string {
-        imut topicKeys = self.subs.keys()
-        for i in range(0, len(topicKeys)) {
-            self.topicRemove(toString(topicKeys[i]), clientId)
-        }
-        imut qKeys = self.queueGroups.keys()
-        for i in range(0, len(qKeys)) {
-            self.groupRemove(toString(qKeys[i]), clientId)
-        }
-        self.writers.remove(clientId)
-        return "ok"
+        Broker { subs: map(), msgCount: 0, subCount: 0 }
     }
 
     fn subscribe(self, clientId: string, topic: string) -> string {
-        if !self.subs.has(topic) { self.subs.set(topic, set()) }
-        imut members = self.getSubs(topic)
-        if members.has(clientId) { return "OK already subscribed to {topic}" }
-        members.add(clientId)
-        self.subCount += 1
-        return "OK subscribed to {topic}"
+        if !self.subs.has(topic) {
+            self.subs.set(topic, set())
+        }
+        mut topicSubs = self.subs.get(topic)
+        if !topicSubs.has(clientId) {
+            topicSubs.add(clientId)
+            self.subCount += 1
+        }
+        "+OK subscribed to $topic"
     }
 
     fn unsubscribe(self, clientId: string, topic: string) -> string {
-        if !self.subs.has(topic) { return "OK not subscribed" }
-        imut members = self.getSubs(topic)
-        members.remove(clientId)
-        if members.size() == 0 { self.subs.remove(topic) }
-        self.subCount -= 1
-        return "OK unsubscribed from {topic}"
+        if self.subs.has(topic) {
+            mut topicSubs = self.subs.get(topic)
+            if topicSubs.has(clientId) {
+                topicSubs.remove(clientId)
+                self.subCount -= 1
+                if topicSubs.size() == 0 {
+                    self.subs.remove(topic)
+                }
+            }
+        }
+        "+OK unsubscribed from $topic"
     }
 
-    fn queueSubscribe(self, clientId: string, group: string, topic: string) -> string {
-        imut gkey = "{group}:{topic}"
-        if !self.queueGroups.has(gkey) { self.queueGroups.set(gkey, set()) }
-        imut members = self.getGroup(gkey)
-        if members.has(clientId) { return "OK already in group {group}" }
-        members.add(clientId)
-        if !self.queueIdx.has(gkey) { self.queueIdx.set(gkey, 0) }
-        self.subscribe(clientId, topic)
-        return "OK queued {group} on {topic}"
-    }
-
-    fn publish(self, senderClientId: string, topic: string, message: string) -> string {
+    fn publish(self, topic: string, message: string) -> object {
         self.msgCount += 1
-        if !self.subs.has(topic) { return "OK 0" }
-
-        imut subVals = self.getSubs(topic).values()
-
-        // Collect queue group members into a set for O(1) lookup
-        mut queueMemberSet = set()
-        imut qKeys = self.queueGroups.keys()
-        for qi in range(0, len(qKeys)) {
-            imut gkey = toString(qKeys[qi])
-            if endsWith(gkey, ":{topic}") {
-                imut gVals = self.getGroup(gkey).values()
-                for gi in range(0, len(gVals)) {
-                    queueMemberSet.add(toString(gVals[gi]))
-                }
-            }
+        if !self.subs.has(topic) {
+            return []
         }
-
-        // Deliver to queue groups (round-robin — one per group)
-        mut queueSent = 0
-        for qi in range(0, len(qKeys)) {
-            imut gkey = toString(qKeys[qi])
-            if endsWith(gkey, ":{topic}") {
-                imut gVals = self.getGroup(gkey).values()
-                imut gCount = len(gVals)
-                if gCount > 0 {
-                    imut idx = self.queueIdx.getInt(gkey)
-                    imut target = toString(gVals[idx % gCount])
-                    self.queueIdx.set(gkey, (idx + 1) % gCount)
-                    self.deliver(target, "MSG {topic} {message}")
-                    queueSent += 1
-                }
-            }
-        }
-
-        // Fanout to regular subscribers (skip queue group members + sender)
-        mut sent = 0
-        for si in range(0, len(subVals)) {
-            imut cid = toString(subVals[si])
-            if cid != senderClientId {
-                if !queueMemberSet.has(cid) {
-                    self.deliver(cid, "MSG {topic} {message}")
-                    sent += 1
-                }
-            }
-        }
-
-        return "OK {sent + queueSent}"
+        mut topicSubs = self.subs.get(topic)
+        mut receivers = topicSubs.values()
+        receivers
     }
 
-    // --- Typed accessors (workaround: map.get returns Object) ---
-
-    fn getSubs(self, topic: string) -> set {
-        return self.subs.get(topic)
-    }
-
-    fn getGroup(self, gkey: string) -> set {
-        return self.queueGroups.get(gkey)
-    }
-
-    fn deliver(self, clientId: string, msg: string) {
-        if self.writers.has(clientId) {
-            imut w = self.writers.get(clientId)
-            w.println(msg)
-        }
-    }
-
-    fn topicRemove(self, topic: string, clientId: string) {
-        imut members = self.getSubs(topic)
-        members.remove(clientId)
-        if members.size() == 0 { self.subs.remove(topic) }
-    }
-
-    fn groupRemove(self, gkey: string, clientId: string) {
-        imut members = self.getGroup(gkey)
-        members.remove(clientId)
-        if members.size() == 0 { self.queueGroups.remove(gkey) }
-    }
-
-    fn listTopics(self) -> string {
-        imut keys = self.subs.keys()
-        if len(keys) == 0 { return "(none)" }
-        mut result = ""
-        for i in range(0, len(keys)) {
-            if i > 0 { result = result + "," }
-            result = result + toString(keys[i])
-        }
-        return result
-    }
-
-    fn getStats(self) -> string {
-        imut topicCount = len(self.subs.keys())
-        imut queueCount = len(self.queueGroups.keys())
-        return "\{\"messages\":{self.msgCount},\"subscribers\":{self.subCount},\"topics\":{topicCount},\"queue_groups\":{queueCount}\}"
+    fn stats(self) -> string {
+        mut topicCount = self.subs.size()
+        "+OK topics=$topicCount subscribers=${self.subCount} messages=${self.msgCount}"
     }
 }
 
-// === ClientHandler Actor ===
+// --------------- Client Handler ---------------
 
-actor ClientHandler {
-    broker: Broker,
-    socket: object,
-    clientId: string
+actor Client {
+    broker: object,
+    clientId: string,
+    writer: object
 }
 
-impl ClientHandler {
-    fn new(broker: Broker, socket: object, clientId: string) -> ClientHandler {
-        ClientHandler { broker: broker, socket: socket, clientId: clientId }
+impl Client {
+    fn new(broker: object, clientId: string, writer: object) -> Client {
+        Client { broker: broker, clientId: clientId, writer: writer }
     }
 
-    fn run(self) {
-        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
-        mut writer = PrintWriter.new(self.socket.getOutputStream(), true)
-        self.broker.addWriter(self.clientId, writer)
-        writer.println("CONNECTED {self.clientId}")
-        println("[{self.clientId}] connected")
+    fn deliver(self, topic: string, message: string) {
+        try {
+            mut line = "MSG $topic $message\n"
+            self.writer.write(line)
+            self.writer.flush()
+        } catch e {
+            println("[broker] failed to deliver to ${self.clientId}: $e")
+        }
+    }
+}
 
-        mut on = true
-        while on {
-            imut line = reader.readLine()
-            if line == null { on = false }
-            else {
-                imut cmd = trim(line)
-                if len(cmd) == 0 {
-                    // skip
-                } else {
-                    imut response = self.handleCommand(cmd)
-                    if response == "BYE" { on = false }
-                    writer.println(response)
+// --------------- Globals ---------------
+
+mut clients = map()
+
+fn handleCommand(broker: object, clientId: string, line: string) -> string {
+    mut parts = split(trim(line), " ")
+    mut cmd = toUpper(parts[0])
+
+    match cmd {
+        "PUB" => {
+            if len(parts) < 3 {
+                return "-ERR usage: PUB topic message"
+            }
+            mut topic = parts[1]
+            // Rejoin remaining parts as the message body
+            mut body = ""
+            for i in range(2, len(parts)) {
+                if i > 2 { body += " " }
+                body += parts[i]
+            }
+            mut receivers = broker.publish(topic, body)
+            // Fan out to subscribers via send (fire-and-forget)
+            for i in range(0, len(receivers)) {
+                mut rid = receivers[i]
+                if clients.has(rid) {
+                    mut c = clients.get(rid)
+                    send c.deliver(topic, body)
                 }
             }
+            "+OK published to $topic"
+        },
+        "SUB" => {
+            if len(parts) < 2 {
+                return "-ERR usage: SUB topic"
+            }
+            mut topic = parts[1]
+            broker.subscribe(clientId, topic)
+        },
+        "UNSUB" => {
+            if len(parts) < 2 {
+                return "-ERR usage: UNSUB topic"
+            }
+            mut topic = parts[1]
+            broker.unsubscribe(clientId, topic)
+        },
+        "STATS" => {
+            broker.stats()
+        },
+        _ => {
+            "-ERR unknown command: $cmd"
         }
-
-        self.broker.removeWriter(self.clientId)
-        self.socket.close()
-        println("[{self.clientId}] disconnected")
-    }
-
-    fn handleCommand(self, cmd: string) -> string {
-        imut spIdx = indexOf(cmd, " ")
-        imut verb = match spIdx {
-            0 - 1 => cmd,
-            _ => substring(cmd, 0, spIdx)
-        }
-        imut rest = match spIdx {
-            0 - 1 => "",
-            _ => substring(cmd, spIdx + 1, len(cmd))
-        }
-
-        return match verb {
-            "PUBLISH" => self.handlePublish(rest),
-            "SUBSCRIBE" => self.broker.subscribe(self.clientId, rest),
-            "UNSUBSCRIBE" => self.broker.unsubscribe(self.clientId, rest),
-            "QUEUE" => self.handleQueue(rest),
-            "TOPICS" => self.broker.listTopics(),
-            "STATS" => self.broker.getStats(),
-            "QUIT" => "BYE",
-            _ => "ERR unknown command: {verb}"
-        }
-    }
-
-    fn handlePublish(self, rest: string) -> string {
-        imut spIdx = indexOf(rest, " ")
-        if spIdx < 0 { return "ERR usage: PUBLISH topic message" }
-        imut topic = substring(rest, 0, spIdx)
-        imut message = substring(rest, spIdx + 1, len(rest))
-        return self.broker.publish(self.clientId, topic, message)
-    }
-
-    fn handleQueue(self, rest: string) -> string {
-        imut spIdx = indexOf(rest, " ")
-        if spIdx < 0 { return "ERR usage: QUEUE group topic" }
-        imut group = substring(rest, 0, spIdx)
-        imut topic = substring(rest, spIdx + 1, len(rest))
-        return self.broker.queueSubscribe(self.clientId, group, topic)
     }
 }
 
-// === Main ===
+// --------------- Main ---------------
 
-imut PORT = 4222
+println("=== Siyo Message Broker ===")
+
 mut broker = spawn Broker.new()
-mut server = ServerSocket.new(PORT)
-mut count = 0
+mut nextId = 0
 
-println("=== SiyoBroker === port {PORT}")
-println("  PUBLISH topic message")
-println("  SUBSCRIBE topic")
-println("  UNSUBSCRIBE topic")
-println("  QUEUE group topic")
-println("  TOPICS / STATS / QUIT")
-println("")
+mut server = ServerSocket.new(4222)
+println("Listening on port 4222")
+println("Protocol: PUB topic message | SUB topic | UNSUB topic | STATS")
 
 while true {
     mut socket = server.accept()
-    count += 1
-    spawn ClientHandler.new(broker, socket, "c" + count)
+    nextId += 1
+    mut clientId = "client-$nextId"
+    println("[broker] $clientId connected")
+
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    mut writer = OutputStreamWriter.new(socket.getOutputStream())
+
+    mut clientActor = spawn Client.new(broker, clientId, writer)
+    clients.set(clientId, clientActor)
+
+    // Send welcome
+    writer.write("+OK welcome $clientId\n")
+    writer.flush()
+
+    // Read commands
+    mut line = reader.readLine()
+    while line != null {
+        mut trimmed = trim(line)
+        if len(trimmed) > 0 {
+            if trimmed == "QUIT" {
+                writer.write("+OK bye\n")
+                writer.flush()
+                line = null
+            } else {
+                mut response = handleCommand(broker, clientId, trimmed)
+                writer.write(response + "\n")
+                writer.flush()
+                println("[broker] $clientId: $trimmed -> $response")
+                line = reader.readLine()
+            }
+        } else {
+            line = reader.readLine()
+        }
+    }
+
+    // Cleanup
+    clients.remove(clientId)
+    clientActor.stop()
+    socket.close()
+    println("[broker] $clientId disconnected")
 }

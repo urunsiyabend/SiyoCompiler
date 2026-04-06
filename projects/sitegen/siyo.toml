@@ -1,0 +1,6 @@
+[project]
+name = "sitegen"
+version = "0.2.0"
+main = "src/main.siyo"
+
+[dependencies]

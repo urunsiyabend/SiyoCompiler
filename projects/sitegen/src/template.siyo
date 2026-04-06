@@ -1,0 +1,81 @@
+{
+// HTML template engine with variable substitution
+// Placeholders use %key% syntax to avoid conflict with Siyo string interpolation
+
+// Apply template: replace %key% placeholders with values from data map
+fn applyTemplate(tmpl: string, data: object) -> string {
+    mut result = tmpl
+    mut keys = data.keys()
+    for k in keys {
+        mut placeholder = "%" + toString(k) + "%"
+        mut value = toString(data.get(k))
+        result = replace(result, placeholder, value)
+    }
+    return result
+}
+
+// Default page template
+fn pageTemplate() -> string {
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>%title%</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem; color: #333; }
+    h1 { color: #1a1a2e; }
+    a { color: #0066cc; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+    .date { color: #666; font-size: 0.9em; }
+    .post-list { list-style: none; padding: 0; }
+    .post-list li { margin-bottom: 1.5rem; }
+    .post-list .title { font-size: 1.2em; }
+    .post-list .date { display: block; }
+    nav { margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1rem; }
+    nav a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <nav><a href="index.html">Home</a></nav>
+  <article>
+    <h1>%title%</h1>
+    <p class="date">%date%</p>
+    %content%
+  </article>
+</body>
+</html>
+"""
+}
+
+// Index page template
+fn indexTemplate() -> string {
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>%title%</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem; color: #333; }
+    h1 { color: #1a1a2e; }
+    a { color: #0066cc; }
+    .post-list { list-style: none; padding: 0; }
+    .post-list li { margin-bottom: 1.5rem; }
+    .post-list .title { font-size: 1.2em; }
+    .post-list .date { display: block; color: #666; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <h1>%title%</h1>
+  <ul class="post-list">
+    %content%
+  </ul>
+</body>
+</html>
+"""
+}
+
+}

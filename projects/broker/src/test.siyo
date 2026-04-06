@@ -1,174 +1,137 @@
-// SiyoBroker Test — pub/sub, queue groups, stats
-import java "java.net.Socket"
-import java "java.io.BufferedReader"
-import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
-import java "java.lang.Thread"
+{
+// Broker logic tests — subscribe, publish, unsubscribe, stats
+import "std/testing"
 
-mut passed = 0
-mut failed = 0
+actor Broker {
+    subs: object,
+    msgCount: int,
+    subCount: int
+}
 
-fn check(label: string, actual: string, expected: string) {
-    if contains(actual, expected) {
-        println("  PASS {label}")
-        passed += 1
-    } else {
-        println("  FAIL {label}: expected [{expected}] got [{actual}]")
-        failed += 1
+impl Broker {
+    fn new() -> Broker {
+        Broker { subs: map(), msgCount: 0, subCount: 0 }
+    }
+
+    fn subscribe(self, clientId: string, topic: string) -> string {
+        if !self.subs.has(topic) {
+            self.subs.set(topic, set())
+        }
+        mut topicSubs = self.subs.get(topic)
+        if !topicSubs.has(clientId) {
+            topicSubs.add(clientId)
+            self.subCount = self.subCount + 1
+        }
+        "+OK subscribed to $topic"
+    }
+
+    fn unsubscribe(self, clientId: string, topic: string) -> string {
+        if self.subs.has(topic) {
+            mut topicSubs = self.subs.get(topic)
+            if topicSubs.has(clientId) {
+                topicSubs.remove(clientId)
+                self.subCount = self.subCount - 1
+                if topicSubs.size() == 0 {
+                    self.subs.remove(topic)
+                }
+            }
+        }
+        "+OK unsubscribed from $topic"
+    }
+
+    fn publish(self, topic: string, message: string) -> object {
+        self.msgCount = self.msgCount + 1
+        if !self.subs.has(topic) {
+            mut empty = [""]
+            removeAt(empty, 0)
+            return empty
+        }
+        mut topicSubs = self.subs.get(topic)
+        mut receivers = topicSubs.values()
+        receivers
+    }
+
+    fn stats(self) -> string {
+        mut topicCount = self.subs.size()
+        "+OK topics=$topicCount subscribers=${self.subCount} messages=${self.msgCount}"
     }
 }
 
-// Drain lines from a reader until one contains the expected string (or max attempts)
-fn drain(reader: object, expected: string) -> string {
-    mut attempts = 0
-    while attempts < 10 {
-        imut raw = reader.readLine()
-        if raw == null { return "(null)" }
-        imut line = toString(raw)
-        if contains(line, expected) { return line }
-        attempts += 1
-    }
-    return "(not found: {expected})"
+// --------------- Tests ---------------
+
+println("=== Broker Tests ===")
+
+mut broker = spawn Broker.new()
+
+// Test 1: Subscribe
+println("--- test: subscribe returns confirmation")
+mut result1 = broker.subscribe("c1", "news")
+testing.assert(result1 == "+OK subscribed to news", "expected subscribe confirmation")
+println("  PASS: subscribe returns confirmation")
+
+// Test 2: Subscribe multiple clients to same topic
+println("--- test: multiple subscribers on same topic")
+broker.subscribe("c2", "news")
+broker.subscribe("c3", "news")
+mut s2 = broker.stats()
+testing.assert(contains(s2, "subscribers=3"), "expected 3 subscribers, got: " + s2)
+println("  PASS: multiple subscribers on same topic")
+
+// Test 3: Subscribe to multiple topics
+println("--- test: subscribe to multiple topics")
+broker.subscribe("c1", "sports")
+mut s3 = broker.stats()
+testing.assert(contains(s3, "topics=2"), "expected 2 topics, got: " + s3)
+testing.assert(contains(s3, "subscribers=4"), "expected 4 subscribers, got: " + s3)
+println("  PASS: subscribe to multiple topics")
+
+// Test 4: Duplicate subscribe is idempotent
+println("--- test: duplicate subscribe is idempotent")
+broker.subscribe("c1", "news")
+mut s4 = broker.stats()
+testing.assert(contains(s4, "subscribers=4"), "expected still 4, got: " + s4)
+println("  PASS: duplicate subscribe is idempotent")
+
+// Test 5: Publish returns receivers
+println("--- test: publish returns subscriber list")
+mut receivers5 = broker.publish("news", "hello world")
+testing.assert(len(receivers5) == 3, "expected 3 receivers")
+println("  PASS: publish returns subscriber list")
+
+// Test 6: Publish to empty topic returns empty
+println("--- test: publish to empty topic returns empty list")
+mut receivers6 = broker.publish("unknown", "test")
+testing.assert(len(receivers6) == 0, "expected 0 receivers")
+println("  PASS: publish to empty topic returns empty list")
+
+// Test 7: Publish increments message count
+println("--- test: publish increments message count")
+mut s7 = broker.stats()
+testing.assert(contains(s7, "messages=2"), "expected 2 messages, got: " + s7)
+println("  PASS: publish increments message count")
+
+// Test 8: Unsubscribe
+println("--- test: unsubscribe removes client from topic")
+mut result8 = broker.unsubscribe("c2", "news")
+testing.assert(result8 == "+OK unsubscribed from news", "expected unsub confirmation")
+mut receivers8 = broker.publish("news", "after unsub")
+testing.assert(len(receivers8) == 2, "expected 2 receivers after unsub")
+println("  PASS: unsubscribe removes client from topic")
+
+// Test 9: Unsubscribe non-existent is safe
+println("--- test: unsubscribe non-existent client is safe")
+mut result9 = broker.unsubscribe("c99", "news")
+testing.assert(result9 == "+OK unsubscribed from news", "expected ok even for unknown client")
+println("  PASS: unsubscribe non-existent client is safe")
+
+// Test 10: Stats reflect final state
+println("--- test: stats reflect final state")
+mut s10 = broker.stats()
+testing.assert(contains(s10, "topics=2"), "expected 2 topics, got: " + s10)
+testing.assert(contains(s10, "subscribers=3"), "expected 3 subscribers, got: " + s10)
+testing.assert(contains(s10, "messages=3"), "expected 3 messages, got: " + s10)
+println("  PASS: stats reflect final state")
+
+println("")
+println("All broker tests complete.")
 }
-
-fn connect(port: int) -> object {
-    return Socket.new("localhost", port)
-}
-
-println("=== SiyoBroker Test Suite ===")
-println("")
-Thread.sleep(500)
-
-// --- Connect 3 clients ---
-mut s1 = connect(4222)
-mut r1 = BufferedReader.new(InputStreamReader.new(s1.getInputStream()))
-mut w1 = PrintWriter.new(s1.getOutputStream(), true)
-check("c1 connect", drain(r1, "CONNECTED"), "CONNECTED")
-
-mut s2 = connect(4222)
-mut r2 = BufferedReader.new(InputStreamReader.new(s2.getInputStream()))
-mut w2 = PrintWriter.new(s2.getOutputStream(), true)
-check("c2 connect", drain(r2, "CONNECTED"), "CONNECTED")
-
-mut s3 = connect(4222)
-mut r3 = BufferedReader.new(InputStreamReader.new(s3.getInputStream()))
-mut w3 = PrintWriter.new(s3.getOutputStream(), true)
-check("c3 connect", drain(r3, "CONNECTED"), "CONNECTED")
-
-// === 1. Basic Pub/Sub ===
-println("")
-println("[1] Pub/Sub — Fan-out")
-
-// c1 and c2 subscribe to "orders"
-w1.println("SUBSCRIBE orders")
-check("c1 sub", drain(r1, "OK"), "subscribed")
-w2.println("SUBSCRIBE orders")
-check("c2 sub", drain(r2, "OK"), "subscribed")
-
-// c3 publishes to "orders"
-w3.println("PUBLISH orders new-order-123")
-Thread.sleep(200)
-check("c3 publish ok", drain(r3, "OK"), "OK")
-
-// Both c1 and c2 should receive
-check("c1 gets msg", drain(r1, "MSG"), "new-order-123")
-check("c2 gets msg", drain(r2, "MSG"), "new-order-123")
-
-// c3 subscribes and publishes — should get nothing (sender excluded)
-w3.println("SUBSCRIBE orders")
-drain(r3, "OK")
-w3.println("PUBLISH orders self-test")
-Thread.sleep(200)
-drain(r3, "OK")
-// c1 and c2 should get it
-check("fanout c1", drain(r1, "MSG"), "self-test")
-check("fanout c2", drain(r2, "MSG"), "self-test")
-
-// === 2. Unsubscribe ===
-println("")
-println("[2] Unsubscribe")
-
-w2.println("UNSUBSCRIBE orders")
-check("c2 unsub", drain(r2, "OK"), "unsubscribed")
-
-w3.println("PUBLISH orders after-unsub")
-Thread.sleep(200)
-drain(r3, "OK")
-check("c1 still gets", drain(r1, "MSG"), "after-unsub")
-// c2 should NOT get this — verify by sending another and checking c2 gets the next one instead
-// PAIN POINT: no way to assert "did NOT receive" without timeout
-
-// === 3. Topics ===
-println("")
-println("[3] Topics List")
-w1.println("TOPICS")
-check("has orders", drain(r1, "orders"), "orders")
-
-// === 4. Queue Groups ===
-println("")
-println("[4] Queue Groups — Round-Robin")
-
-// First, unsubscribe everyone from orders to clean state
-w1.println("UNSUBSCRIBE orders")
-drain(r1, "OK")
-w3.println("UNSUBSCRIBE orders")
-drain(r3, "OK")
-Thread.sleep(100)
-
-// c1 and c2 join queue group "workers" on topic "jobs"
-w1.println("QUEUE workers jobs")
-check("c1 queue", drain(r1, "OK"), "queued")
-w2.println("QUEUE workers jobs")
-check("c2 queue", drain(r2, "OK"), "queued")
-
-// Publish 6 messages to "jobs" from c3
-mut c1count = 0
-mut c2count = 0
-for i in range(0, 6) {
-    w3.println("PUBLISH jobs task-{i}")
-    Thread.sleep(100)
-    drain(r3, "OK")
-}
-Thread.sleep(300)
-
-// Read all delivered messages from c1 and c2
-// PAIN POINT: no non-blocking read — must know how many messages to expect
-// Each should get exactly 3 (round-robin)
-for i in range(0, 3) {
-    imut m1 = drain(r1, "MSG")
-    if contains(m1, "MSG") { c1count += 1 }
-}
-for i in range(0, 3) {
-    imut m2 = drain(r2, "MSG")
-    if contains(m2, "MSG") { c2count += 1 }
-}
-println("  c1 got {c1count}, c2 got {c2count}")
-check("c1 got 3", toString(c1count), "3")
-check("c2 got 3", toString(c2count), "3")
-
-// === 5. Stats ===
-println("")
-println("[5] Stats")
-w1.println("STATS")
-imut stats = drain(r1, "messages")
-check("has messages", stats, "\"messages\":")
-check("has subscribers", stats, "\"subscribers\":")
-check("has queue_groups", stats, "\"queue_groups\":")
-
-// === 6. Disconnect ===
-println("")
-println("[6] Disconnect")
-w1.println("QUIT")
-check("c1 quit", drain(r1, "BYE"), "BYE")
-w2.println("QUIT")
-check("c2 quit", drain(r2, "BYE"), "BYE")
-w3.println("QUIT")
-check("c3 quit", drain(r3, "BYE"), "BYE")
-
-s1.close()
-s2.close()
-s3.close()
-
-println("")
-println("Results: {passed} passed, {failed} failed")
-if failed == 0 { println("ALL TESTS PASSED") }

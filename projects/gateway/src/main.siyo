@@ -1,358 +1,201 @@
-// Siyo API Gateway — auth, rate limiting, routing, stats
-// Middleware pipeline: Auth → RateLimit → Route → Backend
+// API Gateway — routing, middleware, CORS
+// Listen on port 7000, forward requests to backend services
+
 import java "java.net.ServerSocket"
-import java "java.net.Socket"
-import java "java.net.InetSocketAddress"
+import java "java.net.URL"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
-import java "java.io.PrintWriter"
+import java "java.io.OutputStreamWriter"
 import java "java.lang.System"
-import java "java.lang.Thread"
-import "http"
-import "backend"
+import "std/strings"
+import "std/json"
 
-// === TokenStore Actor ===
-// Pre-registered tokens → user identity. No crypto, just lookup.
+// ========== Route Table ==========
 
-actor TokenStore {
-    tokens: map
+mut routes = map()
+routes.set("/api/users", "http://localhost:3000")
+routes.set("/api/todos", "http://localhost:3001")
+routes.set("/api/chat",  "http://localhost:3002")
+
+// ========== HTTP Helpers ==========
+
+fn parseMethod(line: string) -> string {
+    mut parts = split(line, " ")
+    parts[0]
 }
 
-impl TokenStore {
-    fn new() -> TokenStore {
-        TokenStore { tokens: map() }
-    }
-
-    fn register(self, token: string, user: string) -> string {
-        self.tokens.set(token, user)
-        return "ok"
-    }
-
-    fn validate(self, token: string) -> string {
-        // Returns username if valid, empty string if not
-        return self.tokens.getStr(token)
-    }
+fn parsePath(line: string) -> string {
+    mut parts = split(line, " ")
+    if len(parts) > 1 return parts[1]
+    "/"
 }
 
-// === RateLimiter Actor ===
-// Sliding window: tracks request timestamps per user.
-// Window = 10 seconds, limit = 5 requests per window.
-
-actor RateLimiter {
-    counts: map,
-    timestamps: map,
-    windowMs: int,
-    maxRequests: int
-}
-
-impl RateLimiter {
-    fn new(windowMs: int, maxRequests: int) -> RateLimiter {
-        RateLimiter {
-            counts: map(),
-            timestamps: map(),
-            windowMs: windowMs,
-            maxRequests: maxRequests
+fn matchRoute(path: string, routeMap: map) -> string {
+    mut keys = routeMap.keys()
+    for mut i = 0 i < len(keys) i = i + 1 {
+        mut prefix = toString(keys[i])
+        if startsWith(path, prefix) {
+            return toString(routeMap.get(prefix))
         }
     }
-
-    fn check(self, user: string) -> bool {
-        imut now = System.currentTimeMillis()
-
-        // Get window start timestamp for this user
-        imut windowStart = self.timestamps.getLong(user)
-
-        if now - windowStart > self.windowMs {
-            // Window expired — reset
-            self.counts.set(user, 1)
-            self.timestamps.set(user, now)
-            return true
-        }
-
-        // Within window — check count
-        imut count = self.counts.getInt(user)
-        if count >= self.maxRequests {
-            return false
-        }
-
-        self.counts.set(user, count + 1)
-        return true
-    }
-
-    fn getInfo(self, user: string) -> string {
-        imut count = self.counts.getInt(user)
-        return "\{\"user\":\"{user}\",\"requests\":{count},\"limit\":{self.maxRequests}\}"
-    }
+    ""
 }
 
-// === Router ===
-// Maps path prefixes to backend host:port.
-// Not an actor — just a map owned by the gateway config.
-
-actor Router {
-    routes: map
-}
-
-impl Router {
-    fn new() -> Router {
-        Router { routes: map() }
-    }
-
-    fn addRoute(self, prefix: string, backend: string) -> string {
-        self.routes.set(prefix, backend)
-        return "ok"
-    }
-
-    fn resolve(self, path: string) -> string {
-        // Find longest matching prefix
-        imut keys = self.routes.keys()
-        mut bestMatch = ""
-        mut bestLen = 0
-        for i in range(0, len(keys)) {
-            imut prefix = toString(keys[i])
-            if startsWith(path, prefix) {
-                if len(prefix) > bestLen {
-                    bestMatch = self.routes.getStr(prefix)
-                    bestLen = len(prefix)
-                }
-            }
-        }
-        return bestMatch
-    }
-}
-
-// === Stats Actor ===
-
-actor Stats {
-    total: int,
-    authFails: int,
-    rateLimited: int,
-    proxied: int,
-    backendErrors: int
-}
-
-impl Stats {
-    fn new() -> Stats {
-        Stats { total: 0, authFails: 0, rateLimited: 0, proxied: 0, backendErrors: 0 }
-    }
-
-    fn recordAuth(self) -> string {
-        self.authFails += 1
-        self.total += 1
-        return "ok"
-    }
-    fn recordRate(self) -> string {
-        self.rateLimited += 1
-        self.total += 1
-        return "ok"
-    }
-    fn recordProxy(self) -> string {
-        self.proxied += 1
-        self.total += 1
-        return "ok"
-    }
-    fn recordError(self) -> string {
-        self.backendErrors += 1
-        self.total += 1
-        return "ok"
-    }
-
-    fn getStats(self) -> string {
-        return "\{\"total\":{self.total},\"auth_failures\":{self.authFails},\"rate_limited\":{self.rateLimited},\"proxied\":{self.proxied},\"backend_errors\":{self.backendErrors}\}"
-    }
-}
-
-// === Handler Actor ===
-// Middleware pipeline: auth → rate limit → route → proxy
-
-actor Handler {
-    tokenStore: TokenStore,
-    rateLimiter: RateLimiter,
-    router: Router,
-    stats: Stats,
-    socket: object,
-    reqId: int
-}
-
-impl Handler {
-    fn new(tokenStore: TokenStore, rateLimiter: RateLimiter, router: Router, stats: Stats, socket: object, reqId: int) -> Handler {
-        Handler {
-            tokenStore: tokenStore,
-            rateLimiter: rateLimiter,
-            router: router,
-            stats: stats,
-            socket: socket,
-            reqId: reqId
+fn extractSuffix(path: string, routeMap: map) -> string {
+    mut keys = routeMap.keys()
+    for mut i = 0 i < len(keys) i = i + 1 {
+        mut prefix = toString(keys[i])
+        if startsWith(path, prefix) {
+            return substring(path, len(prefix), len(path))
         }
     }
+    path
+}
 
-    fn run(self) {
-        mut reader = BufferedReader.new(InputStreamReader.new(self.socket.getInputStream()))
-        imut requestLine = reader.readLine()
-        if requestLine == null {
-            self.socket.close()
-            return
-        }
+// ========== Backend Forwarding ==========
 
-        imut method = http.parseMethod(requestLine)
-        imut path = http.parsePath(requestLine)
-
-        // Read headers — extract Authorization and Content-Length
-        mut authToken = ""
-        mut contentLength = 0
-        mut h = reader.readLine()
-        while h != null {
-            if len(h) == 0 { h = null }
-            else {
-                imut authVal = http.headerValue(h, "Authorization")
-                if len(authVal) > 0 {
-                    // Strip "Bearer " prefix
-                    if startsWith(authVal, "Bearer ") {
-                        authToken = substring(authVal, 7, len(authVal))
-                    }
-                }
-                imut clVal = http.headerValue(h, "Content-Length")
-                if len(clVal) > 0 { contentLength = parseInt(clVal) }
-                h = reader.readLine()
-            }
-        }
-
-        // Read body
+fn httpGet(backendUrl: string) -> string {
+    try {
+        mut url = URL.new(backendUrl)
+        mut conn = url.openConnection()
+        mut reader = BufferedReader.new(InputStreamReader.new(conn.getInputStream()))
         mut body = ""
-        if contentLength > 0 {
-            for i in range(0, contentLength) {
-                body = body + chr(reader.read())
-            }
-        }
-
-        // --- Stats endpoint (no auth required) ---
-        if path == "/_stats" {
-            self.respond(http.ok(self.stats.getStats()))
-            println("[{self.reqId}] {method} {path} -> stats")
-            return
-        }
-
-        // --- Middleware Pipeline ---
-
-        // Step 1: Auth
-        if len(authToken) == 0 {
-            self.stats.recordAuth()
-            self.respond(http.unauthorized("\{\"error\":\"missing token\"\}"))
-            println("[{self.reqId}] {method} {path} -> 401 no token")
-            return
-        }
-        imut user = self.tokenStore.validate(authToken)
-        if len(user) == 0 {
-            self.stats.recordAuth()
-            self.respond(http.unauthorized("\{\"error\":\"invalid token\"\}"))
-            println("[{self.reqId}] {method} {path} -> 401 bad token")
-            return
-        }
-
-        // Step 2: Rate limit
-        imut allowed = self.rateLimiter.check(user)
-        if !allowed {
-            self.stats.recordRate()
-            imut info = self.rateLimiter.getInfo(user)
-            self.respond(http.tooMany(info))
-            println("[{self.reqId}] {method} {path} -> 429 {user}")
-            return
-        }
-
-        // Step 3: Route
-        imut backendAddr = self.router.resolve(path)
-        if len(backendAddr) == 0 {
-            self.respond(http.notFound("\{\"error\":\"no route for {path}\"\}"))
-            println("[{self.reqId}] {method} {path} -> 404 no route")
-            return
-        }
-
-        // Step 4: Proxy to backend
-        imut colonIdx = indexOf(backendAddr, ":")
-        imut backendHost = substring(backendAddr, 0, colonIdx)
-        imut backendPort = parseInt(substring(backendAddr, colonIdx + 1, len(backendAddr)))
-
-        imut backendResp = try {
-            self.forwardToBackend(backendHost, backendPort, method, path, contentLength, body)
-        } catch e { "" }
-
-        if len(backendResp) > 0 {
-            self.stats.recordProxy()
-            mut out = self.socket.getOutputStream()
-            out.write(backendResp.getBytes())
-            out.flush()
-            println("[{self.reqId}] {method} {path} -> {backendAddr} ({user})")
-        } else {
-            self.stats.recordError()
-            self.respond(http.badGateway("\{\"error\":\"backend unreachable\"\}"))
-            println("[{self.reqId}] {method} {path} -> 502 {backendAddr}")
-        }
-        self.socket.close()
-    }
-
-    fn forwardToBackend(self, host: string, port: int, method: string, path: string, contentLength: int, body: string) -> string {
-        mut bs = Socket.new()
-        bs.connect(InetSocketAddress.new(host, port), 2000)
-        mut bw = PrintWriter.new(bs.getOutputStream(), true)
-        bw.println("{method} {path} HTTP/1.1")
-        bw.println("Host: {host}:{port}")
-        bw.println("Connection: close")
-        if contentLength > 0 { bw.println("Content-Length: {contentLength}") }
-        bw.println("")
-        if contentLength > 0 { bw.print(body) }
-        bw.flush()
-        mut resp = ""
-        mut br = BufferedReader.new(InputStreamReader.new(bs.getInputStream()))
-        mut line = br.readLine()
+        mut line = reader.readLine()
         while line != null {
-            resp = resp + line + "\r\n"
-            line = br.readLine()
+            body = body + line + "\n"
+            line = reader.readLine()
         }
-        bs.close()
-        return resp
-    }
-
-    fn respond(self, response: string) {
-        mut out = self.socket.getOutputStream()
-        out.write(response.getBytes())
-        out.flush()
-        self.socket.close()
+        reader.close()
+        return body
+    } catch e {
+        return "ERROR:" + toString(e)
     }
 }
 
-// === Main ===
+// ========== Response Builder ==========
 
-imut PORT = 5000
+fn buildResponse(status: int, statusText: string, body: string, timing: int) -> string {
+    mut r = "HTTP/1.1 " + toString(status) + " " + statusText + "\r\n"
+    r = r + "Content-Type: application/json\r\n"
+    r = r + "Content-Length: " + toString(len(body)) + "\r\n"
+    r = r + "Access-Control-Allow-Origin: *\r\n"
+    r = r + "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+    r = r + "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
+    r = r + "X-Gateway: siyo-gateway/0.1\r\n"
+    r = r + "X-Response-Time: " + toString(timing) + "ms\r\n"
+    r = r + "Connection: close\r\n\r\n"
+    r = r + body
+    r
+}
 
-// Start echo backends
-spawn Backend.new(9101, "user-service")
-spawn Backend.new(9102, "order-service")
-Thread.sleep(300)
+fn jsonError(msg: string) -> string {
+    mut m = map()
+    m.set("error", msg)
+    json.stringify(m)
+}
 
-// Create actors
-mut tokenStore = spawn TokenStore.new()
-tokenStore.register("tok-alice", "alice")
-tokenStore.register("tok-bob", "bob")
-tokenStore.register("tok-admin", "admin")
+fn jsonStatus(msg: string) -> string {
+    mut m = map()
+    m.set("status", msg)
+    json.stringify(m)
+}
 
-mut rateLimiter = spawn RateLimiter.new(10000, 5)
+fn jsonGatewayInfo(routeMap: map) -> string {
+    mut m = map()
+    m.set("service", "siyo-gateway")
+    m.set("version", "0.1.0")
+    m.set("routes", len(routeMap.keys()))
+    json.stringify(m)
+}
 
-mut router = spawn Router.new()
-router.addRoute("/api/users", "localhost:9101")
-router.addRoute("/api/orders", "localhost:9102")
+// ========== Main Server ==========
 
-mut stats = spawn Stats.new()
-mut server = ServerSocket.new(PORT)
-mut reqCount = 0
+println("=== Siyo API Gateway ===")
+println("Routes:")
+mut routeKeys = routes.keys()
+for mut i = 0 i < len(routeKeys) i = i + 1 {
+    mut prefix = toString(routeKeys[i])
+    mut backend = toString(routes.get(prefix))
+    println("  " + prefix + " -> " + backend)
+}
 
-println("=== Siyo API Gateway === http://localhost:{PORT}")
-println("  backends: user-service :9101, order-service :9102")
-println("  tokens: tok-alice, tok-bob, tok-admin")
-println("  rate limit: 5 req / 10s per user")
-println("  curl -H 'Authorization: Bearer tok-alice' localhost:{PORT}/api/users")
-println("")
+mut server = ServerSocket.new(7000)
+println("Gateway listening on http://localhost:7000")
 
 while true {
     mut socket = server.accept()
-    reqCount += 1
-    spawn Handler.new(tokenStore, rateLimiter, router, stats, socket, reqCount)
+    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+    mut requestLine = reader.readLine()
+    if requestLine == null {
+        socket.close()
+    } else {
+        mut startTime = System.currentTimeMillis()
+        mut method = parseMethod(requestLine)
+        mut path = parsePath(requestLine)
+
+        // Read headers
+        mut contentLength = 0
+        mut h = reader.readLine()
+        while h != null {
+            if len(h) == 0 { break }
+            if contains(h, "Content-Length") {
+                mut idx = indexOf(h, ":") + 1
+                contentLength = parseInt(trim(substring(h, idx, len(h))))
+            }
+            h = reader.readLine()
+        }
+
+        // Read body if present
+        mut requestBody = ""
+        for mut i = 0 i < contentLength i = i + 1 {
+            requestBody = requestBody + chr(reader.read())
+        }
+
+        // Request logging middleware
+        println("[" + method + "] " + path)
+
+        // Handle CORS preflight
+        mut response = ""
+        if method == "OPTIONS" {
+            mut elapsed = System.currentTimeMillis() - startTime
+            response = buildResponse(204, "No Content", "", elapsed)
+        } else if path == "/health" {
+            mut elapsed = System.currentTimeMillis() - startTime
+            response = buildResponse(200, "OK", jsonStatus("healthy"), elapsed)
+        } else if path == "/gateway/info" {
+            mut elapsed = System.currentTimeMillis() - startTime
+            response = buildResponse(200, "OK", jsonGatewayInfo(routes), elapsed)
+        } else {
+            // Route matching
+            mut backend = matchRoute(path, routes)
+            if backend == "" {
+                mut elapsed = System.currentTimeMillis() - startTime
+                response = buildResponse(404, "Not Found", jsonError("no route matched: " + path), elapsed)
+                println("  -> 404 no route")
+            } else {
+                mut suffix = extractSuffix(path, routes)
+                mut targetUrl = backend + suffix
+                println("  -> forwarding to " + targetUrl)
+
+                mut backendBody = httpGet(targetUrl)
+                mut elapsed = System.currentTimeMillis() - startTime
+
+                if startsWith(backendBody, "ERROR:") {
+                    mut errMsg = substring(backendBody, 6, len(backendBody))
+                    response = buildResponse(502, "Bad Gateway", jsonError("backend error: " + trim(errMsg)), elapsed)
+                    println("  -> 502 backend error")
+                } else {
+                    response = buildResponse(200, "OK", trim(backendBody), elapsed)
+                    println("  -> 200 (" + toString(elapsed) + "ms)")
+                }
+            }
+        }
+
+        // Send response
+        mut out = socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        socket.close()
+    }
 }
