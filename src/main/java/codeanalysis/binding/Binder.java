@@ -371,6 +371,7 @@ public class Binder {
             case ScopeExpression -> bindScopeExpression((ScopeExpressionSyntax) syntax);
             case SpawnExpression -> bindSpawnExpression((SpawnExpressionSyntax) syntax);
             case MatchExpression -> bindMatchExpression((MatchExpressionSyntax) syntax);
+            case IfExpression -> bindIfExpression((IfExpressionSyntax) syntax);
             case TryExpression -> bindTryExpression((TryExpressionSyntax) syntax);
             default -> {
                 _diagnostics.reportUnexpectedExpression(syntax.getSpan(), syntax.getType());
@@ -572,6 +573,32 @@ public class Binder {
         return null;
     }
 
+    private BoundExpression bindIfExpression(IfExpressionSyntax syntax) {
+        // Desugar `if cond { A } else { B }` into a match on the boolean condition.
+        IfStatementSyntax ifs = syntax.getIfStatement();
+        BoundExpression cond = bindExpression(ifs.getCondition(), Boolean.class);
+
+        if (ifs.getElseClause() == null) {
+            _diagnostics.reportUnexpectedExpression(ifs.getIfKeyword().getSpan(), SyntaxType.IfExpression);
+            return new BoundLiteralExpression(0);
+        }
+
+        List<BoundStatement> thenPre = new ArrayList<>();
+        BoundExpression thenExpr = bindBlockExpressionBody(ifs.getThenStatement(), thenPre);
+
+        List<BoundStatement> elsePre = new ArrayList<>();
+        BoundExpression elseExpr = bindBlockExpressionBody(ifs.getElseClause().getElseStatement(), elsePre);
+
+        Class<?> resultType = thenExpr.getClassType();
+        if (resultType == null || resultType == Object.class) resultType = elseExpr.getClassType();
+        if (resultType == null) resultType = Object.class;
+
+        List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
+        arms.add(new BoundMatchExpression.BoundMatchArm(new BoundLiteralExpression(true), thenExpr, false, thenPre));
+        arms.add(new BoundMatchExpression.BoundMatchArm(null, elseExpr, true, elsePre));
+        return new BoundMatchExpression(cond, arms, resultType);
+    }
+
     private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax) {
         BoundExpression target = bindExpression(syntax.getTarget());
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
@@ -606,6 +633,9 @@ public class Binder {
             BoundExpression result;
             if (last instanceof ExpressionStatementSyntax exprStmt) {
                 result = bindExpression(exprStmt.getExpression());
+            } else if (last instanceof IfStatementSyntax ifStmt && ifStmt.getElseClause() != null) {
+                // Allow trailing `if/else` to act as the value of the block.
+                result = bindIfExpression(new IfExpressionSyntax(ifStmt));
             } else {
                 // Last statement is not an expression — bind it as a statement and return 0
                 preStatements.add(bindStatement(last));

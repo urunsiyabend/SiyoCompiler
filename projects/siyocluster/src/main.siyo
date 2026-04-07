@@ -73,11 +73,10 @@ impl Store {
             return "(empty)"
         }
         mut allKeys = self.data.keys()
-        mut result = [""]
+        mut result = []
         for k in allKeys {
             push(result, toString(k))
         }
-        removeAt(result, 0)
         return strings.join(result, ", ")
     }
 
@@ -91,11 +90,10 @@ impl Store {
         if len(allKeys) == 0 {
             return ""
         }
-        mut result = [""]
+        mut result = []
         for k in allKeys {
             push(result, toString(k))
         }
-        removeAt(result, 0)
         return strings.join(result, ",")
     }
 
@@ -194,11 +192,10 @@ impl NodeState {
         if len(peerList) == 0 {
             return ""
         }
-        mut result = [""]
+        mut result = []
         for i in range(0, len(peerList)) {
             push(result, toString(peerList[i]))
         }
-        removeAt(result, 0)
         return strings.join(result, ",")
     }
 
@@ -209,7 +206,7 @@ impl NodeState {
     fn getDeadPeers(self, timeoutMs: int) -> string {
         // Returns comma-separated list of dead peers
         mut now = System.currentTimeMillis()
-        mut dead = [""]
+        mut dead = []
         mut peerList = self.peers.values()
         for i in range(0, len(peerList)) {
             mut p = toString(peerList[i])
@@ -221,7 +218,6 @@ impl NodeState {
                 }
             }
         }
-        removeAt(dead, 0)
         if len(dead) == 0 {
             return ""
         }
@@ -310,7 +306,7 @@ fn parsePort(addr: string) -> int {
 
 // ==================== Replication Logic ====================
 
-fn replicateToAllPeers(nodeState: object, key: string, value: string, cmd: string) {
+fn replicateToAllPeers(nodeState: NodeState, key: string, value: string, cmd: string) {
     // Primary replicates writes to all known peers
     mut peersStr = nodeState.getPeers()
     if peersStr == "" { return }
@@ -327,7 +323,7 @@ fn replicateToAllPeers(nodeState: object, key: string, value: string, cmd: strin
     }
 }
 
-fn forwardWriteToPrimary(nodeState: object, command: string) -> string {
+fn forwardWriteToPrimary(nodeState: NodeState, command: string) -> string {
     // Replica forwards write to primary
     mut primaryAddr = nodeState.getPrimaryAddr()
     if primaryAddr == "" {
@@ -342,7 +338,7 @@ fn forwardWriteToPrimary(nodeState: object, command: string) -> string {
     return result
 }
 
-fn syncFromPrimary(store: object, nodeState: object) {
+fn syncFromPrimary(store: Store, nodeState: NodeState) {
     // Request full data sync from current primary
     mut primaryAddr = nodeState.getPrimaryAddr()
     if primaryAddr == "" {
@@ -374,11 +370,10 @@ fn syncFromPrimary(store: object, nodeState: object) {
                 if len(parts) >= 2 {
                     mut key = parts[0]
                     // Value may contain spaces
-                    mut valParts = [""]
+                    mut valParts = []
                     for j in range(1, len(parts)) {
                         push(valParts, parts[j])
                     }
-                    removeAt(valParts, 0)
                     mut value = strings.join(valParts, " ")
                     store.set(key, value)
                     syncCount = syncCount + 1
@@ -395,7 +390,7 @@ fn syncFromPrimary(store: object, nodeState: object) {
 
 // ==================== Heartbeat Logic ====================
 
-fn sendHeartbeats(nodeState: object, myAddr: string) {
+fn sendHeartbeats(nodeState: NodeState, myAddr: string) {
     mut peersStr = nodeState.getPeers()
     if peersStr == "" { return }
     mut peers = split(peersStr, ",")
@@ -410,7 +405,7 @@ fn sendHeartbeats(nodeState: object, myAddr: string) {
     }
 }
 
-fn checkDeadPeers(nodeState: object, myAddr: string) {
+fn checkDeadPeers(nodeState: NodeState, myAddr: string) {
     mut role = nodeState.getRole()
     mut deadStr = nodeState.getDeadPeers(6000)
     if deadStr == "" { return }
@@ -431,7 +426,7 @@ fn checkDeadPeers(nodeState: object, myAddr: string) {
     }
 }
 
-fn heartbeatLoop(nodeState: object, myAddr: string) {
+fn heartbeatLoop(nodeState: NodeState, myAddr: string) {
     while true {
         Thread.sleep(toLong(2000))
         sendHeartbeats(nodeState, myAddr)
@@ -452,11 +447,9 @@ fn checkPeerPort(peerAddr: string, myAddr: string, lowestPort: int) -> bool {
     return peerPort < lowestPort
 }
 
-fn findLowestPort(nodeState: object, myAddr: string) -> string {
-    // PAIN POINT: Actor method calls on `object`-typed params return Object.
-    // Must explicitly convert with parseInt/toString for arithmetic.
-    mut myPort = parseInt(toString(nodeState.getPort()))
-    mut peersStr = toString(nodeState.getPeers())
+fn findLowestPort(nodeState: NodeState, myAddr: string) -> string {
+    mut myPort = nodeState.getPort()
+    mut peersStr = nodeState.getPeers()
     if peersStr == "" { return myAddr }
 
     mut lowestPort = myPort
@@ -472,8 +465,8 @@ fn findLowestPort(nodeState: object, myAddr: string) -> string {
     return lowestAddr
 }
 
-fn promoteAsPrimary(nodeState: object, myAddr: string) {
-    mut myPort = parseInt(toString(nodeState.getPort()))
+fn promoteAsPrimary(nodeState: NodeState, myAddr: string) {
+    mut myPort = nodeState.getPort()
     println("[election] WON — promoting self to primary (port $myPort)")
     nodeState.setRole("primary")
     nodeState.setPrimaryAddr(myAddr)
@@ -489,16 +482,14 @@ fn promoteAsPrimary(nodeState: object, myAddr: string) {
     }
 }
 
-fn triggerElection(nodeState: object, myAddr: string) {
-    // PAIN POINT: startElection() returns bool via actor, but type is Object.
-    // toString comparison is the only safe way.
-    mut canStart = toString(nodeState.startElection())
-    if canStart != "true" {
+fn triggerElection(nodeState: NodeState, myAddr: string) {
+    mut canStart = nodeState.startElection()
+    if !canStart {
         println("[election] Election already in progress")
         return
     }
 
-    mut myPort = parseInt(toString(nodeState.getPort()))
+    mut myPort = nodeState.getPort()
     println("[election] Proposing self (port $myPort) as new primary")
 
     // Vote for self
@@ -517,7 +508,7 @@ fn triggerElection(nodeState: object, myAddr: string) {
 
 // ==================== Command Processing ====================
 
-fn processClientCommand(input: string, store: object, nodeState: object) -> string {
+fn processClientCommand(input: string, store: Store, nodeState: NodeState) -> string {
     mut parts = split(input, " ")
     if len(parts) == 0 {
         return "ERR: empty command"
@@ -537,25 +528,20 @@ fn processClientCommand(input: string, store: object, nodeState: object) -> stri
                 return "ERR: SET requires key and value"
             }
             mut key = parts[1]
-            mut valParts = [""]
+            mut valParts = []
             for j in range(2, len(parts)) {
                 push(valParts, parts[j])
             }
-            removeAt(valParts, 0)
             mut value = strings.join(valParts, " ")
 
             mut role = nodeState.getRole()
-            // PAIN POINT: if/else is a statement, not an expression in Siyo.
-            // Can't use if/else as the last expression in a match arm.
-            // Must use a temp variable instead.
-            mut setResult = ""
             if role == "primary" {
-                setResult = toString(store.set(key, value))
+                mut r = store.set(key, value)
                 replicateToAllPeers(nodeState, key, value, "SET")
+                r
             } else {
-                setResult = forwardWriteToPrimary(nodeState, input)
+                forwardWriteToPrimary(nodeState, input)
             }
-            setResult
         },
         "DEL" => {
             if len(parts) < 2 {
@@ -563,27 +549,26 @@ fn processClientCommand(input: string, store: object, nodeState: object) -> stri
             }
             mut key = parts[1]
             mut role = nodeState.getRole()
-            mut delResult = ""
             if role == "primary" {
-                delResult = toString(store.del(key))
+                mut r = store.del(key)
                 replicateToAllPeers(nodeState, key, "", "DEL")
+                r
             } else {
-                delResult = forwardWriteToPrimary(nodeState, input)
+                forwardWriteToPrimary(nodeState, input)
             }
-            delResult
         },
         "KEYS" => {
             store.keys()
         },
         "INFO" => {
-            mut keyCount = parseInt(toString(store.size()))
+            mut keyCount = store.size()
             nodeState.info(keyCount)
         },
         _ => "ERR: unknown command '$cmd'"
     }
 }
 
-fn processInternalCommand(input: string, store: object, nodeState: object, myAddr: string) -> string {
+fn processInternalCommand(input: string, store: Store, nodeState: NodeState, myAddr: string) -> string {
     // Handle internal replication and cluster protocol
     mut parts = split(input, " ")
     if len(parts) == 0 {
@@ -601,17 +586,16 @@ fn processInternalCommand(input: string, store: object, nodeState: object, myAdd
             if subCmd == "SET" {
                 if len(parts) >= 4 {
                     mut key = parts[2]
-                    mut valParts = [""]
+                    mut valParts = []
                     for j in range(3, len(parts)) {
                         push(valParts, parts[j])
                     }
-                    removeAt(valParts, 0)
                     mut value = strings.join(valParts, " ")
-                    replResult = toString(store.set(key, value))
+                    replResult = store.set(key, value)
                 }
             } else if subCmd == "DEL" {
                 if len(parts) >= 3 {
-                    replResult = toString(store.del(parts[2]))
+                    replResult = store.del(parts[2])
                 }
             }
             replResult
@@ -626,7 +610,7 @@ fn processInternalCommand(input: string, store: object, nodeState: object, myAdd
         "VOTE" => {
             // Another node is proposing itself during election
             // Reply with our port so they can determine lowest
-            mut myPort = parseInt(toString(nodeState.getPort()))
+            mut myPort = nodeState.getPort()
             "VOTE_ACK $myAddr"
         },
         "PROMOTE" => {
@@ -657,7 +641,7 @@ fn processInternalCommand(input: string, store: object, nodeState: object, myAdd
 
 // ==================== Connection Handler ====================
 
-fn handleConnection(socket: object, store: object, nodeState: object, myAddr: string) {
+fn handleConnection(socket: object, store: Store, nodeState: NodeState, myAddr: string) {
     try {
         mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
         mut writer = OutputStreamWriter.new(socket.getOutputStream())

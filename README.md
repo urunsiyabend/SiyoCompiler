@@ -12,7 +12,7 @@
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
   <img src="https://img.shields.io/badge/version-0.2.0-green" alt="v0.2.0">
-  <img src="https://img.shields.io/badge/tests-1474%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1475%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -272,7 +272,7 @@ src/main/java/
     ├── SiyoRuntime.java                Compiled-code runtime helpers
     ├── BuiltinFunctions.java           37 stdlib functions
     └── ...                             Types, diagnostics, symbols
-src/test/java/                          1402 tests
+src/test/java/                          1475 tests
 examples/                               29 standalone examples
 projects/                               Multi-file projects (siyodb, chat)
 ```
@@ -283,7 +283,7 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-1402 tests across 8 suites — lexer, parser, binder, evaluator, compilation (bytecode-vs-interpreter parity), syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+1475 tests across 8 suites — lexer, parser, binder, evaluator, compilation (bytecode-vs-interpreter parity), syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 

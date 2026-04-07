@@ -67,10 +67,14 @@
 - **Integer**: `42`, `-7`
 - **Float**: `3.14`, `0.5`
 - **Long**: returned by Java interop (e.g. `System.currentTimeMillis()`)
-- **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$` and interpolation `"x = $name"` / `"x = ${expr}"`
+- **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$`
+- **Triple-quoted string**: `"""multi-line\nliteral"""` — preserves newlines verbatim, no escape interpretation needed for `"` inside the body
+- **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings.
 - **Boolean**: `true`, `false`
 - **Null**: `null`
-- **Array**: `[1, 2, 3]`, `[]`
+- **Array**: `[1, 2, 3]`, `[]` (empty literal infers element type from context)
+- **Map**: `{"key": value, "other": 42}`, `{}` for empty
+- **Set**: `set()` then `.add(x)` (no literal form yet)
 
 ### Delimiters
 
@@ -108,9 +112,14 @@ variable_declaration
 if_statement
     : 'if' expression block ('else' (if_statement | block))?
 
+// `if`/`else` is also valid in expression position; both branches must be
+// blocks ending in an expression. Example:
+//     mut label = if score > 50 { "pass" } else { "fail" }
+
 while_statement : 'while' expression block
 for_statement   : 'for' variable_declaration expression expression block
 for_in_statement: 'for' IDENTIFIER 'in' expression block
+                | 'for' IDENTIFIER 'in' map_expression block   // iterates keys
 
 function_declaration
     : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause? block
@@ -160,15 +169,20 @@ postfix_expression
     : primary_expression ('[' expression ']' | '.' IDENTIFIER | '(' argument_list? ')')*
 
 primary_expression
-    : NUMBER | FLOAT | STRING | 'true' | 'false' | 'null'
+    : NUMBER | FLOAT | STRING | TRIPLE_QUOTED_STRING | 'true' | 'false' | 'null'
     | IDENTIFIER
     | '(' expression ')'
-    | '[' expression_list? ']'
+    | '[' expression_list? ']'                       // array literal (empty allowed)
+    | '{' (STRING ':' expression (',' ...)*)? '}'    // map literal (empty allowed)
     | struct_literal
     | lambda_expression
     | match_expression
+    | if_expression
     | try_expression
     | spawn_expression
+
+if_expression
+    : 'if' expression block 'else' block             // both branches required, value = last expr in block
 
 lambda_expression
     : 'fn' '(' parameter_list? ')' type_clause? block
@@ -184,7 +198,9 @@ try_expression
     : 'try' block 'catch' IDENTIFIER block
 
 spawn_expression
-    : 'spawn' block
+    : 'spawn' block          // bare `spawn { ... }` is allowed outside `scope { }`
+                             // and runs as a fire-and-forget virtual thread.
+    | 'spawn' call_expression// `spawn Actor.new(...)` to start an actor
 
 struct_literal
     : IDENTIFIER '{' (IDENTIFIER ':' expression ',')* '}'
@@ -249,6 +265,14 @@ scope {
 // all spawned threads joined here
 ```
 
+### Bare Spawn
+```siyo
+// Outside any scope { } — fire-and-forget virtual thread, never joined.
+spawn {
+    while true { handleRequest() }
+}
+```
+
 ### Channels
 ```siyo
 imut ch = channel()     // unbuffered (rendezvous)
@@ -259,6 +283,17 @@ ch.receive()            // blocks until value available
 ch.close()              // signal no more values
 
 for msg in ch { ... }   // iterate until closed
+```
+
+### Maps
+```siyo
+mut prices = {"apple": 100, "pear": 120}
+prices.set("plum", 90)
+println(toString(prices.get("apple")))
+
+for key in prices {       // iterates keys
+    println("$key = ${prices.get(key)}")
+}
 ```
 
 ### Actors

@@ -13,7 +13,7 @@ if exist "%SIYO_HOME%\lib\siyoc.jar" (
 )
 
 REM Development mode: shaded JAR from Maven build
-set "SIYO_JAR=%SIYO_HOME%\target\siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
+set "SIYO_JAR=%SIYO_HOME%\target\siyo-compiler-0.2.0-shaded.jar"
 
 if not exist "%SIYO_JAR%" (
     echo Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'

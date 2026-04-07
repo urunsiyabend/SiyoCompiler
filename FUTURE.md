@@ -48,11 +48,17 @@
 - **Generalized type coercion**: Single `emitCoerceArg()` replaces per-builtin CHECKCAST logic. String builtins (contains, substring, indexOf, etc.) now work with Object-typed arguments from maps, actors, etc.
 - **Source maps / line numbers**: Bytecode now includes LineNumberTable entries. Stack traces show source file and line numbers instead of raw JVM dumps.
 - **Module-level mutable variables**: `mut` variables at module top level now work correctly in bytecode — emitted as static fields on the module class with `<clinit>` initialization.
+- **Actor method return type tracking**: Calling a method on a typed actor parameter (`fn foo(s: Store)`) now preserves the method's declared return type instead of erasing to `Object`. Eliminates the `parseInt(toString(actor.method()))` workaround.
+- **Bare `spawn { }` outside `scope`**: Fire-and-forget virtual threads now allowed at any nesting level. Server patterns no longer need a wrapping scope.
+- **Match arm block bodies**: All preceding statements in a match-arm block are now bound (not just the trailing expression). Fixes `Name '...' does not exist` for arms with multiple statements.
+- **Object indexing**: Object-typed values (e.g., from actor returns) can be indexed with a runtime list cast.
+- **Mutable capture exemption for actors**: Actor handles and Object-typed values are exempt from the mutable-capture restriction in `spawn` blocks (actors are thread-safe by design).
 
 ### New Syntax
 - **Map literals**: `{"key": value, "key2": value2}` and `{}` for empty maps
 - **Triple-quote strings**: `"""..."""` for multi-line string literals
 - **Top-level code without `{ }`**: Wrapping braces no longer required at file level
+- **`if`/`else` as expression**: `mut x = if cond { "a" } else { "b" }`. Works as the trailing expression of a match arm and inside `return`. Eliminates the temp-variable + mutation workaround.
 
 ### New Features
 - **`for key in map`**: Map iteration over keys
@@ -60,13 +66,20 @@
 - **`println(42)`**: println auto-converts any type (boxing + Object overload)
 - **`"text" + intVar`**: String concatenation with non-string types
 - **Empty array literals**: `mut arr = []` and `return []` work correctly
+- **String interpolation**: `$var` for bare identifiers, `${expr}` for arbitrary expressions, supported inside both regular and triple-quoted strings.
+
+### Showcase Projects
+- **siyocluster**: A multi-node replicated TCP key-value store (~800 LOC) with primary/replica failover, heartbeat-based dead-peer detection, and lowest-port leader election. Uses two actors (`Store`, `NodeState`), virtual-thread connection handling, and Java interop for `ServerSocket`/`Socket`. Demonstrates the actor model end-to-end and was the validation harness for several 0.2.0 fixes.
+- **sitegen**: A static site generator written entirely in Siyo, demonstrating multi-file modules, file I/O, string templating, and the std library.
+
+### Test Coverage
+- **1475 unit tests** passing (lexer, parser, binder, evaluator, compilation parity)
 
 ### Pain Points Tracked for Future Releases
 
 #### Tier 2 — Important (0.3.0)
 - Nested JSON parse/stringify broken in std/json
 - JDBC / complex Java interop VerifyError
-- Actor method always returns Object (needs tracked return type)
 - Cross-module closure dispatch uses reflection
 
 #### Tier 3 — Nice to Have (0.3.0+)

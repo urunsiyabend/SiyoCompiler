@@ -807,6 +807,11 @@ public class Parser {
             case MatchKeyword -> {
                 yield parseMatchExpression();
             }
+            case IfKeyword -> {
+                // if/else used as an expression: mut x = if cond { a } else { b }
+                StatementSyntax ifStmt = parseIfStatement();
+                yield new IfExpressionSyntax((IfStatementSyntax) ifStmt);
+            }
             case TryKeyword -> {
                 yield parseTryExpression();
             }

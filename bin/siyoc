@@ -13,7 +13,7 @@ if [ -f "$SIYO_HOME/lib/siyoc.jar" ] && [ -d "$SIYO_HOME/runtime" ]; then
 fi
 
 # Development mode: shaded JAR from Maven build
-SIYO_JAR="$SIYO_HOME/target/siyo-compiler-0.1.0-SNAPSHOT-shaded.jar"
+SIYO_JAR="$SIYO_HOME/target/siyo-compiler-0.2.0-shaded.jar"
 if [ ! -f "$SIYO_JAR" ]; then
     # Try non-snapshot name (release build)
     SIYO_JAR=$(ls "$SIYO_HOME"/target/siyo-compiler-*.jar 2>/dev/null | grep -v original | head -1)

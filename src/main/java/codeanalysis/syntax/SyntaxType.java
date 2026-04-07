@@ -140,6 +140,9 @@ public enum SyntaxType {
     /* Represents an if statement */
     IfStatement,
 
+    /* Represents an if/else used as an expression */
+    IfExpression,
+
     /* Represents an else clause */
     ElseClause,
 
