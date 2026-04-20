@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.2.0)
+# Siyo Language Grammar (0.3.0)
 
 ## Lexical Grammar
 
@@ -72,7 +72,7 @@
 - **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings.
 - **Boolean**: `true`, `false`
 - **Null**: `null`
-- **Array**: `[1, 2, 3]`, `[]` (empty literal infers element type from context)
+- **Array**: `[1, 2, 3]`, `mut xs: string[] = []` (typed empty literal)
 - **Map**: `{"key": value, "other": 42}`, `{}` for empty
 - **Set**: `set()` then `.add(x)` (no literal form yet)
 
@@ -107,7 +107,7 @@ statement
     | expression_statement
 
 variable_declaration
-    : ('mut' | 'imut') IDENTIFIER '=' expression
+    : ('mut' | 'imut') IDENTIFIER (':' type_annotation)? '=' expression
 
 if_statement
     : 'if' expression block ('else' (if_statement | block))?
@@ -306,6 +306,52 @@ imut result = c.increment(5)   // synchronous call
 send c.increment(1)            // fire-and-forget
 ```
 
+## Modules
+
+### Module file format
+
+A module file is a `.siyo` file whose content is a single `{ }` block:
+
+```siyo
+{
+    mut state = 0          // module-level variable, initialized at import time
+
+    println("initialized") // top-level statements run once when the module is first imported
+
+    fn greet(name: string) {
+        println("hello " + name)
+    }
+}
+```
+
+All statements at module top level run in `<clinit>` (once, on first import). Functions and variables are exported as `moduleName.symbol`.
+
+### Import
+
+```siyo
+import "std/io"          // stdlib module
+import "utils"           // relative to the importing file's directory, or src/
+import java "java.io.File"  // Java class import
+```
+
+### Module resolution order
+
+When `import "name"` is resolved, the compiler searches in this order:
+1. `name.siyo` relative to the importing file's directory
+2. `name/index.siyo` relative to the importing file's directory
+3. `src/name.siyo` relative to the project root (siyo.toml location)
+4. `name.siyo` in the working directory
+5. `std/name.siyo` from the bundled stdlib (classpath)
+
+### Function references
+
+Named functions can be used as first-class values:
+
+```siyo
+fn double(x: int) -> int { return x * 2 }
+mut ops: fn[] = [double, double]
+```
+
 ## Java Interop
 
 ```siyo
@@ -314,3 +360,139 @@ mut s = Socket.new("localhost", 8080)
 ```
 
 Static methods, constructors, and instance methods are callable. Return types are mapped automatically.
+
+## Standard Library
+
+### `std/io`
+
+```siyo
+import "std/io"
+
+io.exists(path)             // true if path exists (file or dir)
+io.isFile(path)             // true if regular file
+io.isDir(path)              // true if directory
+io.readFile(path)           // returns string (text)
+io.writeFile(path, content) // writes text
+io.appendFile(path, content)
+io.readLines(path)          // returns string[]
+io.listDir(path)            // returns string[] (non-recursive)
+io.walk(dir)                // returns string[] of all files recursively
+io.readBytes(path)          // returns int[] (0–255 per byte)
+io.writeBytes(path, bytes)  // writes int[] as binary
+io.copyFile(src, dst)       // binary-safe file copy
+io.mkdir(path)
+io.delete(path)
+```
+
+### `std/path`
+
+```siyo
+import "std/path"
+
+path.join(a, b)     // join two path segments
+path.parent(p)      // parent directory
+path.basename(p)    // last component (e.g. "file.siyo")
+path.stem(p)        // basename without extension (e.g. "file")
+path.extension(p)   // extension including dot (e.g. ".siyo")
+path.sep()          // OS path separator
+```
+
+### `std/strings`
+
+Functions from `std/strings` (import to use the qualified name, or call built-ins directly):
+
+```siyo
+import "std/strings"
+
+strings.join(arr, sep)       // join string array
+strings.repeat(s, n)         // repeat string n times
+strings.padLeft(s, w, ch)    // left-pad to width
+strings.padRight(s, w, ch)   // right-pad to width
+strings.trimStart(s)         // strip leading whitespace
+strings.trimEnd(s)           // strip trailing whitespace
+strings.lastIndexOf(s, sub)  // index of last occurrence, -1 if absent
+strings.chars(s)             // split into individual characters
+strings.lines(s)             // split by newline
+```
+
+Built-in string functions (no import needed): `len`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`.
+
+### `std/html`
+
+```siyo
+import "std/html"
+
+html.escape(s)      // escape & < > "
+html.escapeAttr(s)  // escape & < > " ' newlines
+```
+
+### `std/json`
+
+```siyo
+import "std/json"
+
+json.parse(s)       // parse JSON string → map (nested objects/arrays fully decoded)
+json.stringify(v)   // serialize map/array/scalar → JSON string
+```
+
+### `std/testing`
+
+```siyo
+import "std/testing"
+
+testing.assert(cond, msg)
+testing.assertEqual(actual, expected, msg)
+testing.assertEq(actual, expected, msg)      // alias for assertEqual
+testing.assertThrows(body, expectedSubstring)
+testing.beforeEach(fn() { ... })             // run before each test in run()
+testing.afterEach(fn() { ... })              // run after each test in run()
+testing.run("suite name", [test1, test2])    // pass functions by reference
+```
+
+### `std/math`
+
+Common math functions (`math.abs`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.min`, `math.max`, etc.).
+
+## Tooling
+
+### `siyoc` CLI
+
+```
+siyoc run <file>            run a .siyo file (bytecode)
+siyoc run                   run src/main.siyo in the current project
+siyoc test                  auto-discover and run tests:
+                              1. src/test.siyo (if present)
+                              2. tests/*_test.siyo (alphabetical order)
+siyoc test <file>           run a specific test file
+siyoc new <name>            scaffold a new project
+siyoc --version / -v        print version string
+siyoc --help / -h           print usage
+```
+
+### Test auto-discovery
+
+Place test files in a `tests/` directory with names ending in `_test.siyo`. Each file is compiled and run independently.
+
+```
+project/
+  siyo.toml
+  src/
+    main.siyo
+  tests/
+    parser_test.siyo
+    eval_test.siyo
+```
+
+### `siyo.toml` project config
+
+`siyoc run` and `siyoc test` walk up the directory tree to find `siyo.toml`, so they work from any subdirectory of the project.
+
+```toml
+[project]
+name = "myapp"
+version = "0.1.0"
+main = "src/main.siyo"
+
+[dependencies]
+# maven coordinates → local jar cache
+```
