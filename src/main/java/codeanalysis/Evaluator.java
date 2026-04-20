@@ -288,6 +288,16 @@ public class Evaluator {
      * @throws Exception if an error occurs during evaluation or if an unexpected operator is encountered.
      */
     private Object evaluateBinaryExpression(BoundBinaryExpression b) throws Exception {
+        var opType = b.getOperator().getType();
+        if (opType == BoundBinaryOperatorType.LogicalAnd) {
+            boolean left = (boolean) evaluateExpression(b.getLeft());
+            return left && (boolean) evaluateExpression(b.getRight());
+        }
+        if (opType == BoundBinaryOperatorType.LogicalOr) {
+            boolean left = (boolean) evaluateExpression(b.getLeft());
+            return left || (boolean) evaluateExpression(b.getRight());
+        }
+
         Object left = evaluateExpression(b.getLeft());
         Object right = evaluateExpression(b.getRight());
 

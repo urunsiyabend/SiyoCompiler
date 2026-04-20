@@ -14,13 +14,8 @@ import java.util.*;
  * @version 1.0
  */
 public class Main {
-    /**
-     * Entry point of program.
-     * Starts a REPL loop that reads input from the user, parses it, and prints the result.
-     * The loop terminates when the user enters a blank line.
-     *
-     * @param args Command-line arguments.
-     */
+    private static final String VERSION = "0.2.0";
+
     public static void main(String[] args) {
         if (System.getenv("SIYO_DEBUG") != null) {
             System.err.println("[debug] args=" + java.util.Arrays.toString(args));
@@ -42,6 +37,20 @@ public class Main {
         }
 
         String[] cargs = remaining.toArray(new String[0]);
+
+        if (cargs.length >= 1 && (cargs[0].equals("--version") || cargs[0].equals("-v"))) {
+            System.out.println("siyoc " + VERSION);
+            return;
+        }
+        if (cargs.length >= 1 && (cargs[0].equals("--help") || cargs[0].equals("-h"))) {
+            printUsage();
+            return;
+        }
+        if (cargs.length >= 1 && cargs[0].startsWith("-")) {
+            System.err.println("Unknown flag: " + cargs[0]);
+            printUsage();
+            System.exit(1);
+        }
 
         // siyoc new <name> — create project skeleton
         if (cargs.length >= 2 && cargs[0].equals("new")) {
@@ -165,8 +174,16 @@ public class Main {
             byte[] bytecode = compilation.compile(className);
             if (bytecode == null) {
                 DiagnosticBox diagnostics = tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                String diagFileName = java.nio.file.Paths.get(path).getFileName().toString();
+                java.util.Set<String> seen = new java.util.LinkedHashSet<>();
                 while (diagnostics.hasNext()) {
-                    System.err.println(diagnostics.next());
+                    Diagnostic diagnostic = diagnostics.next();
+                    var lineIndex = tree.getText().getLineIndex(diagnostic.getSpan().getStart());
+                    var lineNumber = lineIndex + 1;
+                    var line = tree.getText().getLines().get(lineIndex);
+                    var character = diagnostic.getSpan().getStart() - line.getStart() + 1;
+                    String msg = String.format("%s(%d, %d): %s", diagFileName, lineNumber, character, diagnostic);
+                    if (seen.add(msg)) System.err.println(msg);
                 }
                 System.exit(1);
             }
@@ -305,7 +322,7 @@ public class Main {
         Compilation previous = null;
         Scanner scanner = new Scanner(System.in);
 
-        System.out.println("Siyo REPL v0.2.0 (type 'exit' to quit)");
+        System.out.println("Siyo REPL v" + VERSION + " (type 'exit' to quit)");
 
         while (true) {
             System.out.print(builder.length() == 0 ? ">>> " : "... ");
@@ -346,5 +363,22 @@ public class Main {
 
             builder = new StringBuilder();
         }
+    }
+
+    private static void printUsage() {
+        System.out.println("Usage: siyoc <command> [options]");
+        System.out.println();
+        System.out.println("Commands:");
+        System.out.println("  run <file.siyo>     Compile and run a .siyo file");
+        System.out.println("  run                 Run the project defined in siyo.toml");
+        System.out.println("  test [file]         Run tests (default: src/test.siyo)");
+        System.out.println("  compile <file.siyo> Compile to .class without running");
+        System.out.println("  new <name>          Create a new project skeleton");
+        System.out.println("  repl                Start the interactive REPL");
+        System.out.println();
+        System.out.println("Options:");
+        System.out.println("  -v, --version       Print version and exit");
+        System.out.println("  -h, --help          Print this help and exit");
+        System.out.println("  -cp, --classpath    Append to classpath");
     }
 }

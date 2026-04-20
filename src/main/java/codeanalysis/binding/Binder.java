@@ -316,6 +316,8 @@ public class Binder {
      * @return The bound for statement.
      */
     private BoundStatement bindForStatement(ForStatementSyntax syntax) {
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
         BoundStatement initializer = bindStatement(syntax.getInitializer());
         BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
         BoundExpression iterator = bindExpression(syntax.getIterator());
@@ -324,6 +326,8 @@ public class Binder {
         _loopStack.push(new LoopLabels(breakLabel, continueLabel));
         BoundStatement body = bindStatement(syntax.getBody());
         _loopStack.pop();
+        _scope = _scope.getParent();
+        _moduleHandler.setScope(_scope);
         return new BoundForStatement(initializer, condition, iterator, body, breakLabel, continueLabel);
     }
 

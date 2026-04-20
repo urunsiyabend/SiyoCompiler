@@ -671,6 +671,40 @@ public class Emitter {
             return;
         }
 
+        // Short-circuit logical operators
+        if (node.getOperator().getType() == BoundBinaryOperatorType.LogicalAnd) {
+            Label falseLabel = new Label();
+            Label endLabel = new Label();
+            emitExpression(node.getLeft());
+            if (node.getLeft().getClassType() == Object.class) emitUnboxIfNeeded(Boolean.class);
+            _mv.visitJumpInsn(IFEQ, falseLabel);
+            emitExpression(node.getRight());
+            if (node.getRight().getClassType() == Object.class) emitUnboxIfNeeded(Boolean.class);
+            _mv.visitJumpInsn(IFEQ, falseLabel);
+            _mv.visitInsn(ICONST_1);
+            _mv.visitJumpInsn(GOTO, endLabel);
+            _mv.visitLabel(falseLabel);
+            _mv.visitInsn(ICONST_0);
+            _mv.visitLabel(endLabel);
+            return;
+        }
+        if (node.getOperator().getType() == BoundBinaryOperatorType.LogicalOr) {
+            Label trueLabel = new Label();
+            Label endLabel = new Label();
+            emitExpression(node.getLeft());
+            if (node.getLeft().getClassType() == Object.class) emitUnboxIfNeeded(Boolean.class);
+            _mv.visitJumpInsn(IFNE, trueLabel);
+            emitExpression(node.getRight());
+            if (node.getRight().getClassType() == Object.class) emitUnboxIfNeeded(Boolean.class);
+            _mv.visitJumpInsn(IFNE, trueLabel);
+            _mv.visitInsn(ICONST_0);
+            _mv.visitJumpInsn(GOTO, endLabel);
+            _mv.visitLabel(trueLabel);
+            _mv.visitInsn(ICONST_1);
+            _mv.visitLabel(endLabel);
+            return;
+        }
+
         // Determine result operand type for instruction selection
         Class<?> operandType = type;
         if (type == Object.class) operandType = node.getOperator().getLeftType();
@@ -707,8 +741,6 @@ public class Emitter {
             case BitwiseXor -> _mv.visitInsn(IXOR);
             case LeftShift -> _mv.visitInsn(ISHL);
             case RightShift -> _mv.visitInsn(ISHR);
-            case LogicalAnd -> _mv.visitInsn(IAND);
-            case LogicalOr -> _mv.visitInsn(IOR);
             default -> throw new UnsupportedOperationException("Cannot emit binary operator: " + node.getOperator().getType());
         }
     }
