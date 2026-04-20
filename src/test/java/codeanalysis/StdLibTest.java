@@ -99,9 +99,11 @@ class StdLibTest {
                         for (var entry : module.getFunctionBodies().entrySet()) {
                             loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
                         }
-                        codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(
-                                new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>()),
-                                loweredBodies);
+                        codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
+                                ? module.getTopLevelBlock()
+                                : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
+                        codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
+                        depEmitter.setModuleClass(true);
                         byte[] depBytes = depEmitter.emit(module.getClassName());
                         return defineClass(name, depBytes, 0, depBytes.length);
                     }
@@ -147,7 +149,7 @@ class StdLibTest {
 
             // std/io (uses temp files)
             {"IoWriteRead", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"hello\")\nprintln(io.readFile(\"" + testFile + "\"))"},
-            {"IoFileExists", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"x\")\nprintln(toString(io.fileExists(\"" + testFile + "\")))"},
+            {"IoFileExists", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"x\")\nprintln(toString(io.exists(\"" + testFile + "\")))"},
             {"IoReadLines", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"a\\nb\\nc\")\nmut ls = io.readLines(\"" + testFile + "\")\nprintln(toString(len(ls)))"},
             {"IoAppend", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"first\")\nio.appendFile(\"" + testFile + "\", \"second\")\nprintln(io.readFile(\"" + testFile + "\"))"},
 

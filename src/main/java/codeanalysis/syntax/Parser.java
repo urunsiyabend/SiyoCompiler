@@ -880,8 +880,14 @@ public class Parser {
                 } else {
                     expr = memberAccess;
                 }
-            } else if (current().getType() == SyntaxType.OpenParenthesisToken) {
-                // expr() — call expression result as a closure (e.g. tests[i]())
+            } else if (current().getType() == SyntaxType.OpenParenthesisToken
+                    && (expr instanceof IndexExpressionSyntax
+                        || expr instanceof PostfixCallExpressionSyntax
+                        || expr instanceof MemberCallExpressionSyntax
+                        || expr instanceof CallExpressionSyntax)) {
+                // expr() — call the result of an index/call expression as a closure.
+                // Restricted to these expression shapes so `mut a = 0\n(expr)`
+                // still parses as two statements (0 isn't callable).
                 SyntaxToken openParen = match(SyntaxType.OpenParenthesisToken);
                 SeparatedSyntaxList<ExpressionSyntax> arguments = parseArguments();
                 SyntaxToken closeParen = match(SyntaxType.CloseParenthesisToken);
