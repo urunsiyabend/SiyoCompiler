@@ -29,20 +29,25 @@ public class SiyoProject {
     }
 
     /**
-     * Try to load a project from the given directory (looks for siyo.toml).
-     * Returns null if no siyo.toml found.
+     * Try to load a project by searching from the given directory upward for siyo.toml.
+     * Returns null if no siyo.toml found in this directory or any ancestor.
      */
     public static SiyoProject load(Path directory) {
-        Path tomlPath = directory.resolve("siyo.toml");
-        if (!Files.exists(tomlPath)) return null;
-
-        try {
-            TomlParser config = TomlParser.parse(tomlPath);
-            return new SiyoProject(directory, config);
-        } catch (Exception e) {
-            System.err.println("Error reading siyo.toml: " + e.getMessage());
-            return null;
+        Path dir = directory.toAbsolutePath().normalize();
+        while (dir != null) {
+            Path tomlPath = dir.resolve("siyo.toml");
+            if (Files.exists(tomlPath)) {
+                try {
+                    TomlParser config = TomlParser.parse(tomlPath);
+                    return new SiyoProject(dir, config);
+                } catch (Exception e) {
+                    System.err.println("Error reading siyo.toml: " + e.getMessage());
+                    return null;
+                }
+            }
+            dir = dir.getParent();
         }
+        return null;
     }
 
     /**

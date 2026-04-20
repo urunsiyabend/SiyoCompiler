@@ -110,26 +110,44 @@ public class Main {
             SiyoProject.setCurrent(project);
         }
 
-        // Find test file
-        String path;
         if (testFile != null) {
-            path = testFile;
-        } else {
-            // Default: src/test.siyo
-            java.nio.file.Path defaultTest = cwd.resolve("src").resolve("test.siyo");
-            if (!java.nio.file.Files.exists(defaultTest)) {
-                System.err.println("Error: no test file found. Use: siyoc test <file> or create src/test.siyo");
+            if (!java.nio.file.Files.exists(java.nio.file.Paths.get(testFile))) {
+                System.err.println("Error: test file not found: " + testFile);
                 System.exit(1);
             }
-            path = defaultTest.toString();
+            compileAndRun(testFile);
+            return;
         }
 
-        if (!java.nio.file.Files.exists(java.nio.file.Paths.get(path))) {
-            System.err.println("Error: test file not found: " + path);
+        // Auto-discovery: src/test.siyo has priority, then tests/*_test.siyo
+        java.nio.file.Path defaultTest = cwd.resolve("src").resolve("test.siyo");
+        if (java.nio.file.Files.exists(defaultTest)) {
+            compileAndRun(defaultTest.toString());
+            return;
+        }
+
+        java.util.List<java.nio.file.Path> discovered = new java.util.ArrayList<>();
+        java.nio.file.Path testsDir = cwd.resolve("tests");
+        if (java.nio.file.Files.isDirectory(testsDir)) {
+            try (var stream = java.nio.file.Files.walk(testsDir)) {
+                stream.filter(p -> java.nio.file.Files.isRegularFile(p))
+                      .filter(p -> p.getFileName().toString().endsWith("_test.siyo"))
+                      .sorted()
+                      .forEach(discovered::add);
+            } catch (Exception e) {
+                System.err.println("Error scanning tests/: " + e.getMessage());
+                System.exit(1);
+            }
+        }
+
+        if (discovered.isEmpty()) {
+            System.err.println("Error: no test files found. Use: siyoc test <file>, create src/test.siyo, or add tests/*_test.siyo");
             System.exit(1);
         }
 
-        compileAndRun(path);
+        for (java.nio.file.Path p : discovered) {
+            compileAndRun(p.toString());
+        }
     }
 
     private static void runProject() {
