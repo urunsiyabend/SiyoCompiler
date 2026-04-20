@@ -1,6 +1,7 @@
 // Simple persistent Key-Value Store using std/io and std/json
 import "std/io"
 import "std/json"
+import java "java.io.File"
 
 // Use parallel arrays for keys/values
 mut storeKeys = [""]
@@ -65,48 +66,49 @@ fn kvPrint() {
     }
 }
 
-// Test
-println("=== Key-Value Store ===")
+fn main() {
+    // Test
+    println("=== Key-Value Store ===")
 
-kvSet("name", "Siyo")
-kvSet("version", "0.1.0")
-kvSet("language", "compiled")
-kvSet("target", "JVM")
-kvPrint()
+    kvSet("name", "Siyo")
+    kvSet("version", "0.1.0")
+    kvSet("language", "compiled")
+    kvSet("target", "JVM")
+    kvPrint()
 
-println("")
-mut val1 = kvGet("name")
-println("GET name: $val1")
-mut val2 = kvGet("missing")
-println("GET missing: $val2")
+    println("")
+    mut val1 = kvGet("name")
+    println("GET name: $val1")
+    mut val2 = kvGet("missing")
+    println("GET missing: $val2")
 
-// Update
-kvSet("version", "0.1.1")
-println("After update version:")
-mut val3 = kvGet("version")
-println("GET version: $val3")
+    // Update
+    kvSet("version", "0.1.1")
+    println("After update version:")
+    mut val3 = kvGet("version")
+    println("GET version: $val3")
 
-// Delete
-kvDelete("language")
-println("")
-println("After delete language:")
-kvPrint()
+    // Delete
+    kvDelete("language")
+    println("")
+    println("After delete language:")
+    kvPrint()
 
-// Save and verify
-kvSave()
-println("")
-println("Saved to $storeFile")
+    // Save and verify
+    kvSave()
+    println("")
+    println("Saved to $storeFile")
 
-mut content = io.readFile(storeFile)
-println("File contents:")
-println("  " + content)
+    mut content = io.readFile(storeFile)
+    println("File contents:")
+    println("  " + content)
 
-// Parse back
-mut parsed = json.parse(content)
-mut parsedName = toString(parsed.get("name"))
-println("Parsed name: $parsedName")
+    // Parse back
+    mut parsed = json.parse(content)
+    mut parsedName = toString(parsed.get("name"))
+    println("Parsed name: $parsedName")
 
-// Cleanup
-import java "java.io.File"
-File.new(storeFile).delete()
-println("Cleaned up.")
+    // Cleanup
+    File.new(storeFile).delete()
+    println("Cleaned up.")
+}

@@ -255,70 +255,72 @@ fn handleRequest(method: string, path: string, body: string) -> string {
 
 // ========== Main Server ==========
 
-println("=== Task Orchestrator ===")
-dbInit()
+fn main() {
+    println("=== Task Orchestrator ===")
+    dbInit()
 
-mut server = ServerSocket.new(5000)
-println("Listening on http://localhost:5000")
-println("")
-println("Endpoints:")
-println("  POST /tasks           — create task (body: {\"name\": \"...\"})")
-println("  GET  /tasks           — list all tasks")
-println("  POST /tasks/{id}/run  — mark as running")
-println("  POST /tasks/{id}/done — mark as done")
-println("  POST /tasks/{id}/fail — mark as failed")
-println("")
+    mut server = ServerSocket.new(5000)
+    println("Listening on http://localhost:5000")
+    println("")
+    println("Endpoints:")
+    println("  POST /tasks           — create task (body: {\"name\": \"...\"})")
+    println("  GET  /tasks           — list all tasks")
+    println("  POST /tasks/{id}/run  — mark as running")
+    println("  POST /tasks/{id}/done — mark as done")
+    println("  POST /tasks/{id}/fail — mark as failed")
+    println("")
 
-while true {
-    mut socket = server.accept()
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    while true {
+        mut socket = server.accept()
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
 
-    // Read request line
-    mut requestLine = reader.readLine()
-    if requestLine == null {
-        socket.close()
-        continue
-    }
+        // Read request line
+        mut requestLine = reader.readLine()
+        if requestLine == null {
+            socket.close()
+            continue
+        }
 
-    mut method = parseMethod(requestLine)
-    mut path = parsePath(requestLine)
+        mut method = parseMethod(requestLine)
+        mut path = parsePath(requestLine)
 
-    // Read headers
-    mut contentLength = 0
-    mut header = reader.readLine()
-    while header != null {
-        if len(header) == 0 { break }
-        if contains(header, "Content-Length") {
-            mut clValue = ""
-            mut afterColon = false
-            for mut i = 0 i < len(header) i = i + 1 {
-                mut ch = substring(header, i, i + 1)
-                if afterColon {
-                    if ch != " " { clValue = clValue + ch }
+        // Read headers
+        mut contentLength = 0
+        mut header = reader.readLine()
+        while header != null {
+            if len(header) == 0 { break }
+            if contains(header, "Content-Length") {
+                mut clValue = ""
+                mut afterColon = false
+                for mut i = 0 i < len(header) i = i + 1 {
+                    mut ch = substring(header, i, i + 1)
+                    if afterColon {
+                        if ch != " " { clValue = clValue + ch }
+                    }
+                    if ch == ":" { afterColon = true }
                 }
-                if ch == ":" { afterColon = true }
+                if clValue != "" { contentLength = parseInt(clValue) }
             }
-            if clValue != "" { contentLength = parseInt(clValue) }
+            header = reader.readLine()
         }
-        header = reader.readLine()
-    }
 
-    // Read body
-    mut body = ""
-    if contentLength > 0 {
-        for mut i = 0 i < contentLength i = i + 1 {
-            body = body + chr(reader.read())
+        // Read body
+        mut body = ""
+        if contentLength > 0 {
+            for mut i = 0 i < contentLength i = i + 1 {
+                body = body + chr(reader.read())
+            }
         }
+
+        // Handle request
+        mut response = handleRequest(method, path, body)
+
+        // Send response
+        mut out = socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        socket.close()
+
+        println(method + " " + path + " -> " + toString(len(response)) + " bytes")
     }
-
-    // Handle request
-    mut response = handleRequest(method, path, body)
-
-    // Send response
-    mut out = socket.getOutputStream()
-    out.write(response.getBytes())
-    out.flush()
-    socket.close()
-
-    println(method + " " + path + " -> " + toString(len(response)) + " bytes")
 }

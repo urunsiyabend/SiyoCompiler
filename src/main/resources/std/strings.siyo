@@ -1,57 +1,82 @@
-{
-    import java "java.lang.StringBuilder"
+import java "java.lang.StringBuilder"
 
-    fn builder() -> object {
-        return StringBuilder.new()
-    }
+fn builder() -> object {
+    return StringBuilder.new()
+}
 
-    fn lines(s: string) -> string[] {
-        return split(s, "\n")
-    }
+fn lines(s: string) -> string[] {
+    return split(s, "\n")
+}
 
-    fn join(arr: string[], sep: string) -> string {
-        mut result = ""
-        for mut i = 0 i < len(arr) i = i + 1 {
-            if i > 0 {
-                result = result + sep
-            }
-            result = result + arr[i]
+fn join(arr: string[], sep: string) -> string {
+    mut result = ""
+    for mut i = 0 i < len(arr) i = i + 1 {
+        if i > 0 {
+            result = result + sep
         }
-        return result
+        result = result + arr[i]
     }
+    return result
+}
 
-    fn repeat(s: string, n: int) -> string {
-        mut result = ""
-        for mut i = 0 i < n i = i + 1 {
-            result = result + s
-        }
-        return result
+fn repeat(s: string, n: int) -> string {
+    mut result = ""
+    for mut i = 0 i < n i = i + 1 {
+        result = result + s
     }
+    return result
+}
 
-    fn padLeft(s: string, width: int, ch: string) -> string {
-        mut result = s
-        while len(result) < width {
-            result = ch + result
-        }
-        return result
+fn padLeft(s: string, width: int, ch: string) -> string {
+    mut result = s
+    while len(result) < width {
+        result = ch + result
     }
+    return result
+}
 
-    fn padRight(s: string, width: int, ch: string) -> string {
-        mut result = s
-        while len(result) < width {
-            result = result + ch
-        }
-        return result
+fn padRight(s: string, width: int, ch: string) -> string {
+    mut result = s
+    while len(result) < width {
+        result = result + ch
     }
+    return result
+}
 
-    fn chars(s: string) -> string[] {
-        mut result = [""]
-        mut actual = [""]
-        for mut i = 0 i < len(s) i = i + 1 {
-            push(actual, substring(s, i, i + 1))
-        }
-        // Remove initial empty element
-        removeAt(actual, 0)
-        return actual
+fn chars(s: string) -> string[] {
+    mut result = [""]
+    mut actual = [""]
+    for mut i = 0 i < len(s) i = i + 1 {
+        push(actual, substring(s, i, i + 1))
     }
+    removeAt(actual, 0)
+    return actual
+}
+
+fn trimStart(s: string) -> string {
+    mut i = 0
+    while i < len(s) && (substring(s, i, i + 1) == " " || substring(s, i, i + 1) == "\t" || substring(s, i, i + 1) == "\n" || substring(s, i, i + 1) == "\r") {
+        i = i + 1
+    }
+    return substring(s, i, len(s))
+}
+
+fn trimEnd(s: string) -> string {
+    mut i = len(s) - 1
+    while i >= 0 && (substring(s, i, i + 1) == " " || substring(s, i, i + 1) == "\t" || substring(s, i, i + 1) == "\n" || substring(s, i, i + 1) == "\r") {
+        i = i - 1
+    }
+    return substring(s, 0, i + 1)
+}
+
+// Returns the index of the last occurrence of needle in s, or -1 if not found.
+fn lastIndexOf(s: string, needle: string) -> int {
+    mut result = -1
+    mut nlen = len(needle)
+    for mut i = 0 i <= len(s) - nlen i = i + 1 {
+        if substring(s, i, i + nlen) == needle {
+            result = i
+        }
+    }
+    return result
 }

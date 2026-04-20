@@ -1,25 +1,25 @@
-{
 import "math"
 import "strings"
 
 // math.abs and strings functions should NOT conflict with builtins
 // Each is accessed via module prefix only
 
-// Built-in len works normally
-mut helloLen = len("hello")
-println("builtin len: $helloLen")
+fn main() {
+    // Built-in len works normally
+    mut helloLen = len("hello")
+    println("builtin len: $helloLen")
 
-// Module functions accessed via prefix
-mut absVal = math.abs(-5)
-println("math.abs(-5): $absVal")
-mut cmpVal = strings.contains(10, 5)
-println("strings.contains(10, 5): $cmpVal")
-mut repVal = strings.repeat("ha", 3)
-println("strings.repeat: $repVal")
+    // Module functions accessed via prefix
+    mut absVal = math.abs(-5)
+    println("math.abs(-5): $absVal")
+    mut cmpVal = strings.contains(10, 5)
+    println("strings.contains(10, 5): $cmpVal")
+    mut repVal = strings.repeat("ha", 3)
+    println("strings.repeat: $repVal")
 
-// math.max and math.min
-mut maxVal = math.max(3, 7)
-println("math.max(3, 7): $maxVal")
-mut gcdVal = math.gcd(15, 10)
-println("math.gcd(15, 10): $gcdVal")
+    // math.max and math.min
+    mut maxVal = math.max(3, 7)
+    println("math.max(3, 7): $maxVal")
+    mut gcdVal = math.gcd(15, 10)
+    println("math.gcd(15, 10): $gcdVal")
 }

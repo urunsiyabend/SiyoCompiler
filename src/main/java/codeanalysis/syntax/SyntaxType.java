@@ -315,6 +315,8 @@ public enum SyntaxType {
 
     /* Represents a member call expression (module.func(args)). */
     MemberCallExpression,
+    /* Represents a postfix call on an arbitrary expression: expr(args). */
+    PostfixCallExpression,
     CastExpression,
 
     /* Represents a Java import statement (import java "class.name"). */

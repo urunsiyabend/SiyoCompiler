@@ -1,46 +1,80 @@
-{
-    fn assert(condition: bool, msg: string) {
-        if !condition {
-            println("  FAIL: " + msg)
-            error("assertion failed: " + msg)
-        }
-    }
+mut _beforeHook = fn() {}
+mut _afterHook = fn() {}
 
-    fn assertEqual(actual: string, expected: string, msg: string) {
-        if actual != expected {
-            mut detail = msg + " — expected " + expected + ", got " + actual
+fn assert(condition: bool, msg: string) {
+    if !condition {
+        println("  FAIL: " + msg)
+        error("assertion failed: " + msg)
+    }
+}
+
+fn assertEqual(actual: string, expected: string, msg: string) {
+    if actual != expected {
+        mut detail = msg + " — expected " + expected + ", got " + actual
+        println("  FAIL: " + detail)
+        error("assertion failed: " + detail)
+    }
+}
+
+fn assertEq(actual: string, expected: string, msg: string) {
+    assertEqual(actual, expected, msg)
+}
+
+fn assertThrows(body: fn(), expectedMsgSubstring: string) {
+    mut thrown = false
+    try {
+        body()
+    } catch e {
+        thrown = true
+        if !contains(e, expectedMsgSubstring) {
+            mut detail = "expected message containing \"" + expectedMsgSubstring + "\", got: " + e
             println("  FAIL: " + detail)
             error("assertion failed: " + detail)
         }
     }
+    if !thrown {
+        println("  FAIL: expected exception but none was thrown")
+        error("assertion failed: expected exception but none was thrown")
+    }
+}
 
-    fn test(name: string, body: fn() -> bool) {
+fn beforeEach(body: fn()) {
+    _beforeHook = body
+}
+
+fn afterEach(body: fn()) {
+    _afterHook = body
+}
+
+fn test(name: string, body: fn() -> bool) {
+    try {
+        mut ok = body()
+        if ok {
+            println("  PASS: " + name)
+        } else {
+            println("  FAIL: " + name)
+        }
+    } catch e {
+        println("  FAIL: " + name + " — " + e)
+    }
+}
+
+fn run(name: string, tests: fn()[]) {
+    println("=== " + name + " ===")
+    mut passed = 0
+    mut failed = 0
+    for mut i = 0 i < len(tests) i = i + 1 {
         try {
-            mut ok = body()
-            if ok {
-                println("  PASS: " + name)
-            } else {
-                println("  FAIL: " + name)
-            }
+            _beforeHook()
+            tests[i]()
+            _afterHook()
+            passed += 1
         } catch e {
-            println("  FAIL: " + name + " — " + e)
+            _afterHook()
+            failed += 1
         }
     }
-
-    fn run(name: string, tests: fn()[]) {
-        println("=== " + name + " ===")
-        mut passed = 0
-        mut failed = 0
-        for mut i = 0 i < len(tests) i = i + 1 {
-            try {
-                tests[i]()
-                passed += 1
-            } catch e {
-                failed += 1
-            }
-        }
-        mut total = passed + failed
-        println("")
-        println(toString(passed) + " passed, " + toString(failed) + " failed, " + toString(total) + " total")
-    }
+    mut total = passed + failed
+    println("")
+    println(toString(passed) + " passed, " + toString(failed) + " failed, " + toString(total) + " total")
 }

@@ -1,46 +1,48 @@
 // JSON Parser — uses std/json for parse/stringify
 import "std/json"
 
-println("=== JSON Parser ===")
-println("")
+fn main() {
+    println("=== JSON Parser ===")
+    println("")
 
-// Parse a JSON string into a map
-// Note: use chr(123)/chr(125) for literal braces since { } triggers interpolation
-mut ob = chr(123)
-mut cb = chr(125)
-mut q = chr(34)
+    // Parse a JSON string into a map
+    // Note: use chr(123)/chr(125) for literal braces since { } triggers interpolation
+    mut ob = chr(123)
+    mut cb = chr(125)
+    mut q = chr(34)
 
-mut input1 = ob + q + "name" + q + ": " + q + "Siyo" + q + ", " + q + "version" + q + ": 1, " + q + "compiled" + q + ": true" + cb
-println("Input: " + input1)
-println("Parsed:")
-mut obj1 = json.parse(input1)
-mut name1 = toString(obj1.get("name"))
-mut ver1 = toString(obj1.get("version"))
-mut comp1 = toString(obj1.get("compiled"))
-println("  name: $name1")
-println("  version: $ver1")
-println("  compiled: $comp1")
+    mut input1 = ob + q + "name" + q + ": " + q + "Siyo" + q + ", " + q + "version" + q + ": 1, " + q + "compiled" + q + ": true" + cb
+    println("Input: " + input1)
+    println("Parsed:")
+    mut obj1 = json.parse(input1)
+    mut name1 = toString(obj1.get("name"))
+    mut ver1 = toString(obj1.get("version"))
+    mut comp1 = toString(obj1.get("compiled"))
+    println("  name: $name1")
+    println("  version: $ver1")
+    println("  compiled: $comp1")
 
-println("")
+    println("")
 
-// Build an object and stringify it
-mut obj2 = map()
-obj2.set("host", "localhost")
-obj2.set("port", 8080)
-obj2.set("debug", false)
-mut out2 = json.stringify(obj2)
-println("Stringified:")
-println("  " + out2)
+    // Build an object and stringify it
+    mut obj2 = map()
+    obj2.set("host", "localhost")
+    obj2.set("port", 8080)
+    obj2.set("debug", false)
+    mut out2 = json.stringify(obj2)
+    println("Stringified:")
+    println("  " + out2)
 
-println("")
+    println("")
 
-// Round-trip: parse then stringify
-mut input3 = ob + q + "lang" + q + ": " + q + "siyo" + q + ", " + q + "fast" + q + ": true" + cb
-mut obj3 = json.parse(input3)
-mut out3 = json.stringify(obj3)
-println("Round-trip:")
-println("  Input:  " + input3)
-println("  Output: " + out3)
+    // Round-trip: parse then stringify
+    mut input3 = ob + q + "lang" + q + ": " + q + "siyo" + q + ", " + q + "fast" + q + ": true" + cb
+    mut obj3 = json.parse(input3)
+    mut out3 = json.stringify(obj3)
+    println("Round-trip:")
+    println("  Input:  " + input3)
+    println("  Output: " + out3)
 
-println("")
-println("=== Done ===")
+    println("")
+    println("=== Done ===")
+}

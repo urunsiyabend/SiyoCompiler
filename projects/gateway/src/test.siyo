@@ -1,4 +1,3 @@
-{
 // Gateway tests — route matching and path prefix extraction
 import "std/testing"
 
@@ -27,71 +26,72 @@ fn extractSuffix(path: string, routeMap: map) -> string {
     path
 }
 
-// ========== Test Setup ==========
-
-mut routes = map()
-routes.set("/api/users", "http://localhost:3000")
-routes.set("/api/todos", "http://localhost:3001")
-routes.set("/api/chat",  "http://localhost:3002")
-
 // ========== Tests ==========
 
-println("=== Gateway Route Tests ===")
+fn main() {
+    // ========== Test Setup ==========
 
-// Test: matchRoute finds /api/users backend
-println("--- test: matchRoute finds /api/users backend")
-mut r1 = matchRoute("/api/users", routes)
-testing.assertEqual(r1, "http://localhost:3000", "users route")
-println("  PASS: matchRoute finds /api/users backend")
+    mut routes = map()
+    routes.set("/api/users", "http://localhost:3000")
+    routes.set("/api/todos", "http://localhost:3001")
+    routes.set("/api/chat",  "http://localhost:3002")
 
-// Test: matchRoute finds /api/todos backend
-println("--- test: matchRoute finds /api/todos backend")
-mut r2 = matchRoute("/api/todos", routes)
-testing.assertEqual(r2, "http://localhost:3001", "todos route")
-println("  PASS: matchRoute finds /api/todos backend")
+    println("=== Gateway Route Tests ===")
 
-// Test: matchRoute finds /api/chat backend
-println("--- test: matchRoute finds /api/chat backend")
-mut r3 = matchRoute("/api/chat/messages", routes)
-testing.assertEqual(r3, "http://localhost:3002", "chat route with subpath")
-println("  PASS: matchRoute finds /api/chat backend")
+    // Test: matchRoute finds /api/users backend
+    println("--- test: matchRoute finds /api/users backend")
+    mut r1 = matchRoute("/api/users", routes)
+    testing.assertEqual(r1, "http://localhost:3000", "users route")
+    println("  PASS: matchRoute finds /api/users backend")
 
-// Test: matchRoute returns empty for unknown path
-println("--- test: matchRoute returns empty for unknown path")
-mut r4 = matchRoute("/unknown/path", routes)
-testing.assertEqual(r4, "", "unknown path returns empty")
-println("  PASS: matchRoute returns empty for unknown path")
+    // Test: matchRoute finds /api/todos backend
+    println("--- test: matchRoute finds /api/todos backend")
+    mut r2 = matchRoute("/api/todos", routes)
+    testing.assertEqual(r2, "http://localhost:3001", "todos route")
+    println("  PASS: matchRoute finds /api/todos backend")
 
-// Test: matchRoute returns empty for root path
-println("--- test: matchRoute returns empty for root path")
-mut r5 = matchRoute("/", routes)
-testing.assertEqual(r5, "", "root path returns empty")
-println("  PASS: matchRoute returns empty for root path")
+    // Test: matchRoute finds /api/chat backend
+    println("--- test: matchRoute finds /api/chat backend")
+    mut r3 = matchRoute("/api/chat/messages", routes)
+    testing.assertEqual(r3, "http://localhost:3002", "chat route with subpath")
+    println("  PASS: matchRoute finds /api/chat backend")
 
-// Test: extractSuffix gets subpath from /api/users/123
-println("--- test: extractSuffix gets subpath from /api/users/123")
-mut s1 = extractSuffix("/api/users/123", routes)
-testing.assertEqual(s1, "/123", "suffix after /api/users")
-println("  PASS: extractSuffix gets subpath from /api/users/123")
+    // Test: matchRoute returns empty for unknown path
+    println("--- test: matchRoute returns empty for unknown path")
+    mut r4 = matchRoute("/unknown/path", routes)
+    testing.assertEqual(r4, "", "unknown path returns empty")
+    println("  PASS: matchRoute returns empty for unknown path")
 
-// Test: extractSuffix gets empty for exact prefix
-println("--- test: extractSuffix gets empty for exact prefix")
-mut s2 = extractSuffix("/api/users", routes)
-testing.assertEqual(s2, "", "no suffix for exact match")
-println("  PASS: extractSuffix gets empty for exact prefix")
+    // Test: matchRoute returns empty for root path
+    println("--- test: matchRoute returns empty for root path")
+    mut r5 = matchRoute("/", routes)
+    testing.assertEqual(r5, "", "root path returns empty")
+    println("  PASS: matchRoute returns empty for root path")
 
-// Test: extractSuffix gets nested subpath
-println("--- test: extractSuffix gets nested subpath")
-mut s3 = extractSuffix("/api/todos/42/items", routes)
-testing.assertEqual(s3, "/42/items", "nested suffix after /api/todos")
-println("  PASS: extractSuffix gets nested subpath")
+    // Test: extractSuffix gets subpath from /api/users/123
+    println("--- test: extractSuffix gets subpath from /api/users/123")
+    mut s1 = extractSuffix("/api/users/123", routes)
+    testing.assertEqual(s1, "/123", "suffix after /api/users")
+    println("  PASS: extractSuffix gets subpath from /api/users/123")
 
-// Test: extractSuffix returns full path for unmatched route
-println("--- test: extractSuffix returns full path for unmatched route")
-mut s4 = extractSuffix("/other/path", routes)
-testing.assertEqual(s4, "/other/path", "unmatched returns full path")
-println("  PASS: extractSuffix returns full path for unmatched route")
+    // Test: extractSuffix gets empty for exact prefix
+    println("--- test: extractSuffix gets empty for exact prefix")
+    mut s2 = extractSuffix("/api/users", routes)
+    testing.assertEqual(s2, "", "no suffix for exact match")
+    println("  PASS: extractSuffix gets empty for exact prefix")
 
-println("")
-println("All gateway tests complete.")
+    // Test: extractSuffix gets nested subpath
+    println("--- test: extractSuffix gets nested subpath")
+    mut s3 = extractSuffix("/api/todos/42/items", routes)
+    testing.assertEqual(s3, "/42/items", "nested suffix after /api/todos")
+    println("  PASS: extractSuffix gets nested subpath")
+
+    // Test: extractSuffix returns full path for unmatched route
+    println("--- test: extractSuffix returns full path for unmatched route")
+    mut s4 = extractSuffix("/other/path", routes)
+    testing.assertEqual(s4, "/other/path", "unmatched returns full path")
+    println("  PASS: extractSuffix returns full path for unmatched route")
+
+    println("")
+    println("All gateway tests complete.")
 }

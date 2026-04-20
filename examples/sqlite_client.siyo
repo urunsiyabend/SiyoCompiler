@@ -2,51 +2,53 @@
 // Run: siyoc -cp lib/sqlite-jdbc.jar run examples/sqlite_client.siyo
 import java "org.sqlite.JDBC"
 import java "java.sql.DriverManager"
-
-println("=== SQLite Client ===")
-
-mut conn = DriverManager.getConnection("jdbc:sqlite:test.db")
-mut stmt = conn.createStatement()
-
-// Create table
-stmt.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, city TEXT)")
-println("Table created.")
-
-// Insert data
-stmt.execute("INSERT INTO users VALUES (1, 'Alice', 28, 'Istanbul')")
-stmt.execute("INSERT INTO users VALUES (2, 'Bob', 32, 'Ankara')")
-stmt.execute("INSERT INTO users VALUES (3, 'Charlie', 25, 'Izmir')")
-stmt.execute("INSERT INTO users VALUES (4, 'Diana', 30, 'Bursa')")
-println("4 rows inserted.")
-
-// Query
-println("")
-println("All users:")
-mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY name")
-while rs.next() {
-    println("  ${rs.getInt("id")} | ${rs.getString("name")} | ${rs.getInt("age")} | ${rs.getString("city")}")
-}
-
-// Aggregate
-println("")
-mut rs2 = stmt.executeQuery("SELECT COUNT(*) as cnt, AVG(age) as avg_age FROM users")
-rs2.next()
-println("Count: ${rs2.getInt("cnt")}")
-println("Avg age: ${rs2.getDouble("avg_age")}")
-
-// Update
-stmt.execute("UPDATE users SET age = 29 WHERE name = 'Alice'")
-println("")
-println("After update Alice's age:")
-mut rs3 = stmt.executeQuery("SELECT name, age FROM users WHERE name = 'Alice'")
-rs3.next()
-println("  ${rs3.getString("name")} age=${rs3.getInt("age")}")
-
-// Cleanup
-stmt.close()
-conn.close()
-
 import java "java.io.File"
-File.new("test.db").delete()
-println("")
-println("Database cleaned up.")
+
+fn main() {
+    println("=== SQLite Client ===")
+
+    mut conn = DriverManager.getConnection("jdbc:sqlite:test.db")
+    mut stmt = conn.createStatement()
+
+    // Create table
+    stmt.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, city TEXT)")
+    println("Table created.")
+
+    // Insert data
+    stmt.execute("INSERT INTO users VALUES (1, 'Alice', 28, 'Istanbul')")
+    stmt.execute("INSERT INTO users VALUES (2, 'Bob', 32, 'Ankara')")
+    stmt.execute("INSERT INTO users VALUES (3, 'Charlie', 25, 'Izmir')")
+    stmt.execute("INSERT INTO users VALUES (4, 'Diana', 30, 'Bursa')")
+    println("4 rows inserted.")
+
+    // Query
+    println("")
+    println("All users:")
+    mut rs = stmt.executeQuery("SELECT * FROM users ORDER BY name")
+    while rs.next() {
+        println("  ${rs.getInt("id")} | ${rs.getString("name")} | ${rs.getInt("age")} | ${rs.getString("city")}")
+    }
+
+    // Aggregate
+    println("")
+    mut rs2 = stmt.executeQuery("SELECT COUNT(*) as cnt, AVG(age) as avg_age FROM users")
+    rs2.next()
+    println("Count: ${rs2.getInt("cnt")}")
+    println("Avg age: ${rs2.getDouble("avg_age")}")
+
+    // Update
+    stmt.execute("UPDATE users SET age = 29 WHERE name = 'Alice'")
+    println("")
+    println("After update Alice's age:")
+    mut rs3 = stmt.executeQuery("SELECT name, age FROM users WHERE name = 'Alice'")
+    rs3.next()
+    println("  ${rs3.getString("name")} age=${rs3.getInt("age")}")
+
+    // Cleanup
+    stmt.close()
+    conn.close()
+
+    File.new("test.db").delete()
+    println("")
+    println("Database cleaned up.")
+}

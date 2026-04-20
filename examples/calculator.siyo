@@ -1,118 +1,118 @@
-{
-    // Simple expression evaluator for "3 + 4 * 2"
-    // Supports: +, -, *, / with proper precedence
+// Simple expression evaluator for "3 + 4 * 2"
+// Supports: +, -, *, / with proper precedence
 
-    fn isDigit(c: string) -> bool {
-        return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
-               c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+fn isDigit(c: string) -> bool {
+    return c == "0" || c == "1" || c == "2" || c == "3" || c == "4" ||
+           c == "5" || c == "6" || c == "7" || c == "8" || c == "9"
+}
+
+fn charToDigit(c: string) -> int {
+    match c {
+        "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
+        "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
+        _ => -1
     }
+}
 
-    fn charToDigit(c: string) -> int {
-        match c {
-            "0" => 0, "1" => 1, "2" => 2, "3" => 3, "4" => 4,
-            "5" => 5, "6" => 6, "7" => 7, "8" => 8, "9" => 9,
-            _ => -1
+// Parse a number from string starting at position pos
+// Returns: number value (updates pos via array trick)
+fn parseNumber(expr: string, pos: int[], idx: int) -> int {
+    mut result = 0
+    while pos[idx] < len(expr) {
+        mut c = expr[pos[idx]]
+        if isDigit(c) {
+            result = result * 10 + charToDigit(c)
+            pos[idx] = pos[idx] + 1
+        } else {
+            break
         }
     }
+    return result
+}
 
-    // Parse a number from string starting at position pos
-    // Returns: number value (updates pos via array trick)
-    fn parseNumber(expr: string, pos: int[], idx: int) -> int {
-        mut result = 0
-        while pos[idx] < len(expr) {
-            mut c = expr[pos[idx]]
-            if isDigit(c) {
-                result = result * 10 + charToDigit(c)
-                pos[idx] = pos[idx] + 1
-            } else {
-                break
-            }
-        }
-        return result
-    }
-
-    fn skipSpaces(expr: string, pos: int[], idx: int) {
-        while pos[idx] < len(expr) {
-            if expr[pos[idx]] == " " {
-                pos[idx] = pos[idx] + 1
-            } else {
-                break
-            }
+fn skipSpaces(expr: string, pos: int[], idx: int) {
+    while pos[idx] < len(expr) {
+        if expr[pos[idx]] == " " {
+            pos[idx] = pos[idx] + 1
+        } else {
+            break
         }
     }
+}
 
-    // Evaluate expression with operator precedence
-    fn eval(expr: string) -> int {
-        // Tokenize into numbers and operators
-        mut numbers = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        mut ops = [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "]
-        mut numCount = 0
-        mut opCount = 0
-        mut pos = [0]
+// Evaluate expression with operator precedence
+fn eval(expr: string) -> int {
+    // Tokenize into numbers and operators
+    mut numbers = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    mut ops = [" ", " ", " ", " ", " ", " ", " ", " ", " ", " "]
+    mut numCount = 0
+    mut opCount = 0
+    mut pos = [0]
+
+    skipSpaces(expr, pos, 0)
+
+    // Parse first number
+    numbers[numCount] = parseNumber(expr, pos, 0)
+    numCount = numCount + 1
+
+    // Parse remaining: operator number pairs
+    while pos[0] < len(expr) {
+        skipSpaces(expr, pos, 0)
+        if pos[0] >= len(expr) break
+
+        mut op = expr[pos[0]]
+        pos[0] = pos[0] + 1
+        ops[opCount] = op
+        opCount = opCount + 1
 
         skipSpaces(expr, pos, 0)
-
-        // Parse first number
         numbers[numCount] = parseNumber(expr, pos, 0)
         numCount = numCount + 1
-
-        // Parse remaining: operator number pairs
-        while pos[0] < len(expr) {
-            skipSpaces(expr, pos, 0)
-            if pos[0] >= len(expr) break
-
-            mut op = expr[pos[0]]
-            pos[0] = pos[0] + 1
-            ops[opCount] = op
-            opCount = opCount + 1
-
-            skipSpaces(expr, pos, 0)
-            numbers[numCount] = parseNumber(expr, pos, 0)
-            numCount = numCount + 1
-        }
-
-        // First pass: handle * and /
-        mut i = 0
-        while i < opCount {
-            if ops[i] == "*" || ops[i] == "/" {
-                match ops[i] {
-                    "*" => { numbers[i] = numbers[i] * numbers[i + 1] },
-                    "/" => { numbers[i] = numbers[i] / numbers[i + 1] },
-                    _ => {}
-                }
-                // Shift remaining numbers and ops
-                mut j = i + 1
-                while j < numCount - 1 {
-                    numbers[j] = numbers[j + 1]
-                    j = j + 1
-                }
-                numCount = numCount - 1
-                j = i
-                while j < opCount - 1 {
-                    ops[j] = ops[j + 1]
-                    j = j + 1
-                }
-                opCount = opCount - 1
-            } else {
-                i = i + 1
-            }
-        }
-
-        // Second pass: handle + and -
-        mut result = numbers[0]
-        i = 0
-        while i < opCount {
-            match ops[i] {
-                "+" => { result = result + numbers[i + 1] },
-                "-" => { result = result - numbers[i + 1] },
-                _ => {}
-            }
-            i = i + 1
-        }
-
-        return result
     }
 
+    // First pass: handle * and /
+    mut i = 0
+    while i < opCount {
+        if ops[i] == "*" || ops[i] == "/" {
+            match ops[i] {
+                "*" => { numbers[i] = numbers[i] * numbers[i + 1] },
+                "/" => { numbers[i] = numbers[i] / numbers[i + 1] },
+                _ => {}
+            }
+            // Shift remaining numbers and ops
+            mut j = i + 1
+            while j < numCount - 1 {
+                numbers[j] = numbers[j + 1]
+                j = j + 1
+            }
+            numCount = numCount - 1
+            j = i
+            while j < opCount - 1 {
+                ops[j] = ops[j + 1]
+                j = j + 1
+            }
+            opCount = opCount - 1
+        } else {
+            i = i + 1
+        }
+    }
+
+    // Second pass: handle + and -
+    mut result = numbers[0]
+    i = 0
+    while i < opCount {
+        match ops[i] {
+            "+" => { result = result + numbers[i + 1] },
+            "-" => { result = result - numbers[i + 1] },
+            _ => {}
+        }
+        i = i + 1
+    }
+
+    return result
+}
+
+fn main() {
     // Test cases
     mut results = "3 + 4 = ${eval("3 + 4")}"
     results = results + "\n10 - 3 = ${eval("10 - 3")}"
@@ -120,5 +120,5 @@
     results = results + "\n10 * 2 + 5 = ${eval("10 * 2 + 5")}"
     results = results + "\n100 / 10 - 5 = ${eval("100 / 10 - 5")}"
     results = results + "\n2 * 3 + 4 * 5 = ${eval("2 * 3 + 4 * 5")}"
-    results
+    println(results)
 }

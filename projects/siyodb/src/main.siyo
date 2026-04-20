@@ -142,16 +142,18 @@ fn processCommand(input: string, store: object) -> string {
 
 // ========== Main ==========
 
-mut store = spawn Store.new()
-println("siyodb v0.1.0")
-println("Listening on port 6380...")
+fn main() {
+    mut store = spawn Store.new()
+    println("siyodb v0.1.0")
+    println("Listening on port 6380...")
 
-mut server = ServerSocket.new(6380)
+    mut server = ServerSocket.new(6380)
 
-while true {
-    mut client = server.accept()
-    println("Client connected")
-    spawn {
-        handleClient(client, store)
+    while true {
+        mut client = server.accept()
+        println("Client connected")
+        spawn {
+            handleClient(client, store)
+        }
     }
 }

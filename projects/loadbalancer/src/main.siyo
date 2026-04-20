@@ -168,82 +168,84 @@ fn statusPage() -> string {
 
 // ========== Server ==========
 
-println("=== Siyo Round-Robin Load Balancer ===")
-println("Listening on port 9000")
-println("Backends:")
-for i in range(0, len(backends)) {
-    println("  [${toString(i)}] ${backends[i]}")
-}
-println("")
-
-// Initial health check
-runHealthChecks()
-println("Healthy backends: ${toString(healthyCount())}/${toString(len(backends))}")
-println("")
-
-mut server = ServerSocket.new(9000)
-mut requestCount = 0
-
-while true {
-    mut socket = server.accept()
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
-
-    // Read request line
-    mut requestLine = reader.readLine()
-    if requestLine == null {
-        socket.close()
-        continue
+fn main() {
+    println("=== Siyo Round-Robin Load Balancer ===")
+    println("Listening on port 9000")
+    println("Backends:")
+    for i in range(0, len(backends)) {
+        println("  [${toString(i)}] ${backends[i]}")
     }
+    println("")
 
-    mut method = parseMethod(requestLine)
-    mut path = parsePath(requestLine)
+    // Initial health check
+    runHealthChecks()
+    println("Healthy backends: ${toString(healthyCount())}/${toString(len(backends))}")
+    println("")
 
-    // Read headers, extract Content-Length
-    mut contentLength = 0
-    mut header = reader.readLine()
-    while header != null {
-        if len(header) == 0 { break }
-        if contains(header, "Content-Length") {
-            mut parts = split(header, ":")
-            if len(parts) > 1 {
-                contentLength = parseInt(trim(parts[1]))
+    mut server = ServerSocket.new(9000)
+    mut requestCount = 0
+
+    while true {
+        mut socket = server.accept()
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+
+        // Read request line
+        mut requestLine = reader.readLine()
+        if requestLine == null {
+            socket.close()
+            continue
+        }
+
+        mut method = parseMethod(requestLine)
+        mut path = parsePath(requestLine)
+
+        // Read headers, extract Content-Length
+        mut contentLength = 0
+        mut header = reader.readLine()
+        while header != null {
+            if len(header) == 0 { break }
+            if contains(header, "Content-Length") {
+                mut parts = split(header, ":")
+                if len(parts) > 1 {
+                    contentLength = parseInt(trim(parts[1]))
+                }
+            }
+            header = reader.readLine()
+        }
+
+        // Read body
+        mut body = ""
+        if contentLength > 0 {
+            for i in range(0, contentLength) {
+                mut charCode = reader.read()
+                body = body + chr(charCode)
             }
         }
-        header = reader.readLine()
-    }
 
-    // Read body
-    mut body = ""
-    if contentLength > 0 {
-        for i in range(0, contentLength) {
-            mut charCode = reader.read()
-            body = body + chr(charCode)
+        requestCount = requestCount + 1
+
+        // Route: internal endpoints vs proxy
+        mut response = ""
+        if path == "/lb/status" {
+            response = statusPage()
+        } else if path == "/lb/health" {
+            runHealthChecks()
+            response = statusPage()
+        } else {
+            response = forwardRequest(method, path, body)
         }
-    }
 
-    requestCount = requestCount + 1
+        // Send response
+        mut out = socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        socket.close()
 
-    // Route: internal endpoints vs proxy
-    mut response = ""
-    if path == "/lb/status" {
-        response = statusPage()
-    } else if path == "/lb/health" {
-        runHealthChecks()
-        response = statusPage()
-    } else {
-        response = forwardRequest(method, path, body)
-    }
+        println("[req #${toString(requestCount)}] $method $path -> done")
 
-    // Send response
-    mut out = socket.getOutputStream()
-    out.write(response.getBytes())
-    out.flush()
-    socket.close()
-
-    println("[req #${toString(requestCount)}] $method $path -> done")
-
-    // Periodic health check every 10 requests
-    if requestCount % 10 == 0 {
-        runHealthChecks()
+        // Periodic health check every 10 requests
+        if requestCount % 10 == 0 {
+            runHealthChecks()
+        }
     }
 }

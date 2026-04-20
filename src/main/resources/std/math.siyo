@@ -1,34 +1,32 @@
-{
-    import java "java.lang.StrictMath"
+import java "java.lang.StrictMath"
 
-    fn abs(n: int) -> int {
-        if n < 0 { return -n }
-        return n
-    }
+fn abs(n: int) -> int {
+    if n < 0 { return -n }
+    return n
+}
 
-    fn min(a: int, b: int) -> int {
-        if a < b { return a }
-        return b
-    }
+fn min(a: int, b: int) -> int {
+    if a < b { return a }
+    return b
+}
 
-    fn max(a: int, b: int) -> int {
-        if a > b { return a }
-        return b
-    }
+fn max(a: int, b: int) -> int {
+    if a > b { return a }
+    return b
+}
 
-    fn pow(base: float, exp: float) -> float {
-        return StrictMath.pow(base, exp)
-    }
+fn pow(base: float, exp: float) -> float {
+    return StrictMath.pow(base, exp)
+}
 
-    fn sqrt(n: float) -> float {
-        return StrictMath.sqrt(n)
-    }
+fn sqrt(n: float) -> float {
+    return StrictMath.sqrt(n)
+}
 
-    fn floor(n: float) -> int {
-        return toInt(StrictMath.floor(n))
-    }
+fn floor(n: float) -> int {
+    return toInt(StrictMath.floor(n))
+}
 
-    fn ceil(n: float) -> int {
-        return toInt(StrictMath.ceil(n))
-    }
+fn ceil(n: float) -> int {
+    return toInt(StrictMath.ceil(n))
 }

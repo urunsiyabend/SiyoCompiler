@@ -5,49 +5,51 @@ import "std/json"
 
 // --- Use local variables only, no module-level state ---
 
-println("=== Todo API Tests ===")
+fn main() {
+    println("=== Todo API Tests ===")
 
-// Test: add todo
-println("--- test: add todo")
-mut todos = map()
-mut todo1 = map()
-todo1.set("id", 1)
-todo1.set("title", "Buy milk")
-todo1.set("done", false)
-todos.set("1", todo1)
-testing.assertEqual(toString(todo1.get("title")), "Buy milk", "title should be Buy milk")
-testing.assertEqual(toString(todo1.get("done")), "false", "done should be false")
-testing.assert(todos.has("1"), "todos should contain id 1")
-println("  PASS: add todo")
+    // Test: add todo
+    println("--- test: add todo")
+    mut todos = map()
+    mut todo1 = map()
+    todo1.set("id", 1)
+    todo1.set("title", "Buy milk")
+    todo1.set("done", false)
+    todos.set("1", todo1)
+    testing.assertEqual(toString(todo1.get("title")), "Buy milk", "title should be Buy milk")
+    testing.assertEqual(toString(todo1.get("done")), "false", "done should be false")
+    testing.assert(todos.has("1"), "todos should contain id 1")
+    println("  PASS: add todo")
 
-// Test: list todos
-println("--- test: list todos")
-mut todo2 = map()
-todo2.set("id", 2)
-todo2.set("title", "Walk the dog")
-todo2.set("done", false)
-todos.set("2", todo2)
-mut keys = todos.keys()
-mut result = "["
-for mut i = 0 i < len(keys) i = i + 1 {
-    if i > 0 { result = result + "," }
-    mut t = todos.get(keys[i])
-    result = result + json.stringify(t)
+    // Test: list todos
+    println("--- test: list todos")
+    mut todo2 = map()
+    todo2.set("id", 2)
+    todo2.set("title", "Walk the dog")
+    todo2.set("done", false)
+    todos.set("2", todo2)
+    mut keys = todos.keys()
+    mut result = "["
+    for mut i = 0 i < len(keys) i = i + 1 {
+        if i > 0 { result = result + "," }
+        mut t = todos.get(keys[i])
+        result = result + json.stringify(t)
+    }
+    result = result + "]"
+    testing.assert(contains(result, "Buy milk"), "list should contain Buy milk")
+    testing.assert(contains(result, "Walk the dog"), "list should contain Walk the dog")
+    testing.assert(todos.size() == 2, "should have 2 todos")
+    println("  PASS: list todos")
+
+    // Test: delete todo
+    println("--- test: delete todo")
+    todos.remove("1")
+    testing.assert(!todos.has("1"), "todo 1 should be removed")
+    testing.assert(todos.size() == 1, "should have 1 todo after delete")
+    testing.assert(!todos.has("999"), "non-existent key not present")
+    println("  PASS: delete todo")
+
+    println("")
+    println("All tests completed.")
 }
-result = result + "]"
-testing.assert(contains(result, "Buy milk"), "list should contain Buy milk")
-testing.assert(contains(result, "Walk the dog"), "list should contain Walk the dog")
-testing.assert(todos.size() == 2, "should have 2 todos")
-println("  PASS: list todos")
-
-// Test: delete todo
-println("--- test: delete todo")
-todos.remove("1")
-testing.assert(!todos.has("1"), "todo 1 should be removed")
-testing.assert(todos.size() == 1, "should have 1 todo after delete")
-testing.assert(!todos.has("999"), "non-existent key not present")
-println("  PASS: delete todo")
-
-println("")
-println("All tests completed.")
 }

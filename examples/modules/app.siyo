@@ -1,47 +1,47 @@
-{
 import "math"
 import "collections"
 import "geometry"
 
 // Multi-module application demo
 
-println("=== Collections ===")
-mut numbers = [3, -1, 4, -1, 5, -9, 2, 6]
-mut numStr = collections.arrayToString(numbers)
-println("Original: $numStr")
-mut numSum = collections.sum(numbers)
-println("Sum: $numSum")
+fn main() {
+    println("=== Collections ===")
+    mut numbers = [3, -1, 4, -1, 5, -9, 2, 6]
+    mut numStr = collections.arrayToString(numbers)
+    println("Original: $numStr")
+    mut numSum = collections.sum(numbers)
+    println("Sum: $numSum")
 
-mut positives = collections.filter_positive(numbers)
-mut posStr = collections.arrayToString(positives)
-println("Positives: $posStr")
-mut posSum = collections.sum(positives)
-println("Positive sum: $posSum")
+    mut positives = collections.filter_positive(numbers)
+    mut posStr = collections.arrayToString(positives)
+    println("Positives: $posStr")
+    mut posSum = collections.sum(positives)
+    println("Positive sum: $posSum")
 
-mut doubled = collections.map_int(positives, true)
-mut dblStr = collections.arrayToString(doubled)
-println("Doubled: $dblStr")
+    mut doubled = collections.map_int(positives, true)
+    mut dblStr = collections.arrayToString(doubled)
+    println("Doubled: $dblStr")
 
-println("")
-println("=== Geometry ===")
-mut p1 = Point { x: 0, y: 0 }
-mut p2 = Point { x: 3, y: 4 }
-mut p1s = geometry.pointToString(p1)
-println("p1 = $p1s")
-mut p2s = geometry.pointToString(p2)
-println("p2 = $p2s")
-mut dist2 = geometry.distance2(p1, p2)
-println("distance^2 = $dist2")
+    println("")
+    println("=== Geometry ===")
+    mut p1 = Point { x: 0, y: 0 }
+    mut p2 = Point { x: 3, y: 4 }
+    mut p1s = geometry.pointToString(p1)
+    println("p1 = $p1s")
+    mut p2s = geometry.pointToString(p2)
+    println("p2 = $p2s")
+    mut dist2 = geometry.distance2(p1, p2)
+    println("distance^2 = $dist2")
 
-println("")
-println("=== Math ===")
-mut values = [-15, 200, -3, 50]
-for v in values {
-    mut absV = math.abs(v)
-    mut clamped = math.clamp(absV, 0, 100)
-    println("clamp(abs($v), 0, 100) = $clamped")
-}
+    println("")
+    println("=== Math ===")
+    mut values = [-15, 200, -3, 50]
+    for v in values {
+        mut absV = math.abs(v)
+        mut clamped = math.clamp(absV, 0, 100)
+        println("clamp(abs($v), 0, 100) = $clamped")
+    }
 
-println("")
-println("Done! 4 modules working together.")
+    println("")
+    println("Done! 4 modules working together.")
 }

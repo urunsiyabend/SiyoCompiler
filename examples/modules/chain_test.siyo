@@ -1,18 +1,18 @@
-{
 import "utils"
 import "math"
 
-// chain_test -> utils -> math (multi-level)
-mut ca1 = utils.clampedAbs(-150, 100)
-println("utils.clampedAbs(-150, 100) = $ca1")
-mut ca2 = utils.clampedAbs(-50, 100)
-println("utils.clampedAbs(-50, 100) = $ca2")
-mut desc = utils.describe(-150, 100)
-println("utils.describe(-150, 100): $desc")
+fn main() {
+    // chain_test -> utils -> math (multi-level)
+    mut ca1 = utils.clampedAbs(-150, 100)
+    println("utils.clampedAbs(-150, 100) = $ca1")
+    mut ca2 = utils.clampedAbs(-50, 100)
+    println("utils.clampedAbs(-50, 100) = $ca2")
+    mut desc = utils.describe(-150, 100)
+    println("utils.describe(-150, 100): $desc")
 
-// Direct math access also works
-mut a1 = math.abs(-42)
-println("math.abs(-42) = $a1")
-mut g1 = math.gcd(24, 36)
-println("math.gcd(24, 36) = $g1")
+    // Direct math access also works
+    mut a1 = math.abs(-42)
+    println("math.abs(-42) = $a1")
+    mut g1 = math.gcd(24, 36)
+    println("math.gcd(24, 36) = $g1")
 }

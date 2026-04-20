@@ -45,34 +45,36 @@ fn countByPriority(todos: Todo[], count: int, priority: int) -> int {
     result
 }
 
-// Create some todos
-mut todos = [
-    Todo { title: "Learn Siyo", done: true, priority: Priority.High },
-    Todo { title: "Write compiler", done: true, priority: Priority.High },
-    Todo { title: "Add arrays", done: true, priority: Priority.Medium },
-    Todo { title: "Add modules", done: false, priority: Priority.Medium },
-    Todo { title: "Write docs", done: false, priority: Priority.Low },
-    Todo { title: "Add generics", done: false, priority: Priority.High }
-]
+fn main() {
+    // Create some todos
+    mut todos = [
+        Todo { title: "Learn Siyo", done: true, priority: Priority.High },
+        Todo { title: "Write compiler", done: true, priority: Priority.High },
+        Todo { title: "Add arrays", done: true, priority: Priority.Medium },
+        Todo { title: "Add modules", done: false, priority: Priority.Medium },
+        Todo { title: "Write docs", done: false, priority: Priority.Low },
+        Todo { title: "Add generics", done: false, priority: Priority.High }
+    ]
 
-mut count = 6
+    mut count = 6
 
-println("=== Todo List ===")
-for mut i = 0 i < count i = i + 1 {
-    println(todoToString(todos[i]))
+    println("=== Todo List ===")
+    for mut i = 0 i < count i = i + 1 {
+        println(todoToString(todos[i]))
+    }
+
+    println("")
+    println("=== Stats ===")
+    println("Total: $count")
+    println("Done: ${countDone(todos, count)}")
+    println("Remaining: ${count - countDone(todos, count)}")
+    println("High priority: ${countByPriority(todos, count, Priority.High)}")
+    println("Medium priority: ${countByPriority(todos, count, Priority.Medium)}")
+    println("Low priority: ${countByPriority(todos, count, Priority.Low)}")
+
+    // Mark one as done
+    todos[3].done = true
+    println("")
+    println("=== After completing 'Add modules' ===")
+    println("Done: ${countDone(todos, count)}")
 }
-
-println("")
-println("=== Stats ===")
-println("Total: $count")
-println("Done: ${countDone(todos, count)}")
-println("Remaining: ${count - countDone(todos, count)}")
-println("High priority: ${countByPriority(todos, count, Priority.High)}")
-println("Medium priority: ${countByPriority(todos, count, Priority.Medium)}")
-println("Low priority: ${countByPriority(todos, count, Priority.Low)}")
-
-// Mark one as done
-todos[3].done = true
-println("")
-println("=== After completing 'Add modules' ===")
-println("Done: ${countDone(todos, count)}")

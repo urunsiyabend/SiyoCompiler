@@ -1,4 +1,3 @@
-{
 // SiyoChat Tests - Room actor logic without TCP or SQLite
 import "std/testing"
 
@@ -53,86 +52,87 @@ impl Room {
 
 // ========== Tests ==========
 
-println("=== SiyoChat Tests ===")
+fn main() {
+    println("=== SiyoChat Tests ===")
 
-// Test: Room creation
-println("--- test: room creation")
-mut room1 = spawn Room.new("general")
-mut h1 = room1.getHistory()
-testing.assert(len(h1) <= 1, "new room has minimal history")
-println("  PASS: room creation")
+    // Test: Room creation
+    println("--- test: room creation")
+    mut room1 = spawn Room.new("general")
+    mut h1 = room1.getHistory()
+    testing.assert(len(h1) <= 1, "new room has minimal history")
+    println("  PASS: room creation")
 
-// Test: Join room
-println("--- test: join room")
-mut room2 = spawn Room.new("lobby")
-mut joinMsg = room2.join("alice")
-testing.assert(contains(joinMsg, "alice"), "join message contains nick")
-testing.assert(contains(joinMsg, "lobby"), "join message contains room")
-testing.assert(room2.memberCount() == 1, "one member after join")
-println("  PASS: join room")
+    // Test: Join room
+    println("--- test: join room")
+    mut room2 = spawn Room.new("lobby")
+    mut joinMsg = room2.join("alice")
+    testing.assert(contains(joinMsg, "alice"), "join message contains nick")
+    testing.assert(contains(joinMsg, "lobby"), "join message contains room")
+    testing.assert(room2.memberCount() == 1, "one member after join")
+    println("  PASS: join room")
 
-// Test: Broadcast message
-println("--- test: broadcast message")
-mut room3 = spawn Room.new("chat")
-room3.join("bob")
-room3.join("carol")
-mut bcast = room3.broadcast("bob", "hello everyone")
-testing.assert(contains(bcast, "bob"), "broadcast contains sender")
-testing.assert(contains(bcast, "hello everyone"), "broadcast contains message")
-mut h3 = room3.getHistory()
-mut found3 = false
-for i in range(0, len(h3)) {
-    if contains(h3[i], "hello everyone") {
-        found3 = true
+    // Test: Broadcast message
+    println("--- test: broadcast message")
+    mut room3 = spawn Room.new("chat")
+    room3.join("bob")
+    room3.join("carol")
+    mut bcast = room3.broadcast("bob", "hello everyone")
+    testing.assert(contains(bcast, "bob"), "broadcast contains sender")
+    testing.assert(contains(bcast, "hello everyone"), "broadcast contains message")
+    mut h3 = room3.getHistory()
+    mut found3 = false
+    for i in range(0, len(h3)) {
+        if contains(h3[i], "hello everyone") {
+            found3 = true
+        }
     }
-}
-testing.assert(found3, "broadcast appears in history")
-println("  PASS: broadcast message")
+    testing.assert(found3, "broadcast appears in history")
+    println("  PASS: broadcast message")
 
-// Test: History retrieval
-println("--- test: history retrieval")
-mut room4 = spawn Room.new("archive")
-room4.join("dave")
-room4.broadcast("dave", "first message")
-room4.broadcast("dave", "second message")
-mut h4 = room4.getHistory()
-mut count4 = 0
-for i in range(0, len(h4)) {
-    if contains(h4[i], "message") {
-        count4 = count4 + 1
+    // Test: History retrieval
+    println("--- test: history retrieval")
+    mut room4 = spawn Room.new("archive")
+    room4.join("dave")
+    room4.broadcast("dave", "first message")
+    room4.broadcast("dave", "second message")
+    mut h4 = room4.getHistory()
+    mut count4 = 0
+    for i in range(0, len(h4)) {
+        if contains(h4[i], "message") {
+            count4 = count4 + 1
+        }
     }
-}
-testing.assert(count4 == 2, "history contains both messages")
-println("  PASS: history retrieval")
+    testing.assert(count4 == 2, "history contains both messages")
+    println("  PASS: history retrieval")
 
-// Test: Leave room
-println("--- test: leave room")
-mut room5 = spawn Room.new("temp")
-room5.join("eve")
-testing.assert(room5.memberCount() == 1, "one member after join")
-room5.leave("eve")
-testing.assert(room5.memberCount() == 0, "no members after leave")
-mut h5 = room5.getHistory()
-mut foundLeave = false
-for i in range(0, len(h5)) {
-    if contains(h5[i], "left") {
-        foundLeave = true
+    // Test: Leave room
+    println("--- test: leave room")
+    mut room5 = spawn Room.new("temp")
+    room5.join("eve")
+    testing.assert(room5.memberCount() == 1, "one member after join")
+    room5.leave("eve")
+    testing.assert(room5.memberCount() == 0, "no members after leave")
+    mut h5 = room5.getHistory()
+    mut foundLeave = false
+    for i in range(0, len(h5)) {
+        if contains(h5[i], "left") {
+            foundLeave = true
+        }
     }
-}
-testing.assert(foundLeave, "leave message in history")
-println("  PASS: leave room")
+    testing.assert(foundLeave, "leave message in history")
+    println("  PASS: leave room")
 
-// Test: Multiple rooms independent
-println("--- test: multiple rooms independent")
-mut roomA = spawn Room.new("room-a")
-mut roomB = spawn Room.new("room-b")
-roomA.join("user1")
-roomA.join("user2")
-roomB.join("user3")
-testing.assert(roomA.memberCount() == 2, "room A has 2 members")
-testing.assert(roomB.memberCount() == 1, "room B has 1 member")
-println("  PASS: multiple rooms independent")
+    // Test: Multiple rooms independent
+    println("--- test: multiple rooms independent")
+    mut roomA = spawn Room.new("room-a")
+    mut roomB = spawn Room.new("room-b")
+    roomA.join("user1")
+    roomA.join("user2")
+    roomB.join("user3")
+    testing.assert(roomA.memberCount() == 2, "room A has 2 members")
+    testing.assert(roomB.memberCount() == 1, "room B has 1 member")
+    println("  PASS: multiple rooms independent")
 
-println("")
-println("All tests completed.")
+    println("")
+    println("All tests completed.")
 }

@@ -239,19 +239,21 @@ fn handleClient(socket: object, server: object) {
 
 // ========== Main ==========
 
-// Initialize database
-dbExec("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT, sender TEXT, text TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
+fn main() {
+    // Initialize database
+    dbExec("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT, sender TEXT, text TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
 
-println("=== SiyoChat Server ===")
-println("Listening on port 4000...")
+    println("=== SiyoChat Server ===")
+    println("Listening on port 4000...")
 
-mut serverActor = spawn Server.new()
-mut tcpServer = ServerSocket.new(4000)
+    mut serverActor = spawn Server.new()
+    mut tcpServer = ServerSocket.new(4000)
 
-while true {
-    mut socket = tcpServer.accept()
-    println("Client connected: ${socket.getRemoteSocketAddress()}")
-    spawn {
-        handleClient(socket, serverActor)
+    while true {
+        mut socket = tcpServer.accept()
+        println("Client connected: ${socket.getRemoteSocketAddress()}")
+        spawn {
+            handleClient(socket, serverActor)
+        }
     }
 }

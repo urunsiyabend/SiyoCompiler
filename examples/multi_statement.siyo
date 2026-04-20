@@ -16,10 +16,12 @@ fn pointToString(p: Point) -> string {
     "(${p.x}, ${p.y})"
 }
 
-mut p1 = Point { x: 3, y: 4 }
-mut p2 = Point { x: 6, y: 8 }
+fn main() {
+    mut p1 = Point { x: 3, y: 4 }
+    mut p2 = Point { x: 6, y: 8 }
 
-println("Point 1: ${pointToString(p1)}")
-println("Point 2: ${pointToString(p2)}")
-println("Distance of p1: ${distance(p1)}")
-println("Distance of p2: ${distance(p2)}")
+    println("Point 1: ${pointToString(p1)}")
+    println("Point 2: ${pointToString(p2)}")
+    println("Distance of p1: ${distance(p1)}")
+    println("Distance of p2: ${distance(p2)}")
+}

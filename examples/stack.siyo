@@ -54,18 +54,20 @@ fn stackToString(s: Stack) -> string {
     "$result] (top=${s.top})"
 }
 
-// Test
-mut s = createStack(10)
-stackPush(s, 10)
-stackPush(s, 20)
-stackPush(s, 30)
+fn main() {
+    // Test
+    mut s = createStack(10)
+    stackPush(s, 10)
+    stackPush(s, 20)
+    stackPush(s, 30)
 
-println("After push 10, 20, 30: ${stackToString(s)}")
-println("Peek: ${stackPeek(s)}")
-println("Pop: ${stackPop(s)}")
-println("Pop: ${stackPop(s)}")
-println("After 2 pops: ${stackToString(s)}")
-println("Size: ${stackSize(s)}")
-println("Is empty: ${stackIsEmpty(s)}")
-println("Pop last: ${stackPop(s)}")
-println("Is empty: ${stackIsEmpty(s)}")
+    println("After push 10, 20, 30: ${stackToString(s)}")
+    println("Peek: ${stackPeek(s)}")
+    println("Pop: ${stackPop(s)}")
+    println("Pop: ${stackPop(s)}")
+    println("After 2 pops: ${stackToString(s)}")
+    println("Size: ${stackSize(s)}")
+    println("Is empty: ${stackIsEmpty(s)}")
+    println("Pop last: ${stackPop(s)}")
+    println("Is empty: ${stackIsEmpty(s)}")
+}

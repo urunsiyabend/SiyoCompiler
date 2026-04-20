@@ -1,4 +1,3 @@
-{
 // Markdown and front matter parser
 
 import "std/strings"
@@ -221,6 +220,4 @@ fn processLinks(text: string) -> string {
 
     result = result + remaining
     return result
-}
-
 }

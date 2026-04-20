@@ -34,38 +34,40 @@ fn gradeName(g: int) -> string {
     }
 }
 
-// Create students
-mut students = [
-    Student { name: "Alice", scores: [95, 88, 92, 97], grade: 0 },
-    Student { name: "Bob", scores: [72, 65, 78, 80], grade: 0 },
-    Student { name: "Charlie", scores: [88, 91, 85, 90], grade: 0 },
-    Student { name: "Diana", scores: [55, 62, 48, 70], grade: 0 }
-]
+fn main() {
+    // Create students
+    mut students = [
+        Student { name: "Alice", scores: [95, 88, 92, 97], grade: 0 },
+        Student { name: "Bob", scores: [72, 65, 78, 80], grade: 0 },
+        Student { name: "Charlie", scores: [88, 91, 85, 90], grade: 0 },
+        Student { name: "Diana", scores: [55, 62, 48, 70], grade: 0 }
+    ]
 
-// Calculate grades
-for student in students {
-    mut avg = average(student.scores)
-    student.grade = assignGrade(avg)
-}
-
-// Print report
-println("=== Grade Report ===")
-for student in students {
-    mut avg = average(student.scores)
-    println("${student.name}: avg=$avg grade=${gradeName(student.grade)}")
-}
-
-// Count by grade
-println("")
-mut aCount = 0
-mut passing = 0
-for student in students {
-    if student.grade <= Grade.C {
-        passing += 1
+    // Calculate grades
+    for student in students {
+        mut avg = average(student.scores)
+        student.grade = assignGrade(avg)
     }
-    if student.grade == Grade.A {
-        aCount += 1
+
+    // Print report
+    println("=== Grade Report ===")
+    for student in students {
+        mut avg = average(student.scores)
+        println("${student.name}: avg=$avg grade=${gradeName(student.grade)}")
     }
+
+    // Count by grade
+    println("")
+    mut aCount = 0
+    mut passing = 0
+    for student in students {
+        if student.grade <= Grade.C {
+            passing += 1
+        }
+        if student.grade == Grade.A {
+            aCount += 1
+        }
+    }
+    println("A students: $aCount")
+    println("Passing: $passing/${len(students)}")
 }
-println("A students: $aCount")
-println("Passing: $passing/${len(students)}")

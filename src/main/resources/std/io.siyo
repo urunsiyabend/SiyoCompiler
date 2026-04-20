@@ -1,74 +1,102 @@
-{
-    import java "java.io.FileWriter"
-    import java "java.io.BufferedReader"
-    import java "java.io.FileReader"
-    import java "java.io.File"
+import java "java.io.FileWriter"
+import java "java.io.BufferedReader"
+import java "java.io.FileReader"
+import java "java.io.File"
+import java "codeanalysis.SiyoRuntime"
 
-    fn readFile(path: string) -> string {
-        mut reader = BufferedReader.new(FileReader.new(path))
-        mut result = ""
-        mut line = reader.readLine()
-        while line != null {
-            if len(result) > 0 {
-                result = result + "\n"
-            }
-            result = result + line
-            line = reader.readLine()
+fn readFile(path: string) -> string {
+    mut reader = BufferedReader.new(FileReader.new(path))
+    mut result = ""
+    mut line = reader.readLine()
+    while line != null {
+        if len(result) > 0 {
+            result = result + "\n"
         }
-        reader.close()
-        return result
+        result = result + line
+        line = reader.readLine()
     }
+    reader.close()
+    return result
+}
 
-    fn writeFile(path: string, content: string) {
-        mut writer = FileWriter.new(path)
-        writer.write(content)
-        writer.close()
-    }
+fn writeFile(path: string, content: string) {
+    mut writer = FileWriter.new(path)
+    writer.write(content)
+    writer.close()
+}
 
-    fn appendFile(path: string, content: string) {
-        mut writer = FileWriter.new(path, true)
-        writer.write(content)
-        writer.close()
-    }
+fn appendFile(path: string, content: string) {
+    mut writer = FileWriter.new(path, true)
+    writer.write(content)
+    writer.close()
+}
 
-    fn readLines(path: string) -> string[] {
-        mut reader = BufferedReader.new(FileReader.new(path))
-        mut lines = [""]
-        mut line = reader.readLine()
-        while line != null {
-            push(lines, line)
-            line = reader.readLine()
-        }
-        reader.close()
-        // Remove initial empty element
-        removeAt(lines, 0)
-        return lines
+fn readLines(path: string) -> string[] {
+    mut reader = BufferedReader.new(FileReader.new(path))
+    mut lines = [""]
+    mut line = reader.readLine()
+    while line != null {
+        push(lines, line)
+        line = reader.readLine()
     }
+    reader.close()
+    removeAt(lines, 0)
+    return lines
+}
 
-    fn fileExists(path: string) -> bool {
-        mut f = File.new(path)
-        return f.exists()
-    }
+fn exists(path: string) -> bool {
+    mut f = File.new(path)
+    return f.exists()
+}
 
-    fn listDir(path: string) -> string[] {
-        mut result = [""]
-        removeAt(result, 0)
-        mut dir = File.new(path)
-        if !dir.exists() { return result }
-        mut names = dir.list()
-        for i in range(0, len(names)) {
-            push(result, names[i])
-        }
-        return result
-    }
+fn isDir(path: string) -> bool {
+    mut f = File.new(path)
+    return f.isDirectory()
+}
 
-    fn mkdir(path: string) {
-        mut dir = File.new(path)
-        dir.mkdirs()
-    }
+fn isFile(path: string) -> bool {
+    mut f = File.new(path)
+    return f.isFile()
+}
 
-    fn delete(path: string) -> bool {
-        mut f = File.new(path)
-        return f.delete()
+fn listDir(path: string) -> string[] {
+    mut result = [""]
+    removeAt(result, 0)
+    mut dir = File.new(path)
+    if !dir.exists() { return result }
+    mut names = dir.list()
+    for i in range(0, len(names)) {
+        push(result, names[i])
     }
+    return result
+}
+
+fn mkdir(path: string) {
+    mut dir = File.new(path)
+    dir.mkdirs()
+}
+
+fn delete(path: string) -> bool {
+    mut f = File.new(path)
+    return f.delete()
+}
+
+// Returns all files under dir recursively, paths relative to dir, sorted. Symlinks skipped.
+fn walk(dir: string) -> string[] {
+    return SiyoRuntime.walkFiles(dir)
+}
+
+// Returns SiyoArray of int values (0-255) representing the file's bytes.
+fn readBytes(path: string) -> object {
+    return SiyoRuntime.readBytes(path)
+}
+
+// Writes a SiyoArray of int values (0-255) as binary file content.
+fn writeBytes(path: string, bytes: object) {
+    SiyoRuntime.writeBytes(path, bytes)
+}
+
+// Copies src to dst, preserving binary content. Overwrites dst if it exists.
+fn copyFile(src: string, dst: string) {
+    SiyoRuntime.copyFile(src, dst)
 }

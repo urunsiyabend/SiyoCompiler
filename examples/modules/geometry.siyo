@@ -1,4 +1,3 @@
-{
 import "std/math"
 
 struct Point {
@@ -33,5 +32,4 @@ fn area(r: Rect) -> int {
 
 fn rectToString(r: Rect) -> string {
     "Rect(${r.x}, ${r.y}, ${r.w}x${r.h})"
-}
 }

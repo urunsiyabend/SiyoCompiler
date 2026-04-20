@@ -1,4 +1,3 @@
-{
 // Broker logic tests — subscribe, publish, unsubscribe, stats
 import "std/testing"
 
@@ -59,79 +58,80 @@ impl Broker {
 
 // --------------- Tests ---------------
 
-println("=== Broker Tests ===")
+fn main() {
+    println("=== Broker Tests ===")
 
-mut broker = spawn Broker.new()
+    mut broker = spawn Broker.new()
 
-// Test 1: Subscribe
-println("--- test: subscribe returns confirmation")
-mut result1 = broker.subscribe("c1", "news")
-testing.assert(result1 == "+OK subscribed to news", "expected subscribe confirmation")
-println("  PASS: subscribe returns confirmation")
+    // Test 1: Subscribe
+    println("--- test: subscribe returns confirmation")
+    mut result1 = broker.subscribe("c1", "news")
+    testing.assert(result1 == "+OK subscribed to news", "expected subscribe confirmation")
+    println("  PASS: subscribe returns confirmation")
 
-// Test 2: Subscribe multiple clients to same topic
-println("--- test: multiple subscribers on same topic")
-broker.subscribe("c2", "news")
-broker.subscribe("c3", "news")
-mut s2 = broker.stats()
-testing.assert(contains(s2, "subscribers=3"), "expected 3 subscribers, got: " + s2)
-println("  PASS: multiple subscribers on same topic")
+    // Test 2: Subscribe multiple clients to same topic
+    println("--- test: multiple subscribers on same topic")
+    broker.subscribe("c2", "news")
+    broker.subscribe("c3", "news")
+    mut s2 = broker.stats()
+    testing.assert(contains(s2, "subscribers=3"), "expected 3 subscribers, got: " + s2)
+    println("  PASS: multiple subscribers on same topic")
 
-// Test 3: Subscribe to multiple topics
-println("--- test: subscribe to multiple topics")
-broker.subscribe("c1", "sports")
-mut s3 = broker.stats()
-testing.assert(contains(s3, "topics=2"), "expected 2 topics, got: " + s3)
-testing.assert(contains(s3, "subscribers=4"), "expected 4 subscribers, got: " + s3)
-println("  PASS: subscribe to multiple topics")
+    // Test 3: Subscribe to multiple topics
+    println("--- test: subscribe to multiple topics")
+    broker.subscribe("c1", "sports")
+    mut s3 = broker.stats()
+    testing.assert(contains(s3, "topics=2"), "expected 2 topics, got: " + s3)
+    testing.assert(contains(s3, "subscribers=4"), "expected 4 subscribers, got: " + s3)
+    println("  PASS: subscribe to multiple topics")
 
-// Test 4: Duplicate subscribe is idempotent
-println("--- test: duplicate subscribe is idempotent")
-broker.subscribe("c1", "news")
-mut s4 = broker.stats()
-testing.assert(contains(s4, "subscribers=4"), "expected still 4, got: " + s4)
-println("  PASS: duplicate subscribe is idempotent")
+    // Test 4: Duplicate subscribe is idempotent
+    println("--- test: duplicate subscribe is idempotent")
+    broker.subscribe("c1", "news")
+    mut s4 = broker.stats()
+    testing.assert(contains(s4, "subscribers=4"), "expected still 4, got: " + s4)
+    println("  PASS: duplicate subscribe is idempotent")
 
-// Test 5: Publish returns receivers
-println("--- test: publish returns subscriber list")
-mut receivers5 = broker.publish("news", "hello world")
-testing.assert(len(receivers5) == 3, "expected 3 receivers")
-println("  PASS: publish returns subscriber list")
+    // Test 5: Publish returns receivers
+    println("--- test: publish returns subscriber list")
+    mut receivers5 = broker.publish("news", "hello world")
+    testing.assert(len(receivers5) == 3, "expected 3 receivers")
+    println("  PASS: publish returns subscriber list")
 
-// Test 6: Publish to empty topic returns empty
-println("--- test: publish to empty topic returns empty list")
-mut receivers6 = broker.publish("unknown", "test")
-testing.assert(len(receivers6) == 0, "expected 0 receivers")
-println("  PASS: publish to empty topic returns empty list")
+    // Test 6: Publish to empty topic returns empty
+    println("--- test: publish to empty topic returns empty list")
+    mut receivers6 = broker.publish("unknown", "test")
+    testing.assert(len(receivers6) == 0, "expected 0 receivers")
+    println("  PASS: publish to empty topic returns empty list")
 
-// Test 7: Publish increments message count
-println("--- test: publish increments message count")
-mut s7 = broker.stats()
-testing.assert(contains(s7, "messages=2"), "expected 2 messages, got: " + s7)
-println("  PASS: publish increments message count")
+    // Test 7: Publish increments message count
+    println("--- test: publish increments message count")
+    mut s7 = broker.stats()
+    testing.assert(contains(s7, "messages=2"), "expected 2 messages, got: " + s7)
+    println("  PASS: publish increments message count")
 
-// Test 8: Unsubscribe
-println("--- test: unsubscribe removes client from topic")
-mut result8 = broker.unsubscribe("c2", "news")
-testing.assert(result8 == "+OK unsubscribed from news", "expected unsub confirmation")
-mut receivers8 = broker.publish("news", "after unsub")
-testing.assert(len(receivers8) == 2, "expected 2 receivers after unsub")
-println("  PASS: unsubscribe removes client from topic")
+    // Test 8: Unsubscribe
+    println("--- test: unsubscribe removes client from topic")
+    mut result8 = broker.unsubscribe("c2", "news")
+    testing.assert(result8 == "+OK unsubscribed from news", "expected unsub confirmation")
+    mut receivers8 = broker.publish("news", "after unsub")
+    testing.assert(len(receivers8) == 2, "expected 2 receivers after unsub")
+    println("  PASS: unsubscribe removes client from topic")
 
-// Test 9: Unsubscribe non-existent is safe
-println("--- test: unsubscribe non-existent client is safe")
-mut result9 = broker.unsubscribe("c99", "news")
-testing.assert(result9 == "+OK unsubscribed from news", "expected ok even for unknown client")
-println("  PASS: unsubscribe non-existent client is safe")
+    // Test 9: Unsubscribe non-existent is safe
+    println("--- test: unsubscribe non-existent client is safe")
+    mut result9 = broker.unsubscribe("c99", "news")
+    testing.assert(result9 == "+OK unsubscribed from news", "expected ok even for unknown client")
+    println("  PASS: unsubscribe non-existent client is safe")
 
-// Test 10: Stats reflect final state
-println("--- test: stats reflect final state")
-mut s10 = broker.stats()
-testing.assert(contains(s10, "topics=2"), "expected 2 topics, got: " + s10)
-testing.assert(contains(s10, "subscribers=3"), "expected 3 subscribers, got: " + s10)
-testing.assert(contains(s10, "messages=3"), "expected 3 messages, got: " + s10)
-println("  PASS: stats reflect final state")
+    // Test 10: Stats reflect final state
+    println("--- test: stats reflect final state")
+    mut s10 = broker.stats()
+    testing.assert(contains(s10, "topics=2"), "expected 2 topics, got: " + s10)
+    testing.assert(contains(s10, "subscribers=3"), "expected 3 subscribers, got: " + s10)
+    testing.assert(contains(s10, "messages=3"), "expected 3 messages, got: " + s10)
+    println("  PASS: stats reflect final state")
 
-println("")
-println("All broker tests complete.")
+    println("")
+    println("All broker tests complete.")
 }

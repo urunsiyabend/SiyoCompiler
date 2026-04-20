@@ -64,7 +64,8 @@ public class Compilation {
         if (globalScope == null) {
             BoundGlobalScope previousScope = _previous == null ? null : _previous.getGlobalScope();
             ModuleRegistry reg = _registry != null ? _registry : new ModuleRegistry();
-            globalScope = Binder.bindGlobalScope(previousScope, _syntaxTree.getRoot(), reg, _filePath);
+            boolean enforceTopLevel = _filePath != null;
+            globalScope = Binder.bindGlobalScope(previousScope, _syntaxTree.getRoot(), reg, _filePath, enforceTopLevel);
             _globalScope.compareAndSet(null, globalScope);
         }
         return globalScope;
@@ -171,13 +172,17 @@ public class Compilation {
      */
     private Map<FunctionSymbol, BoundBlockStatement> getFunctions() {
         Map<FunctionSymbol, BoundBlockStatement> functions = new HashMap<>();
+        // Use identity map so bodies that are the same object (shared module copies) get the same lowered result.
+        // Without this, two FunctionSymbols pointing to the same pre-lowered body get different lowered objects,
+        // which breaks the module-body deduplication check in the emitter.
+        java.util.Map<BoundBlockStatement, BoundBlockStatement> loweredCache = new java.util.IdentityHashMap<>();
         BoundGlobalScope scope = getGlobalScope();
         while (scope != null) {
             if (scope.getFunctionBodies() != null) {
-                // Lower each function body
                 for (Map.Entry<FunctionSymbol, BoundBlockStatement> entry : scope.getFunctionBodies().entrySet()) {
                     if (!functions.containsKey(entry.getKey())) {
-                        functions.put(entry.getKey(), Lowerer.lower(entry.getValue()));
+                        BoundBlockStatement lowered = loweredCache.computeIfAbsent(entry.getValue(), Lowerer::lower);
+                        functions.put(entry.getKey(), lowered);
                     }
                 }
             }

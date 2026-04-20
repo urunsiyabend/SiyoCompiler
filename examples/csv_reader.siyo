@@ -2,57 +2,59 @@
 import "std/io"
 import "std/strings"
 
-// Create test CSV file
-mut csvData = "Name,Age,City,Score\n"
-csvData += "Alice,28,Istanbul,95\n"
-csvData += "Bob,32,Ankara,87\n"
-csvData += "Charlie,25,Izmir,92\n"
-csvData += "Diana,30,Bursa,88\n"
-csvData += "Eve,27,Antalya,91"
-io.writeFile("test_data.csv", csvData)
+fn main() {
+    // Create test CSV file
+    mut csvData = "Name,Age,City,Score\n"
+    csvData += "Alice,28,Istanbul,95\n"
+    csvData += "Bob,32,Ankara,87\n"
+    csvData += "Charlie,25,Izmir,92\n"
+    csvData += "Diana,30,Bursa,88\n"
+    csvData += "Eve,27,Antalya,91"
+    io.writeFile("test_data.csv", csvData)
 
-// Read and parse CSV
-println("=== CSV Reader ===")
-mut allLines = io.readLines("test_data.csv")
+    // Read and parse CSV
+    println("=== CSV Reader ===")
+    mut allLines = io.readLines("test_data.csv")
 
-mut headerLine = allLines[0]
-mut headers = split(headerLine, ",")
-println("Columns: ${len(headers)}")
+    mut headerLine = allLines[0]
+    mut headers = split(headerLine, ",")
+    println("Columns: ${len(headers)}")
 
-// Data lines (skip header)
-mut lineCount = len(allLines) - 1
-println("Rows: $lineCount")
-println("")
+    // Data lines (skip header)
+    mut lineCount = len(allLines) - 1
+    println("Rows: $lineCount")
+    println("")
 
-// Print table header
-println(strings.join(headers, "\t"))
-for i in range(0, 40) { print("-") }
-println("")
+    // Print table header
+    println(strings.join(headers, "\t"))
+    for i in range(0, 40) { print("-") }
+    println("")
 
-mut totalScore = 0
-mut maxScore = 0
-mut maxName = ""
+    mut totalScore = 0
+    mut maxScore = 0
+    mut maxName = ""
 
-for i in range(1, len(allLines)) {
-    mut cols = split(allLines[i], ",")
-    println(strings.join(cols, "\t"))
+    for i in range(1, len(allLines)) {
+        mut cols = split(allLines[i], ",")
+        println(strings.join(cols, "\t"))
 
-    // Accumulate stats
-    mut score = parseInt(cols[3])
-    totalScore = totalScore + score
-    if score > maxScore {
-        maxScore = score
-        maxName = cols[0]
+        // Accumulate stats
+        mut score = parseInt(cols[3])
+        totalScore = totalScore + score
+        if score > maxScore {
+            maxScore = score
+            maxName = cols[0]
+        }
     }
+
+    // Stats
+    println("")
+    println("=== Stats ===")
+    println("Total score: $totalScore")
+    println("Average: ${toFloat(totalScore) / toFloat(lineCount)}")
+    println("Top scorer: $maxName ($maxScore)")
+
+    // Cleanup
+    io.writeFile("test_data.csv", "")
+    println("CSV file cleaned up.")
 }
-
-// Stats
-println("")
-println("=== Stats ===")
-println("Total score: $totalScore")
-println("Average: ${toFloat(totalScore) / toFloat(lineCount)}")
-println("Top scorer: $maxName ($maxScore)")
-
-// Cleanup
-io.writeFile("test_data.csv", "")
-println("CSV file cleaned up.")

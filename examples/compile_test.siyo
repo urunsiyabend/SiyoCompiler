@@ -7,6 +7,8 @@ fn factorial(n: int) -> int {
     return n * factorial(n - 1)
 }
 
-println("Hello from compiled Siyo!")
-println("3 + 4 = ${add(3, 4)}")
-println("10! = ${factorial(10)}")
+fn main() {
+    println("Hello from compiled Siyo!")
+    println("3 + 4 = ${add(3, 4)}")
+    println("10! = ${factorial(10)}")
+}

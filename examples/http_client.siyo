@@ -3,33 +3,35 @@ import java "java.net.URL"
 import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
 
-println("=== HTTP Client ===")
-println("Fetching http://example.com ...")
+fn main() {
+    println("=== HTTP Client ===")
+    println("Fetching http://example.com ...")
 
-try {
-    mut url = URL.new("http://example.com")
-    mut connection = url.openConnection()
-    mut reader = BufferedReader.new(InputStreamReader.new(connection.getInputStream()))
+    try {
+        mut url = URL.new("http://example.com")
+        mut connection = url.openConnection()
+        mut reader = BufferedReader.new(InputStreamReader.new(connection.getInputStream()))
 
-    mut body = ""
-    mut lineCount = 0
-    mut line = reader.readLine()
-    while line != null {
-        body += line + "\n"
-        lineCount = lineCount + 1
-        line = reader.readLine()
+        mut body = ""
+        mut lineCount = 0
+        mut line = reader.readLine()
+        while line != null {
+            body += line + "\n"
+            lineCount = lineCount + 1
+            line = reader.readLine()
+        }
+        reader.close()
+
+        println("Lines received: $lineCount")
+        println("Body length: ${len(body)}")
+        println("")
+        // Print first 300 chars
+        if len(body) > 300 {
+            println("${substring(body, 0, 300)}...")
+        } else {
+            println(body)
+        }
+    } catch e {
+        println("Error: $e")
     }
-    reader.close()
-
-    println("Lines received: $lineCount")
-    println("Body length: ${len(body)}")
-    println("")
-    // Print first 300 chars
-    if len(body) > 300 {
-        println("${substring(body, 0, 300)}...")
-    } else {
-        println(body)
-    }
-} catch e {
-    println("Error: $e")
 }

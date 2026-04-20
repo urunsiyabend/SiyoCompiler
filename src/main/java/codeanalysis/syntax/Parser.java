@@ -880,6 +880,12 @@ public class Parser {
                 } else {
                     expr = memberAccess;
                 }
+            } else if (current().getType() == SyntaxType.OpenParenthesisToken) {
+                // expr() — call expression result as a closure (e.g. tests[i]())
+                SyntaxToken openParen = match(SyntaxType.OpenParenthesisToken);
+                SeparatedSyntaxList<ExpressionSyntax> arguments = parseArguments();
+                SyntaxToken closeParen = match(SyntaxType.CloseParenthesisToken);
+                expr = new PostfixCallExpressionSyntax(expr, openParen, arguments, closeParen);
             } else {
                 break;
             }

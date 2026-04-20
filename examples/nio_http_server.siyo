@@ -7,63 +7,65 @@ import java "java.nio.channels.Selector"
 import java "java.nio.ByteBuffer"
 import java "java.net.InetSocketAddress"
 
-println("=== NIO Non-Blocking HTTP Server ===")
+fn main() {
+    println("=== NIO Non-Blocking HTTP Server ===")
 
-mut selector = Selector.open()
-mut serverChannel = ServerSocketChannel.open()
-serverChannel.configureBlocking(false)
-serverChannel.bind(InetSocketAddress.new(8080))
-serverChannel.register(selector, SelectionKey.OP_ACCEPT)
+    mut selector = Selector.open()
+    mut serverChannel = ServerSocketChannel.open()
+    serverChannel.configureBlocking(false)
+    serverChannel.bind(InetSocketAddress.new(8080))
+    serverChannel.register(selector, SelectionKey.OP_ACCEPT)
 
-println("Listening on port 8080 (non-blocking)...")
+    println("Listening on port 8080 (non-blocking)...")
 
-mut requestCount = 0
+    mut requestCount = 0
 
-while true {
-    selector.select()
-    mut keys = selector.selectedKeys()
-    mut iter = keys.iterator()
+    while true {
+        selector.select()
+        mut keys = selector.selectedKeys()
+        mut iter = keys.iterator()
 
-    while iter.hasNext() {
-        mut key = iter.next() as SelectionKey
-        iter.remove()
+        while iter.hasNext() {
+            mut key = iter.next() as SelectionKey
+            iter.remove()
 
-        if key.isAcceptable() {
-            mut client = serverChannel.accept()
-            if client != null {
-                client.configureBlocking(false)
-                client.register(selector, SelectionKey.OP_READ)
-            }
-        } else if key.isReadable() {
-            mut channel = key.channel() as SocketChannel
-            mut buffer = ByteBuffer.allocate(4096)
-
-            try {
-                mut bytesRead = channel.read(buffer)
-                if bytesRead > 0 {
-                    requestCount += 1
-                    buffer.flip()
-
-                    mut body = "<html><body>"
-                    body += "<h1>Siyo NIO Server</h1>"
-                    body += "<p>Non-blocking I/O, single-threaded event loop</p>"
-                    body += "<p>Request #$requestCount</p>"
-                    body += "<p>Powered by java.nio.channels.Selector</p>"
-                    body += "</body></html>"
-
-                    mut response = "HTTP/1.1 200 OK\r\n"
-                    response += "Content-Type: text/html\r\n"
-                    response += "Content-Length: ${len(body)}\r\n"
-                    response += "Connection: close\r\n\r\n"
-                    response += body
-
-                    mut out = ByteBuffer.wrap(response.getBytes())
-                    channel.write(out)
-                    println("Request #$requestCount served")
+            if key.isAcceptable() {
+                mut client = serverChannel.accept()
+                if client != null {
+                    client.configureBlocking(false)
+                    client.register(selector, SelectionKey.OP_READ)
                 }
-                channel.close()
-            } catch e {
-                channel.close()
+            } else if key.isReadable() {
+                mut channel = key.channel() as SocketChannel
+                mut buffer = ByteBuffer.allocate(4096)
+
+                try {
+                    mut bytesRead = channel.read(buffer)
+                    if bytesRead > 0 {
+                        requestCount += 1
+                        buffer.flip()
+
+                        mut body = "<html><body>"
+                        body += "<h1>Siyo NIO Server</h1>"
+                        body += "<p>Non-blocking I/O, single-threaded event loop</p>"
+                        body += "<p>Request #$requestCount</p>"
+                        body += "<p>Powered by java.nio.channels.Selector</p>"
+                        body += "</body></html>"
+
+                        mut response = "HTTP/1.1 200 OK\r\n"
+                        response += "Content-Type: text/html\r\n"
+                        response += "Content-Length: ${len(body)}\r\n"
+                        response += "Connection: close\r\n\r\n"
+                        response += body
+
+                        mut out = ByteBuffer.wrap(response.getBytes())
+                        channel.write(out)
+                        println("Request #$requestCount served")
+                    }
+                    channel.close()
+                } catch e {
+                    channel.close()
+                }
             }
         }
     }

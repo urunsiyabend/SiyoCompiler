@@ -1,6 +1,6 @@
-{
-    import "std/strings"
+import "std/strings"
 
+fn main() {
     mut numbers = [64, 34, 25, 12, 22, 11, 90]
 
     // Use built-in sort with comparator lambda
@@ -15,5 +15,5 @@
             push(parts, toString(numbers[i]))
         }
     }
-    "[" + strings.join(parts, ", ") + "]"
+    println("[" + strings.join(parts, ", ") + "]")
 }

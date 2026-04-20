@@ -1,35 +1,35 @@
-{
-    enum Direction { North, East, South, West }
+enum Direction { North, East, South, West }
 
-    fn directionName(d: int) -> string {
-        match d {
-            Direction.North => "North",
-            Direction.East => "East",
-            Direction.South => "South",
-            Direction.West => "West",
-            _ => "Unknown"
-        }
+fn directionName(d: int) -> string {
+    match d {
+        Direction.North => "North",
+        Direction.East => "East",
+        Direction.South => "South",
+        Direction.West => "West",
+        _ => "Unknown"
     }
+}
 
-    struct Position {
-        x: int,
-        y: int
+struct Position {
+    x: int,
+    y: int
+}
+
+fn move(pos: Position, dir: int, steps: int) {
+    match dir {
+        Direction.North => { pos.y = pos.y + steps },
+        Direction.South => { pos.y = pos.y - steps },
+        Direction.East => { pos.x = pos.x + steps },
+        Direction.West => { pos.x = pos.x - steps },
+        _ => {}
     }
+}
 
-    fn move(pos: Position, dir: int, steps: int) {
-        match dir {
-            Direction.North => { pos.y = pos.y + steps },
-            Direction.South => { pos.y = pos.y - steps },
-            Direction.East => { pos.x = pos.x + steps },
-            Direction.West => { pos.x = pos.x - steps },
-            _ => {}
-        }
-    }
+fn posToString(p: Position) -> string {
+    "(${p.x}, ${p.y})"
+}
 
-    fn posToString(p: Position) -> string {
-        "(${p.x}, ${p.y})"
-    }
-
+fn main() {
     mut pos = Position { x: 0, y: 0 }
 
     println("Starting at ${posToString(pos)}")
@@ -44,5 +44,4 @@
     println("Moved South 1: ${posToString(pos)}")
 
     println("Final position: ${posToString(pos)}")
-    "done"
 }

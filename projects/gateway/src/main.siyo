@@ -13,9 +13,6 @@ import "std/json"
 // ========== Route Table ==========
 
 mut routes = map()
-routes.set("/api/users", "http://localhost:3000")
-routes.set("/api/todos", "http://localhost:3001")
-routes.set("/api/chat",  "http://localhost:3002")
 
 // ========== HTTP Helpers ==========
 
@@ -110,92 +107,98 @@ fn jsonGatewayInfo(routeMap: map) -> string {
 
 // ========== Main Server ==========
 
-println("=== Siyo API Gateway ===")
-println("Routes:")
-mut routeKeys = routes.keys()
-for mut i = 0 i < len(routeKeys) i = i + 1 {
-    mut prefix = toString(routeKeys[i])
-    mut backend = toString(routes.get(prefix))
-    println("  " + prefix + " -> " + backend)
-}
+fn main() {
+    routes.set("/api/users", "http://localhost:3000")
+    routes.set("/api/todos", "http://localhost:3001")
+    routes.set("/api/chat",  "http://localhost:3002")
 
-mut server = ServerSocket.new(7000)
-println("Gateway listening on http://localhost:7000")
+    println("=== Siyo API Gateway ===")
+    println("Routes:")
+    mut routeKeys = routes.keys()
+    for mut i = 0 i < len(routeKeys) i = i + 1 {
+        mut prefix = toString(routeKeys[i])
+        mut backend = toString(routes.get(prefix))
+        println("  " + prefix + " -> " + backend)
+    }
 
-while true {
-    mut socket = server.accept()
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    mut server = ServerSocket.new(7000)
+    println("Gateway listening on http://localhost:7000")
 
-    mut requestLine = reader.readLine()
-    if requestLine == null {
-        socket.close()
-    } else {
-        mut startTime = System.currentTimeMillis()
-        mut method = parseMethod(requestLine)
-        mut path = parsePath(requestLine)
+    while true {
+        mut socket = server.accept()
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
 
-        // Read headers
-        mut contentLength = 0
-        mut h = reader.readLine()
-        while h != null {
-            if len(h) == 0 { break }
-            if contains(h, "Content-Length") {
-                mut idx = indexOf(h, ":") + 1
-                contentLength = parseInt(trim(substring(h, idx, len(h))))
-            }
-            h = reader.readLine()
-        }
-
-        // Read body if present
-        mut requestBody = ""
-        for mut i = 0 i < contentLength i = i + 1 {
-            requestBody = requestBody + chr(reader.read())
-        }
-
-        // Request logging middleware
-        println("[" + method + "] " + path)
-
-        // Handle CORS preflight
-        mut response = ""
-        if method == "OPTIONS" {
-            mut elapsed = System.currentTimeMillis() - startTime
-            response = buildResponse(204, "No Content", "", elapsed)
-        } else if path == "/health" {
-            mut elapsed = System.currentTimeMillis() - startTime
-            response = buildResponse(200, "OK", jsonStatus("healthy"), elapsed)
-        } else if path == "/gateway/info" {
-            mut elapsed = System.currentTimeMillis() - startTime
-            response = buildResponse(200, "OK", jsonGatewayInfo(routes), elapsed)
+        mut requestLine = reader.readLine()
+        if requestLine == null {
+            socket.close()
         } else {
-            // Route matching
-            mut backend = matchRoute(path, routes)
-            if backend == "" {
+            mut startTime = System.currentTimeMillis()
+            mut method = parseMethod(requestLine)
+            mut path = parsePath(requestLine)
+
+            // Read headers
+            mut contentLength = 0
+            mut h = reader.readLine()
+            while h != null {
+                if len(h) == 0 { break }
+                if contains(h, "Content-Length") {
+                    mut idx = indexOf(h, ":") + 1
+                    contentLength = parseInt(trim(substring(h, idx, len(h))))
+                }
+                h = reader.readLine()
+            }
+
+            // Read body if present
+            mut requestBody = ""
+            for mut i = 0 i < contentLength i = i + 1 {
+                requestBody = requestBody + chr(reader.read())
+            }
+
+            // Request logging middleware
+            println("[" + method + "] " + path)
+
+            // Handle CORS preflight
+            mut response = ""
+            if method == "OPTIONS" {
                 mut elapsed = System.currentTimeMillis() - startTime
-                response = buildResponse(404, "Not Found", jsonError("no route matched: " + path), elapsed)
-                println("  -> 404 no route")
+                response = buildResponse(204, "No Content", "", elapsed)
+            } else if path == "/health" {
+                mut elapsed = System.currentTimeMillis() - startTime
+                response = buildResponse(200, "OK", jsonStatus("healthy"), elapsed)
+            } else if path == "/gateway/info" {
+                mut elapsed = System.currentTimeMillis() - startTime
+                response = buildResponse(200, "OK", jsonGatewayInfo(routes), elapsed)
             } else {
-                mut suffix = extractSuffix(path, routes)
-                mut targetUrl = backend + suffix
-                println("  -> forwarding to " + targetUrl)
-
-                mut backendBody = httpGet(targetUrl)
-                mut elapsed = System.currentTimeMillis() - startTime
-
-                if startsWith(backendBody, "ERROR:") {
-                    mut errMsg = substring(backendBody, 6, len(backendBody))
-                    response = buildResponse(502, "Bad Gateway", jsonError("backend error: " + trim(errMsg)), elapsed)
-                    println("  -> 502 backend error")
+                // Route matching
+                mut backend = matchRoute(path, routes)
+                if backend == "" {
+                    mut elapsed = System.currentTimeMillis() - startTime
+                    response = buildResponse(404, "Not Found", jsonError("no route matched: " + path), elapsed)
+                    println("  -> 404 no route")
                 } else {
-                    response = buildResponse(200, "OK", trim(backendBody), elapsed)
-                    println("  -> 200 (" + toString(elapsed) + "ms)")
+                    mut suffix = extractSuffix(path, routes)
+                    mut targetUrl = backend + suffix
+                    println("  -> forwarding to " + targetUrl)
+
+                    mut backendBody = httpGet(targetUrl)
+                    mut elapsed = System.currentTimeMillis() - startTime
+
+                    if startsWith(backendBody, "ERROR:") {
+                        mut errMsg = substring(backendBody, 6, len(backendBody))
+                        response = buildResponse(502, "Bad Gateway", jsonError("backend error: " + trim(errMsg)), elapsed)
+                        println("  -> 502 backend error")
+                    } else {
+                        response = buildResponse(200, "OK", trim(backendBody), elapsed)
+                        println("  -> 200 (" + toString(elapsed) + "ms)")
+                    }
                 }
             }
-        }
 
-        // Send response
-        mut out = socket.getOutputStream()
-        out.write(response.getBytes())
-        out.flush()
-        socket.close()
+            // Send response
+            mut out = socket.getOutputStream()
+            out.write(response.getBytes())
+            out.flush()
+            socket.close()
+        }
     }
 }

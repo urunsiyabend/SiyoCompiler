@@ -310,21 +310,37 @@ send c.increment(1)            // fire-and-forget
 
 ### Module file format
 
-A module file is a `.siyo` file whose content is a single `{ }` block:
+A `.siyo` file is a sequence of top-level items. No outer `{ }` wrapper is needed (it is accepted for backward compatibility but no longer idiomatic).
 
 ```siyo
-{
-    mut state = 0          // module-level variable, initialized at import time
+mut state = 0          // module-level variable, initialized at load time
 
-    println("initialized") // top-level statements run once when the module is first imported
+fn init() {            // runs once when the module is first loaded (eagerly on import)
+    state = 1
+}
 
-    fn greet(name: string) {
-        println("hello " + name)
-    }
+fn greet(name: string) {
+    println("hello " + name)
 }
 ```
 
-All statements at module top level run in `<clinit>` (once, on first import). Functions and variables are exported as `moduleName.symbol`.
+#### Top-level rules (Go-style)
+
+Only these forms are allowed at the top of a file:
+- `fn`, `struct`, `actor`, `impl`, `enum` declarations
+- `import` and `import java` statements
+- `mut` / `imut` variable declarations
+
+Any bare statement at the top level — `println(...)`, `if ...`, `for ...`, loose expressions — is a **compile error**: `top-level statement not allowed; move into init() or main()`.
+
+Two zero-arg functions have special runtime semantics:
+
+- **`fn init()`** — runs once when the module is first loaded. Eagerly triggered at import time (the importing class's `main` / `<clinit>` force-loads each imported module class, which fires the imported module's own `<clinit>`, which runs its `init()`). For a given file, the order is: imported modules' `init()`s (in import order, depth-first) → this module's top-level variable initializers → this module's `init()`.
+- **`fn main()`** — runs only when the module is the entrypoint (compiled directly via `siyoc run file.siyo` or as the project main). Never runs when the module is imported.
+
+A file that is run as the entrypoint and defines both functions runs `init()` first, then `main()`. A file with neither is a no-op when run as the entrypoint.
+
+Functions and top-level variables are exported as `moduleName.symbol` when imported from another file.
 
 ### Import
 

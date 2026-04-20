@@ -1,4 +1,3 @@
-{
 // Task Orchestrator Tests — in-memory, no SQLite dependency
 import "std/testing"
 
@@ -46,82 +45,83 @@ fn resetTasks() {
 
 // ========== Tests ==========
 
-println("=== Task Orchestrator Tests ===")
-println("")
+fn main() {
+    println("=== Task Orchestrator Tests ===")
+    println("")
 
-// Test: task creation
-println("--- test: task creation inserts with pending status")
-resetTasks()
-mut id1 = createTask("Deploy service")
-testing.assertEqual(getStatus(id1), "pending", "new task should be pending")
-println("  PASS: task creation inserts with pending status")
+    // Test: task creation
+    println("--- test: task creation inserts with pending status")
+    resetTasks()
+    mut id1 = createTask("Deploy service")
+    testing.assertEqual(getStatus(id1), "pending", "new task should be pending")
+    println("  PASS: task creation inserts with pending status")
 
-// Test: valid auto-increment IDs
-println("--- test: task creation returns valid id")
-resetTasks()
-mut id2a = createTask("First task")
-mut id2b = createTask("Second task")
-testing.assert(id2a > 0, "first id should be positive")
-testing.assert(id2b > id2a, "second id should be greater than first")
-println("  PASS: task creation returns valid id")
+    // Test: valid auto-increment IDs
+    println("--- test: task creation returns valid id")
+    resetTasks()
+    mut id2a = createTask("First task")
+    mut id2b = createTask("Second task")
+    testing.assert(id2a > 0, "first id should be positive")
+    testing.assert(id2b > id2a, "second id should be greater than first")
+    println("  PASS: task creation returns valid id")
 
-// Test: count
-println("--- test: list tasks returns all tasks")
-resetTasks()
-createTask("Task A")
-createTask("Task B")
-createTask("Task C")
-testing.assert(taskCount() == 3, "should have 3 tasks")
-println("  PASS: list tasks returns all tasks")
+    // Test: count
+    println("--- test: list tasks returns all tasks")
+    resetTasks()
+    createTask("Task A")
+    createTask("Task B")
+    createTask("Task C")
+    testing.assert(taskCount() == 3, "should have 3 tasks")
+    println("  PASS: list tasks returns all tasks")
 
-// Test: pending -> running
-println("--- test: transition pending -> running")
-resetTasks()
-mut id4 = createTask("Build project")
-updateStatus(id4, "running")
-testing.assertEqual(getStatus(id4), "running", "status should be running")
-println("  PASS: transition pending -> running")
+    // Test: pending -> running
+    println("--- test: transition pending -> running")
+    resetTasks()
+    mut id4 = createTask("Build project")
+    updateStatus(id4, "running")
+    testing.assertEqual(getStatus(id4), "running", "status should be running")
+    println("  PASS: transition pending -> running")
 
-// Test: running -> done
-println("--- test: transition running -> done")
-resetTasks()
-mut id5 = createTask("Run tests")
-updateStatus(id5, "running")
-updateStatus(id5, "done")
-testing.assertEqual(getStatus(id5), "done", "status should be done")
-println("  PASS: transition running -> done")
+    // Test: running -> done
+    println("--- test: transition running -> done")
+    resetTasks()
+    mut id5 = createTask("Run tests")
+    updateStatus(id5, "running")
+    updateStatus(id5, "done")
+    testing.assertEqual(getStatus(id5), "done", "status should be done")
+    println("  PASS: transition running -> done")
 
-// Test: running -> failed
-println("--- test: transition running -> failed")
-resetTasks()
-mut id6 = createTask("Flaky task")
-updateStatus(id6, "running")
-updateStatus(id6, "failed")
-testing.assertEqual(getStatus(id6), "failed", "status should be failed")
-println("  PASS: transition running -> failed")
+    // Test: running -> failed
+    println("--- test: transition running -> failed")
+    resetTasks()
+    mut id6 = createTask("Flaky task")
+    updateStatus(id6, "running")
+    updateStatus(id6, "failed")
+    testing.assertEqual(getStatus(id6), "failed", "status should be failed")
+    println("  PASS: transition running -> failed")
 
-// Test: pending -> failed
-println("--- test: transition pending -> failed")
-resetTasks()
-mut id7 = createTask("Bad task")
-updateStatus(id7, "failed")
-testing.assertEqual(getStatus(id7), "failed", "status should be failed")
-println("  PASS: transition pending -> failed")
+    // Test: pending -> failed
+    println("--- test: transition pending -> failed")
+    resetTasks()
+    mut id7 = createTask("Bad task")
+    updateStatus(id7, "failed")
+    testing.assertEqual(getStatus(id7), "failed", "status should be failed")
+    println("  PASS: transition pending -> failed")
 
-// Test: independent tracking
-println("--- test: multiple tasks track independently")
-resetTasks()
-mut id8a = createTask("Task 1")
-mut id8b = createTask("Task 2")
-mut id8c = createTask("Task 3")
-updateStatus(id8a, "running")
-updateStatus(id8b, "running")
-updateStatus(id8b, "done")
-testing.assertEqual(getStatus(id8a), "running", "task 1 should be running")
-testing.assertEqual(getStatus(id8b), "done", "task 2 should be done")
-testing.assertEqual(getStatus(id8c), "pending", "task 3 should be pending")
-println("  PASS: multiple tasks track independently")
+    // Test: independent tracking
+    println("--- test: multiple tasks track independently")
+    resetTasks()
+    mut id8a = createTask("Task 1")
+    mut id8b = createTask("Task 2")
+    mut id8c = createTask("Task 3")
+    updateStatus(id8a, "running")
+    updateStatus(id8b, "running")
+    updateStatus(id8b, "done")
+    testing.assertEqual(getStatus(id8a), "running", "task 1 should be running")
+    testing.assertEqual(getStatus(id8b), "done", "task 2 should be done")
+    testing.assertEqual(getStatus(id8c), "pending", "task 3 should be pending")
+    println("  PASS: multiple tasks track independently")
 
-println("")
-println("All tests complete.")
+    println("")
+    println("All tests complete.")
 }

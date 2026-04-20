@@ -1,0 +1,18 @@
+fn escape(s: string) -> string {
+    mut result = replace(s, "&", "&amp;")
+    result = replace(result, "<", "&lt;")
+    result = replace(result, ">", "&gt;")
+    result = replace(result, "\"", "&quot;")
+    return result
+}
+
+fn escapeAttr(s: string) -> string {
+    mut result = replace(s, "&", "&amp;")
+    result = replace(result, "<", "&lt;")
+    result = replace(result, ">", "&gt;")
+    result = replace(result, "\"", "&quot;")
+    result = replace(result, "'", "&#x27;")
+    result = replace(result, "\n", "&#10;")
+    result = replace(result, "\r", "&#13;")
+    return result
+}

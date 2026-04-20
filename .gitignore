@@ -25,3 +25,6 @@ build_output.txt
 .depintel/
 *.class
 lib/
+
+# Generated output
+projects/*/dist/

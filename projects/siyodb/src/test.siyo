@@ -57,70 +57,72 @@ impl Store {
 
 // ========== Tests ==========
 
-println("=== siyodb Store Tests ===")
-println("")
+fn main() {
+    println("=== siyodb Store Tests ===")
+    println("")
 
-mut store = spawn Store.new()
+    mut store = spawn Store.new()
 
-// Test: set and get
-println("--- test: set and get")
-mut result1 = store.set("name", "siyo")
-testing.assertEqual(result1, "OK", "set should return OK")
-mut val1 = store.get("name")
-testing.assertEqual(val1, "siyo", "get should return stored value")
-println("  PASS: set and get")
+    // Test: set and get
+    println("--- test: set and get")
+    mut result1 = store.set("name", "siyo")
+    testing.assertEqual(result1, "OK", "set should return OK")
+    mut val1 = store.get("name")
+    testing.assertEqual(val1, "siyo", "get should return stored value")
+    println("  PASS: set and get")
 
-// Test: get missing key
-println("--- test: get missing key")
-mut val2 = store.get("nonexistent")
-testing.assertEqual(val2, "(nil)", "missing key should return (nil)")
-println("  PASS: get missing key")
+    // Test: get missing key
+    println("--- test: get missing key")
+    mut val2 = store.get("nonexistent")
+    testing.assertEqual(val2, "(nil)", "missing key should return (nil)")
+    println("  PASS: get missing key")
 
-// Test: overwrite value
-println("--- test: overwrite value")
-store.set("color", "red")
-store.set("color", "blue")
-mut val3 = store.get("color")
-testing.assertEqual(val3, "blue", "overwritten key should return new value")
-println("  PASS: overwrite value")
+    // Test: overwrite value
+    println("--- test: overwrite value")
+    store.set("color", "red")
+    store.set("color", "blue")
+    mut val3 = store.get("color")
+    testing.assertEqual(val3, "blue", "overwritten key should return new value")
+    println("  PASS: overwrite value")
 
-// Test: delete existing key
-println("--- test: delete existing key")
-store.set("temp", "data")
-mut result2 = store.del("temp")
-testing.assertEqual(result2, "(deleted)", "del existing should return (deleted)")
-mut val4 = store.get("temp")
-testing.assertEqual(val4, "(nil)", "deleted key should return (nil)")
-println("  PASS: delete existing key")
+    // Test: delete existing key
+    println("--- test: delete existing key")
+    store.set("temp", "data")
+    mut result2 = store.del("temp")
+    testing.assertEqual(result2, "(deleted)", "del existing should return (deleted)")
+    mut val4 = store.get("temp")
+    testing.assertEqual(val4, "(nil)", "deleted key should return (nil)")
+    println("  PASS: delete existing key")
 
-// Test: delete missing key
-println("--- test: delete missing key")
-mut result3 = store.del("ghost")
-testing.assertEqual(result3, "(nil)", "del missing should return (nil)")
-println("  PASS: delete missing key")
+    // Test: delete missing key
+    println("--- test: delete missing key")
+    mut result3 = store.del("ghost")
+    testing.assertEqual(result3, "(nil)", "del missing should return (nil)")
+    println("  PASS: delete missing key")
 
-// Test: keys listing
-println("--- test: keys listing")
-store.set("a", "1")
-store.set("b", "2")
-mut k1 = store.keys()
-testing.assert(contains(k1, "a"), "keys should contain a")
-testing.assert(contains(k1, "b"), "keys should contain b")
-println("  PASS: keys listing")
+    // Test: keys listing
+    println("--- test: keys listing")
+    store.set("a", "1")
+    store.set("b", "2")
+    mut k1 = store.keys()
+    testing.assert(contains(k1, "a"), "keys should contain a")
+    testing.assert(contains(k1, "b"), "keys should contain b")
+    println("  PASS: keys listing")
 
-// Test: stats count
-println("--- test: stats count")
-mut s1 = store.stats()
-testing.assert(startsWith(s1, "keys="), "stats should start with keys=")
-println("  PASS: stats count")
+    // Test: stats count
+    println("--- test: stats count")
+    mut s1 = store.stats()
+    testing.assert(startsWith(s1, "keys="), "stats should start with keys=")
+    println("  PASS: stats count")
 
-// Test: empty store keys
-println("--- test: empty store keys")
-mut fresh = spawn Store.new()
-mut k2 = fresh.keys()
-testing.assertEqual(k2, "(empty)", "empty store keys should return (empty)")
-println("  PASS: empty store keys")
+    // Test: empty store keys
+    println("--- test: empty store keys")
+    mut fresh = spawn Store.new()
+    mut k2 = fresh.keys()
+    testing.assertEqual(k2, "(empty)", "empty store keys should return (empty)")
+    println("  PASS: empty store keys")
 
-println("")
-println("All tests completed.")
+    println("")
+    println("All tests completed.")
+}
 }

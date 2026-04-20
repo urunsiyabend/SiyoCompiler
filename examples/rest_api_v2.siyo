@@ -214,53 +214,55 @@ fn handle(method: string, path: string, body: string) -> string {
 
 // ========== Server ==========
 
-println("=== Siyo REST API v2 ===")
-dbExec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, age INTEGER)")
+fn main() {
+    println("=== Siyo REST API v2 ===")
+    dbExec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT, age INTEGER)")
 
-// Seed
-dbInsert("Alice", "alice@siyo.dev", 28)
-dbInsert("Bob", "bob@siyo.dev", 32)
-dbInsert("Charlie", "charlie@siyo.dev", 25)
-println("Seeded 3 users.")
+    // Seed
+    dbInsert("Alice", "alice@siyo.dev", 28)
+    dbInsert("Bob", "bob@siyo.dev", 32)
+    dbInsert("Charlie", "charlie@siyo.dev", 25)
+    println("Seeded 3 users.")
 
-mut server = ServerSocket.new(3000)
-println("http://localhost:3000")
+    mut server = ServerSocket.new(3000)
+    println("http://localhost:3000")
 
-while true {
-    mut socket = server.accept()
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    while true {
+        mut socket = server.accept()
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
 
-    mut requestLine = reader.readLine()
-    if requestLine == null { socket.close() }
-    else {
-        mut method = parseMethod(requestLine)
-        mut path = parsePath(requestLine)
+        mut requestLine = reader.readLine()
+        if requestLine == null { socket.close() }
+        else {
+            mut method = parseMethod(requestLine)
+            mut path = parsePath(requestLine)
 
-        // Read headers, find Content-Length
-        mut contentLength = 0
-        mut h = reader.readLine()
-        while h != null {
-            if len(h) == 0 { break }
-            if contains(h, "Content-Length") {
-                mut idx = indexOf(h, ":") + 1
-                contentLength = parseInt(trim(substring(h, idx, len(h))))
+            // Read headers, find Content-Length
+            mut contentLength = 0
+            mut h = reader.readLine()
+            while h != null {
+                if len(h) == 0 { break }
+                if contains(h, "Content-Length") {
+                    mut idx = indexOf(h, ":") + 1
+                    contentLength = parseInt(trim(substring(h, idx, len(h))))
+                }
+                h = reader.readLine()
             }
-            h = reader.readLine()
+
+            // Read body
+            mut body = ""
+            for i in range(0, contentLength) {
+                body += chr(reader.read())
+            }
+
+            // Route and respond
+            mut response = handle(method, path, body)
+            mut out = socket.getOutputStream()
+            out.write(response.getBytes())
+            out.flush()
+            socket.close()
+
+            println("$method $path -> ${len(response)}b")
         }
-
-        // Read body
-        mut body = ""
-        for i in range(0, contentLength) {
-            body += chr(reader.read())
-        }
-
-        // Route and respond
-        mut response = handle(method, path, body)
-        mut out = socket.getOutputStream()
-        out.write(response.getBytes())
-        out.flush()
-        socket.close()
-
-        println("$method $path -> ${len(response)}b")
     }
 }

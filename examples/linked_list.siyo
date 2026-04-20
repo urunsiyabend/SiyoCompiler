@@ -1,9 +1,9 @@
-{
-    struct Node {
-        value: int,
-        next: int
-    }
+struct Node {
+    value: int,
+    next: int
+}
 
+fn main() {
     mut nodes = [
         Node { value: 10, next: 1 },
         Node { value: 20, next: 2 },
@@ -20,5 +20,4 @@
         current = node.next
     }
     println("Sum: $sum")
-    sum
 }

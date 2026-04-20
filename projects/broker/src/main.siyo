@@ -141,55 +141,57 @@ fn handleCommand(broker: object, clientId: string, line: string) -> string {
 
 // --------------- Main ---------------
 
-println("=== Siyo Message Broker ===")
+fn main() {
+    println("=== Siyo Message Broker ===")
 
-mut broker = spawn Broker.new()
-mut nextId = 0
+    mut broker = spawn Broker.new()
+    mut nextId = 0
 
-mut server = ServerSocket.new(4222)
-println("Listening on port 4222")
-println("Protocol: PUB topic message | SUB topic | UNSUB topic | STATS")
+    mut server = ServerSocket.new(4222)
+    println("Listening on port 4222")
+    println("Protocol: PUB topic message | SUB topic | UNSUB topic | STATS")
 
-while true {
-    mut socket = server.accept()
-    nextId += 1
-    mut clientId = "client-$nextId"
-    println("[broker] $clientId connected")
+    while true {
+        mut socket = server.accept()
+        nextId += 1
+        mut clientId = "client-$nextId"
+        println("[broker] $clientId connected")
 
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
-    mut writer = OutputStreamWriter.new(socket.getOutputStream())
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+        mut writer = OutputStreamWriter.new(socket.getOutputStream())
 
-    mut clientActor = spawn Client.new(broker, clientId, writer)
-    clients.set(clientId, clientActor)
+        mut clientActor = spawn Client.new(broker, clientId, writer)
+        clients.set(clientId, clientActor)
 
-    // Send welcome
-    writer.write("+OK welcome $clientId\n")
-    writer.flush()
+        // Send welcome
+        writer.write("+OK welcome $clientId\n")
+        writer.flush()
 
-    // Read commands
-    mut line = reader.readLine()
-    while line != null {
-        mut trimmed = trim(line)
-        if len(trimmed) > 0 {
-            if trimmed == "QUIT" {
-                writer.write("+OK bye\n")
-                writer.flush()
-                line = null
+        // Read commands
+        mut line = reader.readLine()
+        while line != null {
+            mut trimmed = trim(line)
+            if len(trimmed) > 0 {
+                if trimmed == "QUIT" {
+                    writer.write("+OK bye\n")
+                    writer.flush()
+                    line = null
+                } else {
+                    mut response = handleCommand(broker, clientId, trimmed)
+                    writer.write(response + "\n")
+                    writer.flush()
+                    println("[broker] $clientId: $trimmed -> $response")
+                    line = reader.readLine()
+                }
             } else {
-                mut response = handleCommand(broker, clientId, trimmed)
-                writer.write(response + "\n")
-                writer.flush()
-                println("[broker] $clientId: $trimmed -> $response")
                 line = reader.readLine()
             }
-        } else {
-            line = reader.readLine()
         }
-    }
 
-    // Cleanup
-    clients.remove(clientId)
-    clientActor.stop()
-    socket.close()
-    println("[broker] $clientId disconnected")
+        // Cleanup
+        clients.remove(clientId)
+        clientActor.stop()
+        socket.close()
+        println("[broker] $clientId disconnected")
+    }
 }

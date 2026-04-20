@@ -1,11 +1,9 @@
-{
-    import java "codeanalysis.SiyoRuntime"
+import java "codeanalysis.SiyoRuntime"
 
-    fn parse(s: string) -> map {
-        return SiyoRuntime.jsonParse(s)
-    }
+fn parse(s: string) -> map {
+    return SiyoRuntime.jsonParse(s)
+}
 
-    fn stringify(v: object) -> string {
-        return SiyoRuntime.jsonStringify(v)
-    }
+fn stringify(v: object) -> string {
+    return SiyoRuntime.jsonStringify(v)
 }

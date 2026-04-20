@@ -195,10 +195,59 @@ public class Emitter {
     }
 
     /**
-     * For module classes: emit a <clinit> that initializes module-level variables.
+     * Collect distinct class names of imported modules, read from function symbols'
+     * moduleName metadata. Used to force-load imports so their init() fires eagerly.
+     */
+    private java.util.Set<String> collectImportedModuleClasses() {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        for (FunctionSymbol func : _functions.keySet()) {
+            String mod = func.getModuleName();
+            if (mod != null) names.add(mod);
+        }
+        return names;
+    }
+
+    /**
+     * Find a zero-argument user function declared in this class by name.
+     * Used to dispatch to init() / main(). Excludes bodies that are shared with
+     * an imported module's function (those are cross-reference copies).
+     */
+    private FunctionSymbol findZeroArgFunction(String name) {
+        java.util.Set<BoundBlockStatement> importedBodies = new java.util.HashSet<>();
+        for (Map.Entry<FunctionSymbol, BoundBlockStatement> e : _functions.entrySet()) {
+            if (e.getKey().getModuleName() != null) importedBodies.add(e.getValue());
+        }
+        for (Map.Entry<FunctionSymbol, BoundBlockStatement> e : _functions.entrySet()) {
+            FunctionSymbol func = e.getKey();
+            if (func.getModuleName() != null) continue;
+            if (importedBodies.contains(e.getValue())) continue;
+            if (func.getName().equals(name) && func.getParameters().isEmpty()) {
+                return func;
+            }
+        }
+        return null;
+    }
+
+    private void emitForceLoadImports(java.util.Set<String> moduleClassNames) {
+        for (String cls : moduleClassNames) {
+            _mv.visitLdcInsn(cls);
+            _mv.visitMethodInsn(INVOKESTATIC, "java/lang/Class", "forName",
+                    "(Ljava/lang/String;)Ljava/lang/Class;", false);
+            _mv.visitInsn(POP);
+        }
+    }
+
+    /**
+     * For module classes: emit a <clinit> that force-loads imports, initializes
+     * module-level variables, and then invokes init() if the user defined one.
      */
     private void emitModuleInitializer(ClassWriter cw, String className) {
-        if (_statement.getStatements().isEmpty() && !_needsScanner) return;
+        java.util.Set<String> importedModules = collectImportedModuleClasses();
+        FunctionSymbol init = findZeroArgFunction("init");
+        boolean hasBody = !_statement.getStatements().isEmpty()
+                || !importedModules.isEmpty()
+                || init != null;
+        if (!hasBody) return;
 
         _mv = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
         _mv.visitCode();
@@ -208,8 +257,14 @@ public class Emitter {
         _inMainMethod = true;
         _lastEmittedLine = -1;
 
+        emitForceLoadImports(importedModules);
+
         for (BoundStatement stmt : _statement.getStatements()) {
             emitStatement(stmt);
+        }
+
+        if (init != null) {
+            _mv.visitMethodInsn(INVOKESTATIC, className, "init", "()V", false);
         }
 
         _mv.visitInsn(RETURN);
@@ -232,22 +287,22 @@ public class Emitter {
         _mv.visitVarInsn(ALOAD, 0);
         _mv.visitFieldInsn(PUTSTATIC, "codeanalysis/SiyoRuntime", "programArgs", "[Ljava/lang/String;");
 
-        // For main method: print the last expression value if non-void
-        var statements = _statement.getStatements();
-        for (int i = 0; i < statements.size(); i++) {
-            BoundStatement stmt = statements.get(i);
-            boolean isLast = (i == statements.size() - 1);
+        // Eagerly trigger each imported module's class initializer (runs its init()).
+        emitForceLoadImports(collectImportedModuleClasses());
 
-            if (isLast && stmt instanceof BoundExpressionStatement exprStmt
-                    && exprStmt.getExpression().getClassType() != null) {
-                // Print last expression result
-                _mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
-                emitExpression(exprStmt.getExpression());
-                emitBoxIfNeeded(exprStmt.getExpression().getClassType());
-                _mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/Object;)V", false);
-            } else {
-                emitStatement(stmt);
-            }
+        // Emit top-level statements — after binding checks, these are declarations
+        // and variable initializers; non-declaration statements don't reach here.
+        for (BoundStatement stmt : _statement.getStatements()) {
+            emitStatement(stmt);
+        }
+
+        FunctionSymbol init = findZeroArgFunction("init");
+        if (init != null) {
+            _mv.visitMethodInsn(INVOKESTATIC, className, "init", "()V", false);
+        }
+        FunctionSymbol userMain = findZeroArgFunction("main");
+        if (userMain != null) {
+            _mv.visitMethodInsn(INVOKESTATIC, className, "main", "()V", false);
         }
 
         _mv.visitInsn(RETURN);

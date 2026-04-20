@@ -1,23 +1,21 @@
-{
-    import java "java.lang.System"
-    import java "java.lang.Runtime"
-    import java "codeanalysis.SiyoRuntime"
+import java "java.lang.System"
+import java "java.lang.Runtime"
+import java "codeanalysis.SiyoRuntime"
 
-    fn args() -> string[] {
-        return SiyoRuntime.getProgramArgs()
-    }
+fn args() -> string[] {
+    return SiyoRuntime.getProgramArgs()
+}
 
-    fn env(name: string) -> string {
-        mut val = System.getenv(name)
-        if val == null { return "" }
-        return val
-    }
+fn env(name: string) -> string {
+    mut val = System.getenv(name)
+    if val == null { return "" }
+    return val
+}
 
-    fn exit(code: int) {
-        System.exit(code)
-    }
+fn exit(code: int) {
+    System.exit(code)
+}
 
-    fn cwd() -> string {
-        return System.getProperty("user.dir")
-    }
+fn cwd() -> string {
+    return System.getProperty("user.dir")
 }

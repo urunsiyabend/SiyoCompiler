@@ -1,4 +1,3 @@
-{
 // Load Balancer Tests — round-robin logic and backend selection
 import "std/testing"
 
@@ -38,93 +37,94 @@ fn resetPool() {
 
 // ========== Tests ==========
 
-println("=== Load Balancer Tests ===")
+fn main() {
+    println("=== Load Balancer Tests ===")
 
-// Test: round-robin cycles through backends in order
-println("--- test: round-robin cycles through backends in order")
-resetPool()
-mut first1 = nextBackend()
-mut second1 = nextBackend()
-mut third1 = nextBackend()
-testing.assertEqual(first1, "http://localhost:8081", "first backend")
-testing.assertEqual(second1, "http://localhost:8082", "second backend")
-testing.assertEqual(third1, "http://localhost:8083", "third backend")
-println("  PASS: round-robin cycles through backends in order")
+    // Test: round-robin cycles through backends in order
+    println("--- test: round-robin cycles through backends in order")
+    resetPool()
+    mut first1 = nextBackend()
+    mut second1 = nextBackend()
+    mut third1 = nextBackend()
+    testing.assertEqual(first1, "http://localhost:8081", "first backend")
+    testing.assertEqual(second1, "http://localhost:8082", "second backend")
+    testing.assertEqual(third1, "http://localhost:8083", "third backend")
+    println("  PASS: round-robin cycles through backends in order")
 
-// Test: round-robin wraps around after last backend
-println("--- test: round-robin wraps around after last backend")
-resetPool()
-nextBackend()
-nextBackend()
-nextBackend()
-mut fourth2 = nextBackend()
-testing.assertEqual(fourth2, "http://localhost:8081", "wraps to first")
-println("  PASS: round-robin wraps around after last backend")
+    // Test: round-robin wraps around after last backend
+    println("--- test: round-robin wraps around after last backend")
+    resetPool()
+    nextBackend()
+    nextBackend()
+    nextBackend()
+    mut fourth2 = nextBackend()
+    testing.assertEqual(fourth2, "http://localhost:8081", "wraps to first")
+    println("  PASS: round-robin wraps around after last backend")
 
-// Test: skips unhealthy backend
-println("--- test: skips unhealthy backend")
-resetPool()
-healthy[1] = false
-mut first3 = nextBackend()
-mut second3 = nextBackend()
-mut third3 = nextBackend()
-testing.assertEqual(first3, "http://localhost:8081", "picks first (healthy)")
-testing.assertEqual(second3, "http://localhost:8083", "skips second (unhealthy), picks third")
-testing.assertEqual(third3, "http://localhost:8081", "wraps back to first")
-println("  PASS: skips unhealthy backend")
+    // Test: skips unhealthy backend
+    println("--- test: skips unhealthy backend")
+    resetPool()
+    healthy[1] = false
+    mut first3 = nextBackend()
+    mut second3 = nextBackend()
+    mut third3 = nextBackend()
+    testing.assertEqual(first3, "http://localhost:8081", "picks first (healthy)")
+    testing.assertEqual(second3, "http://localhost:8083", "skips second (unhealthy), picks third")
+    testing.assertEqual(third3, "http://localhost:8081", "wraps back to first")
+    println("  PASS: skips unhealthy backend")
 
-// Test: returns empty when all backends unhealthy
-println("--- test: returns empty when all backends unhealthy")
-resetPool()
-healthy[0] = false
-healthy[1] = false
-healthy[2] = false
-mut result4 = nextBackend()
-testing.assertEqual(result4, "", "no healthy backend returns empty string")
-println("  PASS: returns empty when all backends unhealthy")
+    // Test: returns empty when all backends unhealthy
+    println("--- test: returns empty when all backends unhealthy")
+    resetPool()
+    healthy[0] = false
+    healthy[1] = false
+    healthy[2] = false
+    mut result4 = nextBackend()
+    testing.assertEqual(result4, "", "no healthy backend returns empty string")
+    println("  PASS: returns empty when all backends unhealthy")
 
-// Test: healthyCount tracks healthy backends
-println("--- test: healthyCount tracks healthy backends")
-resetPool()
-testing.assert(healthyCount() == 3, "all 3 healthy")
-healthy[0] = false
-testing.assert(healthyCount() == 2, "2 healthy after marking one down")
-healthy[1] = false
-testing.assert(healthyCount() == 1, "1 healthy after marking two down")
-healthy[2] = false
-testing.assert(healthyCount() == 0, "0 healthy after marking all down")
-println("  PASS: healthyCount tracks healthy backends")
+    // Test: healthyCount tracks healthy backends
+    println("--- test: healthyCount tracks healthy backends")
+    resetPool()
+    testing.assert(healthyCount() == 3, "all 3 healthy")
+    healthy[0] = false
+    testing.assert(healthyCount() == 2, "2 healthy after marking one down")
+    healthy[1] = false
+    testing.assert(healthyCount() == 1, "1 healthy after marking two down")
+    healthy[2] = false
+    testing.assert(healthyCount() == 0, "0 healthy after marking all down")
+    println("  PASS: healthyCount tracks healthy backends")
 
-// Test: recovered backend re-enters rotation
-println("--- test: recovered backend re-enters rotation")
-resetPool()
-healthy[1] = false
-mut r6a = nextBackend()  // 8081 (index now at 1, but 8082 unhealthy so skip to 8083)
-mut r6b = nextBackend()  // 8083
-healthy[1] = true
-mut next6 = nextBackend()
-// After reset, index=0. First call advances through 0(8081), second skips 1 takes 2(8083), third takes 0(8081) again
-// Actually with global counter: after 2 calls index=3, next call index=3%3=0 -> 8081
-testing.assert(len(next6) > 0, "recovered backend returns to rotation")
-println("  PASS: recovered backend re-enters rotation")
+    // Test: recovered backend re-enters rotation
+    println("--- test: recovered backend re-enters rotation")
+    resetPool()
+    healthy[1] = false
+    mut r6a = nextBackend()  // 8081 (index now at 1, but 8082 unhealthy so skip to 8083)
+    mut r6b = nextBackend()  // 8083
+    healthy[1] = true
+    mut next6 = nextBackend()
+    // After reset, index=0. First call advances through 0(8081), second skips 1 takes 2(8083), third takes 0(8081) again
+    // Actually with global counter: after 2 calls index=3, next call index=3%3=0 -> 8081
+    testing.assert(len(next6) > 0, "recovered backend returns to rotation")
+    println("  PASS: recovered backend re-enters rotation")
 
-// Test: round-robin distributes evenly over many requests
-println("--- test: round-robin distributes evenly over many requests")
-resetPool()
-mut count1 = 0
-mut count2 = 0
-mut count3 = 0
-for i in range(0, 30) {
-    mut b = nextBackend()
-    if b == "http://localhost:8081" { count1 = count1 + 1 }
-    if b == "http://localhost:8082" { count2 = count2 + 1 }
-    if b == "http://localhost:8083" { count3 = count3 + 1 }
-}
-testing.assert(count1 == 10, "backend 1 gets 10 of 30 requests")
-testing.assert(count2 == 10, "backend 2 gets 10 of 30 requests")
-testing.assert(count3 == 10, "backend 3 gets 10 of 30 requests")
-println("  PASS: round-robin distributes evenly over many requests")
+    // Test: round-robin distributes evenly over many requests
+    println("--- test: round-robin distributes evenly over many requests")
+    resetPool()
+    mut count1 = 0
+    mut count2 = 0
+    mut count3 = 0
+    for i in range(0, 30) {
+        mut b = nextBackend()
+        if b == "http://localhost:8081" { count1 = count1 + 1 }
+        if b == "http://localhost:8082" { count2 = count2 + 1 }
+        if b == "http://localhost:8083" { count3 = count3 + 1 }
+    }
+    testing.assert(count1 == 10, "backend 1 gets 10 of 30 requests")
+    testing.assert(count2 == 10, "backend 2 gets 10 of 30 requests")
+    testing.assert(count3 == 10, "backend 3 gets 10 of 30 requests")
+    println("  PASS: round-robin distributes evenly over many requests")
 
-println("")
-println("All load balancer tests complete.")
+    println("")
+    println("All load balancer tests complete.")
 }

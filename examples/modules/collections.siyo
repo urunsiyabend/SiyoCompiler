@@ -1,4 +1,3 @@
-{
 // Generic-ish collection utilities
 
 fn map_int(arr: int[], fn_double: bool) -> int[] {
@@ -47,5 +46,4 @@ fn arrayToString(arr: int[]) -> string {
         s += toString(arr[i])
     }
     "$s]"
-}
 }

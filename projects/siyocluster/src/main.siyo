@@ -708,88 +708,90 @@ fn handleConnection(socket: object, store: Store, nodeState: NodeState, myAddr: 
 
 // ==================== Main ====================
 
-mut args = os.args()
+fn main() {
+    mut args = os.args()
 
-// PAIN POINT: os.args() doesn't include the script name in some modes,
-// and argument count varies. Need to handle flexibly.
-// Expected: [port, role, primaryAddr?]
-// With siyoc run: siyoc run src/main.siyo 7001 primary
-// os.args() returns the args after the script name.
+    // PAIN POINT: os.args() doesn't include the script name in some modes,
+    // and argument count varies. Need to handle flexibly.
+    // Expected: [port, role, primaryAddr?]
+    // With siyoc run: siyoc run src/main.siyo 7001 primary
+    // os.args() returns the args after the script name.
 
-if len(args) < 2 {
-    println("Usage: siyoc run src/main.siyo <port> <primary|replica> [primary_host:primary_port]")
-    println("")
-    println("Examples:")
-    println("  siyoc run src/main.siyo 7001 primary")
-    println("  siyoc run src/main.siyo 7002 replica localhost:7001")
-    println("  siyoc run src/main.siyo 7003 replica localhost:7001")
-    os.exit(1)
-}
-
-mut port = parseInt(args[0])
-mut role = toLower(args[1])
-mut primaryAddr = ""
-imut myAddr = "localhost:$port"
-
-if role == "replica" {
-    if len(args) < 3 {
-        println("ERR: replica mode requires primary address (e.g., localhost:7001)")
+    if len(args) < 2 {
+        println("Usage: siyoc run src/main.siyo <port> <primary|replica> [primary_host:primary_port]")
+        println("")
+        println("Examples:")
+        println("  siyoc run src/main.siyo 7001 primary")
+        println("  siyoc run src/main.siyo 7002 replica localhost:7001")
+        println("  siyoc run src/main.siyo 7003 replica localhost:7001")
         os.exit(1)
     }
-    primaryAddr = args[2]
-}
 
-if role == "primary" {
-    primaryAddr = myAddr
-}
+    mut port = parseInt(args[0])
+    mut role = toLower(args[1])
+    mut primaryAddr = ""
+    imut myAddr = "localhost:$port"
 
-// Print banner
-println("=== SiyoCluster v0.1.0 ===")
-println("Node:    $myAddr")
-println("Role:    $role")
-if role == "replica" {
-    println("Primary: $primaryAddr")
-}
-println("")
-
-// Create core actors
-mut store = spawn Store.new()
-mut nodeState = spawn NodeState.new(role, myAddr, port, primaryAddr)
-
-// If replica, register with primary and request initial sync
-if role == "replica" {
-    println("[init] Connecting to primary at $primaryAddr...")
-    mut primaryHost = parseHost(primaryAddr)
-    mut primaryPort = parsePort(primaryAddr)
-
-    // Register ourselves as a peer on the primary
-    mut regResult = sendTcpMessage(primaryHost, primaryPort, "HEARTBEAT $myAddr")
-    if regResult == "ERR:CONNECT" {
-        println("[init] WARNING: Could not reach primary at $primaryAddr")
-        println("[init] Will retry via heartbeat...")
-    } else {
-        println("[init] Registered with primary")
-        // Also add primary as our peer
-        nodeState.addPeer(primaryAddr)
-        // Sync existing data from primary
-        syncFromPrimary(store, nodeState)
+    if role == "replica" {
+        if len(args) < 3 {
+            println("ERR: replica mode requires primary address (e.g., localhost:7001)")
+            os.exit(1)
+        }
+        primaryAddr = args[2]
     }
-}
 
-// Start heartbeat loop in background
-spawn {
-    heartbeatLoop(nodeState, myAddr)
-}
+    if role == "primary" {
+        primaryAddr = myAddr
+    }
 
-// Start TCP server
-mut server = ServerSocket.new(port)
-println("[server] Listening on port $port")
-println("[server] Ready for connections")
-println("")
+    // Print banner
+    println("=== SiyoCluster v0.1.0 ===")
+    println("Node:    $myAddr")
+    println("Role:    $role")
+    if role == "replica" {
+        println("Primary: $primaryAddr")
+    }
+    println("")
 
-while true {
-    mut socket = server.accept()
+    // Create core actors
+    mut store = spawn Store.new()
+    mut nodeState = spawn NodeState.new(role, myAddr, port, primaryAddr)
+
+    // If replica, register with primary and request initial sync
+    if role == "replica" {
+        println("[init] Connecting to primary at $primaryAddr...")
+        mut primaryHost = parseHost(primaryAddr)
+        mut primaryPort = parsePort(primaryAddr)
+
+        // Register ourselves as a peer on the primary
+        mut regResult = sendTcpMessage(primaryHost, primaryPort, "HEARTBEAT $myAddr")
+        if regResult == "ERR:CONNECT" {
+            println("[init] WARNING: Could not reach primary at $primaryAddr")
+            println("[init] Will retry via heartbeat...")
+        } else {
+            println("[init] Registered with primary")
+            // Also add primary as our peer
+            nodeState.addPeer(primaryAddr)
+            // Sync existing data from primary
+            syncFromPrimary(store, nodeState)
+        }
+    }
+
+    // Start heartbeat loop in background
     spawn {
-        handleConnection(socket, store, nodeState, myAddr)
+        heartbeatLoop(nodeState, myAddr)
+    }
+
+    // Start TCP server
+    mut server = ServerSocket.new(port)
+    println("[server] Listening on port $port")
+    println("[server] Ready for connections")
+    println("")
+
+    while true {
+        mut socket = server.accept()
+        spawn {
+            handleConnection(socket, store, nodeState, myAddr)
+        }
     }
 }

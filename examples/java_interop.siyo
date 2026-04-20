@@ -1,18 +1,20 @@
 import java "java.io.File"
 import java "java.lang.System"
 
-// File operations
-mut file = File.new("test_output.txt")
-println("File: ${file.toString()}")
-println("Exists: ${file.exists()}")
-println("Absolute path: ${file.getAbsolutePath()}")
+fn main() {
+    // File operations
+    mut file = File.new("test_output.txt")
+    println("File: ${file.toString()}")
+    println("Exists: ${file.exists()}")
+    println("Absolute path: ${file.getAbsolutePath()}")
 
-// System properties
-mut os = System.getProperty("os.name")
-mut javaVersion = System.getProperty("java.version")
-println("OS: $os")
-println("Java: $javaVersion")
+    // System properties
+    mut os = System.getProperty("os.name")
+    mut javaVersion = System.getProperty("java.version")
+    println("OS: $os")
+    println("Java: $javaVersion")
 
-// Current time
-mut time = System.currentTimeMillis()
-println("Timestamp: $time")
+    // Current time
+    mut time = System.currentTimeMillis()
+    println("Timestamp: $time")
+}

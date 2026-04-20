@@ -1,24 +1,26 @@
 import "geometry"
 import "std/testing"
 
-// Use imported structs directly (no prefix needed for struct names)
-mut p1 = Point { x: 3, y: 4 }
-mut p2 = Point { x: 6, y: 8 }
+fn main() {
+    // Use imported structs directly (no prefix needed for struct names)
+    mut p1 = Point { x: 3, y: 4 }
+    mut p2 = Point { x: 6, y: 8 }
 
-testing.assertEqual(geometry.pointToString(p1), "(3, 4)", "pointToString p1")
-testing.assertEqual(geometry.pointToString(p2), "(6, 8)", "pointToString p2")
-mut d2 = geometry.distance2(p1, p2)
-testing.assertEqual(toString(d2), "25", "distance^2 between p1 and p2")
+    testing.assertEqual(geometry.pointToString(p1), "(3, 4)", "pointToString p1")
+    testing.assertEqual(geometry.pointToString(p2), "(6, 8)", "pointToString p2")
+    mut d2 = geometry.distance2(p1, p2)
+    testing.assertEqual(toString(d2), "25", "distance^2 between p1 and p2")
 
-mut r = Rect { x: 0, y: 0, w: 10, h: 5 }
-mut rArea = geometry.area(r)
-testing.assertEqual(toString(rArea), "50", "area of 10x5 rect")
-testing.assertEqual(geometry.rectToString(r), "Rect(0, 0, 10x5)", "rectToString")
+    mut r = Rect { x: 0, y: 0, w: 10, h: 5 }
+    mut rArea = geometry.area(r)
+    testing.assertEqual(toString(rArea), "50", "area of 10x5 rect")
+    testing.assertEqual(geometry.rectToString(r), "Rect(0, 0, 10x5)", "rectToString")
 
-mut p1s = geometry.pointToString(p1)
-println("p1 = $p1s")
-mut p2s = geometry.pointToString(p2)
-println("p2 = $p2s")
-println("distance^2 = $d2")
-println("area = $rArea")
-println("All geometry tests passed!")
+    mut p1s = geometry.pointToString(p1)
+    println("p1 = $p1s")
+    mut p2s = geometry.pointToString(p2)
+    println("p2 = $p2s")
+    println("distance^2 = $d2")
+    println("area = $rArea")
+    println("All geometry tests passed!")
+}

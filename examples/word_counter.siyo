@@ -11,39 +11,41 @@ fn countWord(words: string[], target: string) -> int {
     count
 }
 
-// Main program
-mut text = "the quick brown fox jumps over the lazy dog the fox the dog"
-mut words = split(text, " ")
+fn main() {
+    // Main program
+    mut text = "the quick brown fox jumps over the lazy dog the fox the dog"
+    mut words = split(text, " ")
 
-println("Text: $text")
-println("Word count: ${len(words)}")
+    println("Text: $text")
+    println("Word count: ${len(words)}")
 
-// Count specific words
-mut targets = ["the", "fox", "dog", "quick"]
-for target in targets {
-    mut count = countWord(words, target)
-    println("  '$target' appears $count time(s)")
-}
+    // Count specific words
+    mut targets = ["the", "fox", "dog", "quick"]
+    for target in targets {
+        mut count = countWord(words, target)
+        println("  '$target' appears $count time(s)")
+    }
 
-// Find unique words
-mut unique = [""]
-mut uniqueCount = 0
-for word in words {
-    mut found = false
-    for i in range(0, uniqueCount) {
-        if unique[i] == word {
-            found = true
-            break
+    // Find unique words
+    mut unique = [""]
+    mut uniqueCount = 0
+    for word in words {
+        mut found = false
+        for i in range(0, uniqueCount) {
+            if unique[i] == word {
+                found = true
+                break
+            }
+        }
+        if !found {
+            if uniqueCount == 0 {
+                unique[0] = word
+            } else {
+                push(unique, word)
+            }
+            uniqueCount += 1
         }
     }
-    if !found {
-        if uniqueCount == 0 {
-            unique[0] = word
-        } else {
-            push(unique, word)
-        }
-        uniqueCount += 1
-    }
-}
 
-println("Unique words: $uniqueCount")
+    println("Unique words: $uniqueCount")
+}

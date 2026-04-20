@@ -114,7 +114,7 @@ public class SiyoProject {
             Files.writeString(projectDir.resolve("siyo.toml"), toml);
 
             // src/main.siyo
-            String main = "{\n" +
+            String main = "fn main() {\n" +
                     "    println(\"Hello from " + name + "!\")\n" +
                     "}\n";
             Files.writeString(projectDir.resolve("src").resolve("main.siyo"), main);

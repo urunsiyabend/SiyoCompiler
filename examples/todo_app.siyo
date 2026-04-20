@@ -143,44 +143,46 @@ impl TodoList {
     }
 }
 
-// ========== Main ==========
-mut app = TodoList.new("todos.dat")
-app.load()
+fn main() {
+    // ========== Main ==========
+    mut app = TodoList.new("todos.dat")
+    app.load()
 
-println("=== Todo App ===")
-println("Commands: add <title>, list, done <id>, remove <id>, stats, save, quit")
-println("")
+    println("=== Todo App ===")
+    println("Commands: add <title>, list, done <id>, remove <id>, stats, save, quit")
+    println("")
 
-mut running = true
-while running {
-    mut cmd = input("> ")
-    mut trimmed = trim(cmd)
+    mut running = true
+    while running {
+        mut cmd = input("> ")
+        mut trimmed = trim(cmd)
 
-    if trimmed == "quit" {
-        app.save()
-        running = false
-    } else if trimmed == "list" {
-        app.list()
-    } else if trimmed == "stats" {
-        app.stats()
-    } else if trimmed == "save" {
-        app.save()
-    } else if startsWith(trimmed, "add ") {
-        mut title = substring(trimmed, 4, len(trimmed))
-        app.add(title)
-    } else if startsWith(trimmed, "done ") {
-        mut idStr = substring(trimmed, 5, len(trimmed))
-        app.toggle(parseInt(idStr))
-    } else if startsWith(trimmed, "remove ") {
-        mut idStr = substring(trimmed, 7, len(trimmed))
-        app.remove(parseInt(idStr))
-    } else {
-        if len(trimmed) > 0 {
-            println("Unknown command: $trimmed")
+        if trimmed == "quit" {
+            app.save()
+            running = false
+        } else if trimmed == "list" {
+            app.list()
+        } else if trimmed == "stats" {
+            app.stats()
+        } else if trimmed == "save" {
+            app.save()
+        } else if startsWith(trimmed, "add ") {
+            mut title = substring(trimmed, 4, len(trimmed))
+            app.add(title)
+        } else if startsWith(trimmed, "done ") {
+            mut idStr = substring(trimmed, 5, len(trimmed))
+            app.toggle(parseInt(idStr))
+        } else if startsWith(trimmed, "remove ") {
+            mut idStr = substring(trimmed, 7, len(trimmed))
+            app.remove(parseInt(idStr))
+        } else {
+            if len(trimmed) > 0 {
+                println("Unknown command: $trimmed")
+            }
         }
     }
-}
 
-// Cleanup
-io.writeFile("todos.dat", "")
-println("Bye!")
+    // Cleanup
+    io.writeFile("todos.dat", "")
+    println("Bye!")
+}

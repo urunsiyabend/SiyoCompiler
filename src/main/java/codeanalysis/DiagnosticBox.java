@@ -399,4 +399,8 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         String message = String.format("Index %d is out of bounds for length %d", index, length);
         report(span, message);
     }
+
+    public void reportTopLevelNotAllowed(TextSpan span) {
+        report(span, "top-level statement not allowed; move into init() or main()");
+    }
 }

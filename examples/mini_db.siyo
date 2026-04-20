@@ -83,42 +83,44 @@ fn dbLoad() {
     println("Loaded $rowCount rows from $dbFile")
 }
 
-// Test
-println("=== Mini Database ===")
-println("")
+fn main() {
+    // Test
+    println("=== Mini Database ===")
+    println("")
 
-dbCreate(["name", "age", "city", "role"])
-dbInsert("Alice,28,Istanbul,Engineer")
-dbInsert("Bob,32,Ankara,Manager")
-dbInsert("Charlie,25,Izmir,Designer")
-dbInsert("Diana,30,Bursa,Engineer")
-dbInsert("Eve,27,Antalya,Designer")
-println("")
+    dbCreate(["name", "age", "city", "role"])
+    dbInsert("Alice,28,Istanbul,Engineer")
+    dbInsert("Bob,32,Ankara,Manager")
+    dbInsert("Charlie,25,Izmir,Designer")
+    dbInsert("Diana,30,Bursa,Engineer")
+    dbInsert("Eve,27,Antalya,Designer")
+    println("")
 
-println("SELECT * (all rows):")
-dbSelectAll()
+    println("SELECT * (all rows):")
+    dbSelectAll()
 
-println("")
-println("SELECT WHERE city = Istanbul:")
-dbSelect("city", "Istanbul")
+    println("")
+    println("SELECT WHERE city = Istanbul:")
+    dbSelect("city", "Istanbul")
 
-println("")
-println("SELECT WHERE role = Engineer:")
-dbSelect("role", "Engineer")
+    println("")
+    println("SELECT WHERE role = Engineer:")
+    dbSelect("role", "Engineer")
 
-println("")
-println("SELECT WHERE role = Designer:")
-dbSelect("role", "Designer")
+    println("")
+    println("SELECT WHERE role = Designer:")
+    dbSelect("role", "Designer")
 
-// Save and reload
-println("")
-dbSave()
-dbCreate([""])
-dbLoad()
-println("")
-println("After reload:")
-dbSelectAll()
+    // Save and reload
+    println("")
+    dbSave()
+    dbCreate([""])
+    dbLoad()
+    println("")
+    println("After reload:")
+    dbSelectAll()
 
-// Cleanup
-io.writeFile(dbFile, "")
-println("\nDatabase cleaned up.")
+    // Cleanup
+    io.writeFile(dbFile, "")
+    println("\nDatabase cleaned up.")
+}

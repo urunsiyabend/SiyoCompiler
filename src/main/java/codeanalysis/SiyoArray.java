@@ -94,7 +94,7 @@ public class SiyoArray extends AbstractList<Object> implements List<Object> {
         ArrayList<Object> elements = new ArrayList<>(len);
         for (int i = 0; i < len; i++) {
             Object elem = java.lang.reflect.Array.get(javaArray, i);
-            if (elem instanceof Byte b) elements.add((int) b);
+            if (elem instanceof Byte b) elements.add(b & 0xFF);
             else if (elem instanceof Short s) elements.add((int) s);
             else if (elem instanceof Float f) elements.add((double) f);
             else if (elem instanceof Character c) elements.add(String.valueOf(c));

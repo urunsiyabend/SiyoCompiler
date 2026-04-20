@@ -1,4 +1,3 @@
-{
 // HTML template engine with variable substitution
 // Placeholders use %key% syntax to avoid conflict with Siyo string interpolation
 
@@ -76,6 +75,4 @@ fn indexTemplate() -> string {
 </body>
 </html>
 """
-}
-
 }

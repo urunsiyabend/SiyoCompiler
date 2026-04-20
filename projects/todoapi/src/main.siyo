@@ -105,60 +105,62 @@ fn handleRequest(method: string, path: string, body: string) -> string {
 
 // ========== Server ==========
 
-println("=== Todo API Server ===")
-mut server = ServerSocket.new(8080)
-println("Listening on http://localhost:8080")
-println("")
-println("Endpoints:")
-println("  GET    /todos         - list all todos")
-println("  POST   /todos         - create todo (JSON body with \"title\")")
-println("  DELETE /todos/{id}    - delete todo by id")
-println("")
+fn main() {
+    println("=== Todo API Server ===")
+    mut server = ServerSocket.new(8080)
+    println("Listening on http://localhost:8080")
+    println("")
+    println("Endpoints:")
+    println("  GET    /todos         - list all todos")
+    println("  POST   /todos         - create todo (JSON body with \"title\")")
+    println("  DELETE /todos/{id}    - delete todo by id")
+    println("")
 
-mut running = true
-while running {
-    mut socket = server.accept()
-    mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
+    mut running = true
+    while running {
+        mut socket = server.accept()
+        mut reader = BufferedReader.new(InputStreamReader.new(socket.getInputStream()))
 
-    // Read request line
-    mut requestLine = reader.readLine()
-    if requestLine == null {
-        socket.close()
-        continue
-    }
+        // Read request line
+        mut requestLine = reader.readLine()
+        if requestLine == null {
+            socket.close()
+            continue
+        }
 
-    mut method = parseMethod(requestLine)
-    mut path = parsePath(requestLine)
+        mut method = parseMethod(requestLine)
+        mut path = parsePath(requestLine)
 
-    // Read headers, extract Content-Length
-    mut contentLength = 0
-    mut header = reader.readLine()
-    while header != null {
-        if len(header) == 0 { break }
-        if contains(header, "Content-Length") {
-            mut parts = split(header, ":")
-            if len(parts) > 1 {
-                contentLength = parseInt(trim(parts[1]))
+        // Read headers, extract Content-Length
+        mut contentLength = 0
+        mut header = reader.readLine()
+        while header != null {
+            if len(header) == 0 { break }
+            if contains(header, "Content-Length") {
+                mut parts = split(header, ":")
+                if len(parts) > 1 {
+                    contentLength = parseInt(trim(parts[1]))
+                }
+            }
+            header = reader.readLine()
+        }
+
+        // Read body
+        mut body = ""
+        if contentLength > 0 {
+            for i in range(0, contentLength) {
+                mut charCode = reader.read()
+                body = body + chr(charCode)
             }
         }
-        header = reader.readLine()
+
+        // Handle and respond
+        mut response = handleRequest(method, path, body)
+        mut out = socket.getOutputStream()
+        out.write(response.getBytes())
+        out.flush()
+        socket.close()
+
+        println(method + " " + path + " -> " + toString(len(response)) + " bytes")
     }
-
-    // Read body
-    mut body = ""
-    if contentLength > 0 {
-        for i in range(0, contentLength) {
-            mut charCode = reader.read()
-            body = body + chr(charCode)
-        }
-    }
-
-    // Handle and respond
-    mut response = handleRequest(method, path, body)
-    mut out = socket.getOutputStream()
-    out.write(response.getBytes())
-    out.flush()
-    socket.close()
-
-    println(method + " " + path + " -> " + toString(len(response)) + " bytes")
 }

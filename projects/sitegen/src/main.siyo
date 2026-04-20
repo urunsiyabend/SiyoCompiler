@@ -1,4 +1,3 @@
-{
 // Static Site Generator
 // Reads .md files from content/, applies HTML templates, outputs to dist/
 // Usage: siyoc run build  — generate site
@@ -148,25 +147,26 @@ fn buildIndex(distDir: string, titles: string[], dates: string[], slugs: string[
 
 // ========== CLI ==========
 
-mut args = os.args()
+fn main() {
+    mut args = os.args()
 
-if len(args) == 0 {
-    println("Siyo Static Site Generator")
-    println("Usage:")
-    println("  siyoc run build  — generate site")
-    println("  siyoc run clean  — remove dist/")
-    os.exit(0)
-}
+    if len(args) == 0 {
+        println("Siyo Static Site Generator")
+        println("Usage:")
+        println("  siyoc run build  — generate site")
+        println("  siyoc run clean  — remove dist/")
+        os.exit(0)
+    }
 
-mut command = toString(args[0])
+    mut command = toString(args[0])
 
-if command == "build" {
-    buildSite()
-} else if command == "clean" {
-    deleteDir("dist")
-} else {
-    println("Unknown command: " + command)
-    println("Available: build, clean")
-    os.exit(1)
-}
+    if command == "build" {
+        buildSite()
+    } else if command == "clean" {
+        deleteDir("dist")
+    } else {
+        println("Unknown command: " + command)
+        println("Available: build, clean")
+        os.exit(1)
+    }
 }

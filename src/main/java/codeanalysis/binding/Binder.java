@@ -38,6 +38,7 @@ public class Binder {
     private FunctionSymbol _currentFunction = null;
     private boolean _insideScope = false;
     private boolean _insideSpawn = false;
+    private boolean _atFileTopLevel = true;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
@@ -71,14 +72,19 @@ public class Binder {
     }
 
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax) {
-        return bindGlobalScope(previous, syntax, new ModuleRegistry(), null);
+        return bindGlobalScope(previous, syntax, new ModuleRegistry(), null, false);
     }
 
     public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax, ModuleRegistry registry, String filePath) {
+        return bindGlobalScope(previous, syntax, registry, filePath, true);
+    }
+
+    public static BoundGlobalScope bindGlobalScope(BoundGlobalScope previous, CompilationUnitSyntax syntax, ModuleRegistry registry, String filePath, boolean enforceTopLevel) {
         var parentScope = createParentScopes(previous);
         Binder binder = new Binder(parentScope);
         binder._moduleHandler.setRegistry(registry);
         binder._moduleHandler.setFilePath(filePath);
+        if (!enforceTopLevel) binder._atFileTopLevel = false;
         BoundStatement statement = binder.bindStatement(syntax.getStatement());
         Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
         Map<FunctionSymbol, BoundBlockStatement> functionBodies = binder._functionBodies;
@@ -118,6 +124,14 @@ public class Binder {
      * @return The bound statement.
      */
     BoundStatement bindStatement(StatementSyntax syntax) {
+        // If the root of the file is a non-block statement, `bindBlockStatement`
+        // never fires, so perform the top-level check here once.
+        if (_atFileTopLevel && syntax.getType() != SyntaxType.BlockStatement) {
+            if (!isAllowedAtTopLevel(syntax)) {
+                _diagnostics.reportTopLevelNotAllowed(syntax.getSpan());
+            }
+            _atFileTopLevel = false; // recursive calls are nested, not top-level
+        }
         BoundStatement result = bindStatementInternal(syntax);
         if (result != null) {
             try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
@@ -157,6 +171,9 @@ public class Binder {
      * @return The bound block statement.
      */
     private BoundStatement bindBlockStatement(BlockStatementSyntax syntax) {
+        boolean wasFileTopLevel = _atFileTopLevel;
+        _atFileTopLevel = false;
+
         ArrayList<BoundStatement> statements = new ArrayList<>();
         _scope = new BoundScope(_scope);
         _moduleHandler.setScope(_scope);
@@ -194,8 +211,13 @@ public class Binder {
             }
         }
 
-        // Second pass: bind all statements (function bodies can now reference each other)
+        // Second pass: bind all statements (function bodies can now reference each other).
+        // At file top level, only declarations, imports, and variable declarations are allowed.
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            if (wasFileTopLevel && !isAllowedAtTopLevel(statementSyntax)) {
+                _diagnostics.reportTopLevelNotAllowed(statementSyntax.getSpan());
+                continue;
+            }
             BoundStatement boundStatement = bindStatement(statementSyntax);
             statements.add(boundStatement);
         }
@@ -203,6 +225,20 @@ public class Binder {
         _scope = _scope.getParent();
         _moduleHandler.setScope(_scope);
         return new BoundBlockStatement(statements);
+    }
+
+    private static boolean isAllowedAtTopLevel(StatementSyntax stmt) {
+        return switch (stmt.getType()) {
+            case FunctionDeclaration,
+                 StructDeclaration,
+                 EnumDeclaration,
+                 ActorDeclaration,
+                 ImplDeclaration,
+                 ImportStatement,
+                 JavaImportStatement,
+                 VariableDeclaration -> true;
+            default -> false;
+        };
     }
 
     /**
@@ -391,6 +427,7 @@ public class Binder {
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
             case CompoundAssignmentExpression -> bindCompoundAssignment((CompoundAssignmentExpressionSyntax) syntax);
             case MemberCallExpression -> bindMemberCallExpression((MemberCallExpressionSyntax) syntax);
+            case PostfixCallExpression -> bindPostfixCallExpression((codeanalysis.syntax.PostfixCallExpressionSyntax) syntax);
             case CastExpression -> bindCastExpression((CastExpressionSyntax) syntax);
             case LambdaExpression -> bindLambdaExpression((LambdaExpressionSyntax) syntax);
             case ScopeExpression -> bindScopeExpression((ScopeExpressionSyntax) syntax);
@@ -1628,6 +1665,15 @@ public class Binder {
             return expr;
         }
         return new BoundCastExpression(expr, targetClass);
+    }
+
+    private BoundExpression bindPostfixCallExpression(codeanalysis.syntax.PostfixCallExpressionSyntax syntax) {
+        BoundExpression callee = bindExpression(syntax.getCallee());
+        List<BoundExpression> args = new ArrayList<>();
+        for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+            args.add(bindExpression(argSyntax));
+        }
+        return new BoundClosureCallExpression(callee, args);
     }
 
     private BoundExpression bindMemberCallExpression(MemberCallExpressionSyntax syntax) {

@@ -1,0 +1,53 @@
+import java "java.io.File"
+import java "java.lang.System"
+
+fn sep() -> string {
+    return System.getProperty("file.separator")
+}
+
+fn join(a: string, b: string) -> string {
+    mut f = File.new(a, b)
+    return f.toString()
+}
+
+fn parent(p: string) -> string {
+    mut f = File.new(p)
+    mut par = f.getParent()
+    if par == null { return "" }
+    return par
+}
+
+fn basename(p: string) -> string {
+    mut f = File.new(p)
+    return f.getName()
+}
+
+fn stem(p: string) -> string {
+    mut name = basename(p)
+    mut dotIdx = -1
+    for mut i = 0 i < len(name) i = i + 1 {
+        mut ch = substring(name, i, i + 1)
+        if ch == "." && i > 0 {
+            dotIdx = i
+        }
+    }
+    if dotIdx <= 0 {
+        return name
+    }
+    return substring(name, 0, dotIdx)
+}
+
+fn extension(p: string) -> string {
+    mut name = basename(p)
+    mut dotIdx = -1
+    for mut i = 0 i < len(name) i = i + 1 {
+        mut ch = substring(name, i, i + 1)
+        if ch == "." && i > 0 {
+            dotIdx = i
+        }
+    }
+    if dotIdx <= 0 {
+        return ""
+    }
+    return substring(name, dotIdx, len(name))
+}

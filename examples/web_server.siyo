@@ -3,32 +3,34 @@ import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
 import java "java.io.OutputStream"
 
-println("Starting web server on port 8080...")
-mut server = ServerSocket.new(8080)
+fn main() {
+    println("Starting web server on port 8080...")
+    mut server = ServerSocket.new(8080)
 
-mut running = true
-while running {
-    println("Waiting for connection...")
-    mut client = server.accept()
+    mut running = true
+    while running {
+        println("Waiting for connection...")
+        mut client = server.accept()
 
-    // Read request
-    mut reader = BufferedReader.new(InputStreamReader.new(client.getInputStream()))
-    mut requestLine = reader.readLine()
-    println("Request: $requestLine")
+        // Read request
+        mut reader = BufferedReader.new(InputStreamReader.new(client.getInputStream()))
+        mut requestLine = reader.readLine()
+        println("Request: $requestLine")
 
-    // Send response with string interpolation
-    mut body = "<html><body><h1>Hello from Siyo!</h1><p>This web server is written in Siyo lang.</p></body></html>"
-    mut response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${len(body)}\r\nConnection: close\r\n\r\n$body"
-    mut out = client.getOutputStream()
-    mut bytes = response.getBytes()
-    out.write(bytes)
-    out.flush()
-    client.close()
+        // Send response with string interpolation
+        mut body = "<html><body><h1>Hello from Siyo!</h1><p>This web server is written in Siyo lang.</p></body></html>"
+        mut response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${len(body)}\r\nConnection: close\r\n\r\n$body"
+        mut out = client.getOutputStream()
+        mut bytes = response.getBytes()
+        out.write(bytes)
+        out.flush()
+        client.close()
 
-    println("Response sent!")
-    // Serve once then exit (for testing)
-    running = false
+        println("Response sent!")
+        // Serve once then exit (for testing)
+        running = false
+    }
+
+    server.close()
+    println("Server stopped.")
 }
-
-server.close()
-println("Server stopped.")

@@ -20,51 +20,53 @@ fn safeParseNum(text: string) -> int {
     parseInt(text)
 }
 
-// Safe division
-println("=== Safe Division ===")
-try {
-    mut r1 = safeDivide(10, 2)
-    println("10 / 2 = $r1")
-    mut r2 = safeDivide(10, 0)
-    println("10 / 0 = $r2")
-} catch e {
-    println("Error: $e")
-}
+fn main() {
+    // Safe division
+    println("=== Safe Division ===")
+    try {
+        mut r1 = safeDivide(10, 2)
+        println("10 / 2 = $r1")
+        mut r2 = safeDivide(10, 0)
+        println("10 / 0 = $r2")
+    } catch e {
+        println("Error: $e")
+    }
 
-// Safe parsing
-println("")
-println("=== Safe Parsing ===")
-try {
-    mut v1 = safeParseNum("42")
-    println("Parsed: $v1")
-} catch e {
-    println("Error: $e")
-}
+    // Safe parsing
+    println("")
+    println("=== Safe Parsing ===")
+    try {
+        mut v1 = safeParseNum("42")
+        println("Parsed: $v1")
+    } catch e {
+        println("Error: $e")
+    }
 
-try {
-    mut v2 = safeParseNum("hello")
-    println("Parsed: $v2")
-} catch e {
-    println("Error: $e")
-}
+    try {
+        mut v2 = safeParseNum("hello")
+        println("Parsed: $v2")
+    } catch e {
+        println("Error: $e")
+    }
 
-try {
-    mut v3 = safeParseNum("")
-    println("Parsed: $v3")
-} catch e {
-    println("Error: $e")
-}
+    try {
+        mut v3 = safeParseNum("")
+        println("Parsed: $v3")
+    } catch e {
+        println("Error: $e")
+    }
 
-// Array bounds
-println("")
-println("=== Array Bounds ===")
-mut arr = [1, 2, 3]
-try {
-    mut val = arr[1]
-    println("arr[1] = $val")
-    mut bad = arr[99]
-    println("arr[99] = $bad")
-} catch e {
-    println("Error: $e")
+    // Array bounds
+    println("")
+    println("=== Array Bounds ===")
+    mut arr = [1, 2, 3]
+    try {
+        mut val = arr[1]
+        println("arr[1] = $val")
+        mut bad = arr[99]
+        println("arr[99] = $bad")
+    } catch e {
+        println("Error: $e")
+    }
+    println("Program continues after error!")
 }
-println("Program continues after error!")

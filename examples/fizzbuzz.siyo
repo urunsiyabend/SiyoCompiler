@@ -1,19 +1,19 @@
-{
-    import "std/strings"
+import "std/strings"
 
-    fn fizzbuzz(n: int) -> string {
-        match n % 15 {
-            0 => "FizzBuzz",
-            3 => "Fizz",
-            6 => "Fizz",
-            9 => "Fizz",
-            12 => "Fizz",
-            5 => "Buzz",
-            10 => "Buzz",
-            _ => toString(n)
-        }
+fn fizzbuzz(n: int) -> string {
+    match n % 15 {
+        0 => "FizzBuzz",
+        3 => "Fizz",
+        6 => "Fizz",
+        9 => "Fizz",
+        12 => "Fizz",
+        5 => "Buzz",
+        10 => "Buzz",
+        _ => toString(n)
     }
+}
 
+fn main() {
     mut results = [""]
     for mut i = 1 i <= 20 i = i + 1 {
         if i == 1 {
@@ -22,5 +22,5 @@
             push(results, fizzbuzz(i))
         }
     }
-    strings.join(results, ", ")
+    println(strings.join(results, ", "))
 }
