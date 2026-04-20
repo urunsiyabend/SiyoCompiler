@@ -789,11 +789,36 @@ public class Binder {
         boolean hasVariable = _scope.tryLookup(name);
 
         if (!hasVariable) {
+            if (_scope.tryLookupFunction(name)) {
+                FunctionSymbol func = _scope.lookupFunction(name);
+                if (func != null) {
+                    return createFunctionReference(func);
+                }
+            }
             _diagnostics.reportUndefinedName(syntax.getIdentifierToken().getSpan(), name);
             return new BoundLiteralExpression(0);
         }
         var variable  = _scope.lookupVariable(name);
         return new BoundVariableExpression(variable);
+    }
+
+    private BoundExpression createFunctionReference(FunctionSymbol func) {
+        List<ParameterSymbol> params = func.getParameters();
+        List<BoundExpression> argExprs = new ArrayList<>();
+        for (ParameterSymbol p : params) {
+            argExprs.add(new BoundVariableExpression(p));
+        }
+        BoundCallExpression call = new BoundCallExpression(func, argExprs);
+        BoundStatement bodyStmt;
+        if (func.getReturnType() == void.class || func.getReturnType() == null) {
+            bodyStmt = new BoundExpressionStatement(call);
+        } else {
+            bodyStmt = new BoundReturnStatement(call);
+        }
+        ArrayList<BoundStatement> stmts = new ArrayList<>();
+        stmts.add(bodyStmt);
+        BoundBlockStatement body = new BoundBlockStatement(stmts);
+        return new BoundLambdaExpression(params, body, func.getReturnType(), java.util.Collections.emptySet());
     }
 
     /**
