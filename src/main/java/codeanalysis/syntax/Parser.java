@@ -221,13 +221,30 @@ public class Parser {
         SyntaxType expectedKeyword = current().getType() == SyntaxType.ImmutableKeyword ? SyntaxType.ImmutableKeyword : SyntaxType.MutableKeyword;
         SyntaxToken keyword = match(expectedKeyword);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken typeAnnotation = null;
+        if (current().getType() == SyntaxType.ColonToken) {
+            nextToken(); // consume ':'
+            SyntaxToken typeToken;
+            if (current().getType() == SyntaxType.FnKeyword) {
+                SyntaxToken fnToken = nextToken();
+                typeToken = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            } else {
+                typeToken = match(SyntaxType.IdentifierToken);
+            }
+            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+                nextToken(); // consume '['
+                nextToken(); // consume ']'
+                typeToken = new SyntaxToken(SyntaxType.IdentifierToken, typeToken.getPosition(), typeToken.getData() + "[]", typeToken.getValue());
+            }
+            typeAnnotation = typeToken;
+        }
         SyntaxToken equals = match(SyntaxType.EqualsToken);
         if (current().getType() == SyntaxType.SendKeyword) {
             _diagnostics.reportError(current().getSpan(),
                     "send is a statement and does not return a value\n\n  help: use a channel to receive results from async actor calls");
         }
         ExpressionSyntax initializer = parseExpression();
-        return new VariableDeclarationSyntax(keyword, identifier, equals, initializer);
+        return new VariableDeclarationSyntax(keyword, identifier, typeAnnotation, equals, initializer);
     }
 
     /**

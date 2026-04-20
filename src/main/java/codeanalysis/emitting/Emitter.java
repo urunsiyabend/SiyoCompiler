@@ -200,28 +200,16 @@ public class Emitter {
     private void emitModuleInitializer(ClassWriter cw, String className) {
         if (_statement.getStatements().isEmpty() && !_needsScanner) return;
 
-        // Check if there are any variable declarations to initialize
-        boolean hasVarDecls = false;
-        for (BoundStatement stmt : _statement.getStatements()) {
-            if (stmt instanceof BoundVariableDeclaration) {
-                hasVarDecls = true;
-                break;
-            }
-        }
-        if (!hasVarDecls) return;
-
         _mv = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
         _mv.visitCode();
         _locals.clear();
         _labels.clear();
         _nextLocal = 0;
-        _inMainMethod = true; // allow global field access
+        _inMainMethod = true;
         _lastEmittedLine = -1;
 
         for (BoundStatement stmt : _statement.getStatements()) {
-            if (stmt instanceof BoundVariableDeclaration) {
-                emitStatement(stmt);
-            }
+            emitStatement(stmt);
         }
 
         _mv.visitInsn(RETURN);
@@ -2208,16 +2196,14 @@ public class Emitter {
         if (_locals.containsKey(var)) return false;
         // Use reference equality first (same VariableSymbol instance)
         if (_globalFields.contains(var)) return true;
-        // For main method, also try name-based (lowered vars may have different instances)
-        if (_inMainMethod) {
-            for (VariableSymbol g : _globalFields) {
-                if (g.getName().equals(var.getName())) {
-                    // But not if a local with the same name exists (shadowing)
-                    for (VariableSymbol local : _locals.keySet()) {
-                        if (local.getName().equals(var.getName())) return false;
-                    }
-                    return true;
+        // Name-based fallback: needed when lowering or module functions produce different instances
+        for (VariableSymbol g : _globalFields) {
+            if (g.getName().equals(var.getName())) {
+                // But not if a local with the same name exists (shadowing)
+                for (VariableSymbol local : _locals.keySet()) {
+                    if (local.getName().equals(var.getName())) return false;
                 }
+                return true;
             }
         }
         return false;

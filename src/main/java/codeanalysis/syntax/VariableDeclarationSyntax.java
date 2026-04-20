@@ -19,20 +19,18 @@ import java.util.NoSuchElementException;
 public class VariableDeclarationSyntax extends StatementSyntax {
     private final SyntaxToken _keyword;
     private final SyntaxToken _identifier;
+    private final SyntaxToken _typeAnnotation;
     private final SyntaxToken _equalsToken;
     private final ExpressionSyntax _initializer;
 
-    /**
-     * Initializes a new instance of the VariableDeclarationSyntax class.
-     *
-     * @param keyword     The keyword token.
-     * @param identifier  The identifier token.
-     * @param equalsToken The equals token.
-     * @param initializer The initializer expression.
-     */
     public VariableDeclarationSyntax(SyntaxToken keyword, SyntaxToken identifier, SyntaxToken equalsToken, ExpressionSyntax initializer) {
+        this(keyword, identifier, null, equalsToken, initializer);
+    }
+
+    public VariableDeclarationSyntax(SyntaxToken keyword, SyntaxToken identifier, SyntaxToken typeAnnotation, SyntaxToken equalsToken, ExpressionSyntax initializer) {
         _keyword = keyword;
         _identifier = identifier;
+        _typeAnnotation = typeAnnotation;
         _equalsToken = equalsToken;
         _initializer = initializer;
     }
@@ -53,6 +51,10 @@ public class VariableDeclarationSyntax extends StatementSyntax {
      */
     public SyntaxToken getIdentifier() {
         return _identifier;
+    }
+
+    public SyntaxToken getTypeAnnotation() {
+        return _typeAnnotation;
     }
 
     /**

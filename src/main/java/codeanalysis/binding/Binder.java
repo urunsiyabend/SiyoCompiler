@@ -225,7 +225,7 @@ public class Binder {
     private BoundStatement bindVariableDeclaration(VariableDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
         var isReadOnly = syntax.getKeyword().getType() == SyntaxType.ImmutableKeyword;
-        BoundExpression initializer = bindExpression(syntax.getInitializer());
+        BoundExpression initializer = bindExpressionWithTypeHint(syntax.getInitializer(), syntax.getTypeAnnotation());
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, initializer.getClassType());
 
         if (!_scope.tryDeclare(variableSymbol)) {
@@ -348,6 +348,27 @@ public class Binder {
      */
     public BoundExpression bindExpression(ExpressionSyntax syntax) {
         BoundExpression result = bindExpressionInternal(syntax);
+        if (result != null) {
+            try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
+        }
+        return result;
+    }
+
+    private BoundExpression bindExpressionWithTypeHint(ExpressionSyntax syntax, codeanalysis.syntax.SyntaxToken typeAnnotation) {
+        BoundExpression result = bindExpressionInternal(syntax);
+        if (result instanceof BoundArrayLiteralExpression arr && arr.getElements().isEmpty() && typeAnnotation != null) {
+            String typeName = typeAnnotation.getData();
+            // Strip [] suffix to get element type
+            Class<?> elemType;
+            if (typeName.endsWith("[]")) {
+                elemType = _typeResolver.lookupType(typeName.substring(0, typeName.length() - 2));
+            } else {
+                elemType = _typeResolver.lookupType(typeName);
+            }
+            if (elemType != null) {
+                result = new BoundArrayLiteralExpression(new ArrayList<>(), elemType);
+            }
+        }
         if (result != null) {
             try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
         }
