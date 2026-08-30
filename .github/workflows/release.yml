@@ -123,9 +123,7 @@ jobs:
     - name: Generate release notes
       run: |
         VERSION=${{ steps.version.outputs.VERSION }}
-        cat > release-notes.md << EOF
-        ## Siyo ${VERSION}
-
+        cat > install-notes.md << EOF
         ### Quick Install
 
         **Linux / macOS:**
@@ -158,7 +156,20 @@ jobs:
 
         See [GRAMMAR.md](https://github.com/urunsiyabend/SiyoCompiler/blob/v${VERSION}/GRAMMAR.md) for the language reference.
         EOF
-        sed -i 's/^        //' release-notes.md
+        sed -i 's/^        //' install-notes.md
+
+        # Release highlights come from RELEASE_NOTES_<version>.md when the tag
+        # ships one; its H1 title is demoted to H2 so it reads as the release
+        # heading. Tags without such a file keep the plain version heading.
+        {
+          if [ -f "RELEASE_NOTES_${VERSION}.md" ]; then
+            sed '1s/^# /## /' "RELEASE_NOTES_${VERSION}.md"
+            printf '\n'
+          else
+            printf '## Siyo %s\n\n' "${VERSION}"
+          fi
+          cat install-notes.md
+        } > release-notes.md
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
