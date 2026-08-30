@@ -12,12 +12,14 @@ if [ -f "$SIYO_HOME/lib/siyoc.jar" ] && [ -d "$SIYO_HOME/runtime" ]; then
     exec "$SIYO_HOME/runtime/bin/java" -jar "$SIYO_HOME/lib/siyoc.jar" "$@"
 fi
 
-# Development mode: shaded JAR from Maven build
-SIYO_JAR="$SIYO_HOME/target/siyo-compiler-0.2.0-shaded.jar"
-if [ ! -f "$SIYO_JAR" ]; then
-    # Try non-snapshot name (release build)
-    SIYO_JAR=$(ls "$SIYO_HOME"/target/siyo-compiler-*.jar 2>/dev/null | grep -v original | head -1)
-fi
+# Development mode: select the highest built release, ignoring Shade's backup JAR.
+SIYO_JAR=""
+for candidate in "$SIYO_HOME"/target/siyo-compiler-*.jar; do
+    case "$candidate" in
+        */original-*) continue ;;
+    esac
+    [ -f "$candidate" ] && SIYO_JAR="$candidate"
+done
 
 if [ ! -f "$SIYO_JAR" ]; then
     echo "Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'"

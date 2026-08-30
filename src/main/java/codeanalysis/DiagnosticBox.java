@@ -257,6 +257,13 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         report(span, message);
     }
 
+    public void reportAmbiguousJavaCall(TextSpan span, String name) {
+        String message = String.format(
+                "Java call '%s' is ambiguous for erased object arguments; add an imported Java type annotation",
+                name);
+        report(span, message);
+    }
+
     public void reportError(TextSpan span, String message) {
         report(span, message);
     }

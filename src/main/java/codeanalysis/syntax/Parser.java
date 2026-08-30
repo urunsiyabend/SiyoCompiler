@@ -364,12 +364,18 @@ public class Parser {
 
         while (current().getType() != SyntaxType.CloseParenthesisToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             ParameterSyntax parameter = parseParameter();
             nodesAndSeparators.add(parameter);
 
             if (current().getType() != SyntaxType.CloseParenthesisToken) {
                 SyntaxToken comma = match(SyntaxType.CommaToken);
                 nodesAndSeparators.add(comma);
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
             }
         }
 
@@ -545,9 +551,15 @@ public class Parser {
         List<SyntaxToken> members = new ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             SyntaxToken member = match(SyntaxType.IdentifierToken);
             members.add(member);
             if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
                 nextToken();
             }
         }
@@ -572,6 +584,7 @@ public class Parser {
         match(SyntaxType.OpenBraceToken);
         java.util.List<MatchArmSyntax> arms = new java.util.ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             boolean isDefault = false;
             ExpressionSyntax pattern = null;
             if (current().getType() == SyntaxType.IdentifierToken && current().getData().equals("_")) {
@@ -592,6 +605,11 @@ public class Parser {
             arms.add(new MatchArmSyntax(pattern, arrow, body, isDefault));
             // Optional comma separator
             if (current().getType() == SyntaxType.CommaToken) nextToken();
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
         }
         match(SyntaxType.CloseBraceToken);
         return new MatchExpressionSyntax(matchKeyword, target, arms);
@@ -608,12 +626,17 @@ public class Parser {
     }
 
     private StatementSyntax parseActorDeclaration() {
-        // actor Name { fields } — same as struct but marked as actor
+        // actor Name { fields } — same as struct but marked as actor.
+        // Accept the older documented `actor struct Name` spelling as well.
         SyntaxToken actorKeyword = match(SyntaxType.ActorKeyword);
+        if (current().getType() == SyntaxType.StructKeyword) {
+            nextToken();
+        }
         SyntaxToken name = match(SyntaxType.IdentifierToken);
         SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
         java.util.List<ParameterSyntax> fields = new java.util.ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
             SyntaxToken colon = match(SyntaxType.ColonToken);
             SyntaxToken fieldType;
@@ -629,6 +652,11 @@ public class Parser {
             }
             fields.add(new ParameterSyntax(fieldName, colon, fieldType));
             if (current().getType() == SyntaxType.CommaToken) nextToken();
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
         }
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         // Reuse StructDeclarationSyntax but tag it as actor
@@ -641,7 +669,13 @@ public class Parser {
         SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
         java.util.List<FunctionDeclarationSyntax> methods = new java.util.ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             methods.add((FunctionDeclarationSyntax) parseFunctionDeclaration());
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
         }
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new ImplDeclarationSyntax(implKeyword, typeName, openBrace, methods, closeBrace);
@@ -655,6 +689,7 @@ public class Parser {
         List<ParameterSyntax> fields = new ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
             SyntaxToken colon = match(SyntaxType.ColonToken);
             SyntaxToken fieldType = match(SyntaxType.IdentifierToken);
@@ -667,6 +702,11 @@ public class Parser {
 
             // Optional comma between fields
             if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
                 nextToken();
             }
         }
@@ -908,6 +948,7 @@ public class Parser {
 
         while (current().getType() != SyntaxType.CloseBraceToken
                 && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             ExpressionSyntax key = parseExpression();
             keys.add(key);
             SyntaxToken colon = match(SyntaxType.ColonToken);
@@ -917,6 +958,11 @@ public class Parser {
 
             if (current().getType() != SyntaxType.CloseBraceToken) {
                 match(SyntaxType.CommaToken);
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
             }
         }
 
@@ -939,12 +985,18 @@ public class Parser {
         List<SyntaxNode> fieldAssignments = new ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
             SyntaxToken colon = match(SyntaxType.ColonToken);
             ExpressionSyntax value = parseExpression();
             fieldAssignments.add(new FieldAssignmentSyntax(fieldName, colon, value));
 
             if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
                 nextToken();
             }
         }
@@ -973,12 +1025,18 @@ public class Parser {
 
         while (current().getType() != SyntaxType.CloseBracketToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             ExpressionSyntax expression = parseExpression();
             nodesAndSeparators.add(expression);
 
             if (current().getType() != SyntaxType.CloseBracketToken) {
                 SyntaxToken comma = match(SyntaxType.CommaToken);
                 nodesAndSeparators.add(comma);
+            }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
             }
         }
 
@@ -1133,6 +1191,7 @@ public class Parser {
 
         while (current().getType() != SyntaxType.CloseParenthesisToken &&
                current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
             ExpressionSyntax expression = parseExpression();
             nodesAndSeparators.add(expression);
 
@@ -1140,9 +1199,13 @@ public class Parser {
                 SyntaxToken comma = match(SyntaxType.CommaToken);
                 nodesAndSeparators.add(comma);
             }
+
+            // Prevent infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
         }
 
         return new SeparatedSyntaxList<>(nodesAndSeparators);
     }
 }
-

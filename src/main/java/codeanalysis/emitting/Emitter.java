@@ -1060,11 +1060,11 @@ public class Emitter {
             _mv.visitLabel(nextArm);
         }
 
-        // Default arm or null
+        // Default arm, or a neutral value only for value-producing matches.
         if (defaultArm != null) {
             emitMatchArmPreStatements(defaultArm.preStatements());
             emitExpression(defaultArm.body());
-        } else {
+        } else if (node.getClassType() != null) {
             _mv.visitInsn(ACONST_NULL);
         }
 
@@ -1455,8 +1455,10 @@ public class Emitter {
         _labels.clear();
         _nextLocal = 0;
         boolean savedInMain = _inMainMethod;
+        Class<?> savedReturnType = _currentReturnType;
         _inMainMethod = false;
         _inIsolatedMethod = true;
+        _currentReturnType = lambda.getReturnType();
 
         // Map captured variables to local slots (passed as Object)
         java.util.Set<VariableSymbol> capturedSet = lambda.getCapturedVariables();
@@ -1480,6 +1482,7 @@ public class Emitter {
         _mv.visitEnd();
         _inMainMethod = savedInMain;
         _inIsolatedMethod = false;
+        _currentReturnType = savedReturnType;
     }
 
     private void emitSpawnMethod(ClassWriter cw, int index, BoundSpawnExpression spawn) {
@@ -1681,7 +1684,7 @@ public class Emitter {
                     emitBoxIfNeeded(argType); // box primitive to Object
                 }
                 // Cast to expected type if not Object
-                if (!paramDesc.equals("Ljava/lang/Object;") && !paramDesc.equals("Ljava/lang/String;") && argType == Object.class) {
+                if (!paramDesc.equals("Ljava/lang/Object;") && argType == Object.class) {
                     String castType = paramDesc.startsWith("[") ? paramDesc : paramDesc.substring(1, paramDesc.length() - 1);
                     _mv.visitTypeInsn(CHECKCAST, castType);
                 }
@@ -2159,7 +2162,9 @@ public class Emitter {
         String owner = function.getModuleName() != null ? function.getModuleName() : _className;
         String descriptor = getFunctionDescriptor(function);
         String methodName;
-        if (function.getModuleName() != null && function.getName().contains(".")) {
+        if (function.getJvmMethodName() != null) {
+            methodName = function.getJvmMethodName();
+        } else if (function.getModuleName() != null && function.getName().contains(".")) {
             // Module function: "collections.arrayToString" → "arrayToString" (in module's class)
             methodName = function.getName().substring(function.getName().lastIndexOf('.') + 1);
         } else {

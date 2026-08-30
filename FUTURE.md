@@ -1,6 +1,6 @@
 # Siyo Compiler — Roadmap
 
-## 0.1.1 (Previous Release)
+## 0.1.1 — Foundations (Released)
 
 ### Language Features
 - **Types**: `int`, `long`, `bool`, `float` (double), `string`, arrays, structs, enums, `null`
@@ -42,7 +42,7 @@
 
 ---
 
-## 0.2.0 (Current Release) — Ergonomics & Reliability
+## 0.2.0 — Ergonomics & Reliability (Released)
 
 ### Compiler Improvements
 - **Generalized type coercion**: Single `emitCoerceArg()` replaces per-builtin CHECKCAST logic. String builtins (contains, substring, indexOf, etc.) now work with Object-typed arguments from maps, actors, etc.
@@ -74,6 +74,7 @@
 
 ### Test Coverage
 - **1475 unit tests** passing (lexer, parser, binder, evaluator, compilation parity)
+  — 1499 as of 0.4.0
 
 ### Pain Points Tracked for Future Releases
 
@@ -95,31 +96,57 @@
 
 ---
 
-## 0.3.0 — Closures & Functional
+## 0.3.0 / 0.3.1 — Module Layout & Tooling (Released)
 
-### Full Higher-Order Functions
-- Pass closures to functions and receive them back
-- Nested function type annotations
-- Closure variable mutation (currently read-only capture)
-
-### Collection Operations
-- `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`
-- `forEach(arr, fn)`
-- Method chaining
+- Go-style module top level: only declarations and imports are allowed at the
+  top of a file, with `init()` on load and `main()` for the entrypoint
+- Module resolution walks up to `siyo.toml`, so commands work from any
+  subdirectory; `siyoc test` auto-discovers `tests/*_test.siyo`
+- Typed arrays (`T[]`), binary file I/O, `std/path`, `std/html`, rewritten
+  `std/json` with nested objects and arrays
+- Diagnostics carry file, line and column
+- 0.3.1 fixed postfix-call parser greediness
 
 ---
 
-## 0.4.0 — Module System
+## 0.4.0 — Module Boundary Maturity (Released)
 
-### Proper Packages
-- Directory-based module resolution
-- Public/private visibility (`pub` keyword)
-- Circular import detection
-- Standard library modules
+Driven by the Aja static-site-generator maturity test — see
+`RELEASE_NOTES_0.4.0.md` for the full list.
+
+- Imported enums, `impl` methods and struct identity survive module boundaries,
+  including diamond-shaped import graphs; no module re-exports a transitive
+  import under its own JVM owner
+- `T[]` returns and parameters keep their element type, and `for-in` elements
+  keep their struct identity
+- Imported Java classes are usable in function, lambda and `impl` signatures;
+  overload selection uses exact JVM descriptors, and an ambiguous erased
+  `object` argument is a compile-time error instead of invalid bytecode
+- Void-valued `match` statements no longer emit an invalid trailing `POP`
+- `actor struct Name` is accepted alongside `actor Name`
+- Parser list loops (parameters, arguments, fields, enum members, match arms,
+  map/array/struct literals, `impl` bodies) always make progress, so malformed
+  input reports diagnostics instead of exhausting the heap
 
 ---
 
 ## 0.5.0 — Advanced Types
+
+### Closures & Collections (carried over)
+- Closure variable mutation — writes to a captured variable are currently
+  discarded silently
+- `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`, `forEach(arr, fn)`
+- Method chaining
+
+### Module System (carried over)
+- Public/private visibility (`pub` keyword)
+- Circular import detection
+- Module aliasing (`import "std/math" as m`)
+
+### Error Handling
+- `throw` / user-raised errors
+- Observable exception type in `catch` (today only the message is reachable, so
+  a message-less exception prints as `null`)
 
 ### Generics
 - `Array<int>`, `Map<string, int>`

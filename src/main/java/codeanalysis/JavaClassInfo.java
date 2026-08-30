@@ -30,11 +30,23 @@ public class JavaClassInfo {
         return _metadata.resolveMethod(name, argCount, argTypes);
     }
 
+    public JavaMethodSignature resolveMethod(String name, int argCount, Class<?>[] argTypes, String[] argJvmDescriptors) {
+        return _metadata.resolveMethod(name, argCount, argTypes, argJvmDescriptors);
+    }
+
     public JavaMethodSignature resolveConstructor(int argCount) {
         return _metadata.resolveConstructor(argCount);
     }
 
     public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes) {
         return _metadata.resolveConstructor(argCount, argTypes);
+    }
+
+    public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes, String[] argJvmDescriptors) {
+        return _metadata.resolveConstructor(argCount, argTypes, argJvmDescriptors);
+    }
+
+    public boolean wasLastResolutionAmbiguous() {
+        return _metadata.wasLastResolutionAmbiguous();
     }
 }

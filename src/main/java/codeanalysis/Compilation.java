@@ -125,6 +125,11 @@ public class Compilation {
      * @return The class file bytes, or null if there are errors.
      */
     public byte[] compile(String className) {
+        // A tree that failed to parse contains synthetic error tokens; binding it
+        // would report follow-on noise at best and crash at worst.
+        if (_syntaxTree.diagnostics().size() > 0) {
+            return null;
+        }
         DiagnosticBox diagnostics = _syntaxTree.diagnostics().addAll(getGlobalScope().getDiagnostics());
         if (diagnostics.hasNext()) {
             return null;

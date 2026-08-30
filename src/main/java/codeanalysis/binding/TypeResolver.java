@@ -79,6 +79,8 @@ public class TypeResolver {
         if (target instanceof BoundCallExpression callExpr) {
             if (callExpr.getFunction() == BuiltinFunctions.RANGE) return Integer.class;
             if (callExpr.getFunction() == BuiltinFunctions.SPLIT) return String.class;
+            Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
+            if (returnElementType != null) return returnElementType;
         }
         if (target instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol structType = resolveStructType(memberExpr.getTarget());
@@ -144,6 +146,13 @@ public class TypeResolver {
         if (collection instanceof BoundVariableExpression varExpr) {
             StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
+        }
+        if (collection instanceof BoundCallExpression callExpr) {
+            String structName = callExpr.getFunction().getReturnElementStructName();
+            if (structName != null) {
+                StructSymbol structType = _structTypes.get(structName);
+                if (structType != null) return structType;
+            }
         }
         // Struct field array: self.todos where todos: Todo[]
         if (collection instanceof BoundMemberAccessExpression memberExpr) {
@@ -297,7 +306,7 @@ public class TypeResolver {
         if (name.endsWith("[]")) {
             return SiyoArray.class;
         }
-        return switch (name) {
+        Class<?> builtin = switch (name) {
             case "int" -> Integer.class;
             case "long" -> Long.class;
             case "bool" -> Boolean.class;
@@ -310,9 +319,14 @@ public class TypeResolver {
             case "object", "any" -> Object.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
         };
+        if (builtin != null) return builtin;
+        // Imported Java classes are represented as Object in Siyo function ABI,
+        // with their precise Java identity tracked separately for member/overload resolution.
+        return _javaClasses.containsKey(name) ? Object.class : null;
     }
 
     public Class<?> lookupElementType(String typeName) {
+        if (typeName == null) return null;
         if (typeName.endsWith("[]")) {
             return lookupType(typeName.substring(0, typeName.length() - 2));
         }
