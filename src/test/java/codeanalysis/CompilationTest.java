@@ -180,6 +180,10 @@ class CompilationTest {
             {"StructIntInterp", "struct S { val: int }\nmut s = S { val: 42 }\nprintln(\"val=${s.val}\")"},
             // for-in map iteration
             {"ForInMap", "mut m = {\"x\": 1}\nfor k in m {\nprintln(k)\n}"},
+            // Regression: a void-valued match used as a statement must not emit POP.
+            {"VoidMatchStatement", "fn alpha() { println(\"alpha\") }\nfn beta() { println(\"beta\") }\nmut command = \"alpha\"\nmatch command { \"alpha\" => alpha(), _ => beta() }"},
+            // Backward compatibility: the early actor documentation used `actor struct`.
+            {"ActorStructCompatibility", "actor struct Counter { total: int }\nimpl Counter { fn new() -> Counter { Counter { total: 0 } }\nfn increment(self) { self.total += 1 } }\nprintln(\"ok\")"},
         };
     }
 }

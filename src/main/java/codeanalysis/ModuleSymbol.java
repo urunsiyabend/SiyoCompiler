@@ -15,13 +15,15 @@ public class ModuleSymbol {
     private final List<FunctionSymbol> _functions;
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies;
     private final Map<String, StructSymbol> _structs;
+    private final Map<String, Map<String, Integer>> _enums;
     private final BoundBlockStatement _topLevelBlock;
 
     public ModuleSymbol(String name, String className, String filePath,
                         List<FunctionSymbol> functions,
                         Map<FunctionSymbol, BoundBlockStatement> functionBodies,
                         Map<String, StructSymbol> structs) {
-        this(name, className, filePath, functions, functionBodies, structs, null);
+        this(name, className, filePath, functions, functionBodies, structs,
+                new java.util.HashMap<>(), null);
     }
 
     public ModuleSymbol(String name, String className, String filePath,
@@ -29,12 +31,23 @@ public class ModuleSymbol {
                         Map<FunctionSymbol, BoundBlockStatement> functionBodies,
                         Map<String, StructSymbol> structs,
                         BoundBlockStatement topLevelBlock) {
+        this(name, className, filePath, functions, functionBodies, structs,
+                new java.util.HashMap<>(), topLevelBlock);
+    }
+
+    public ModuleSymbol(String name, String className, String filePath,
+                        List<FunctionSymbol> functions,
+                        Map<FunctionSymbol, BoundBlockStatement> functionBodies,
+                        Map<String, StructSymbol> structs,
+                        Map<String, Map<String, Integer>> enums,
+                        BoundBlockStatement topLevelBlock) {
         _name = name;
         _className = className;
         _filePath = filePath;
         _functions = functions;
         _functionBodies = functionBodies;
         _structs = structs != null ? structs : new java.util.HashMap<>();
+        _enums = enums != null ? enums : new java.util.HashMap<>();
         _topLevelBlock = topLevelBlock;
     }
 
@@ -44,5 +57,6 @@ public class ModuleSymbol {
     public List<FunctionSymbol> getFunctions() { return _functions; }
     public Map<FunctionSymbol, BoundBlockStatement> getFunctionBodies() { return _functionBodies; }
     public Map<String, StructSymbol> getStructs() { return _structs; }
+    public Map<String, Map<String, Integer>> getEnums() { return _enums; }
     public BoundBlockStatement getTopLevelBlock() { return _topLevelBlock; }
 }

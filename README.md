@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.2.0-green" alt="v0.2.0">
-  <img src="https://img.shields.io/badge/tests-1475%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.4.0-green" alt="v0.4.0">
+  <img src="https://img.shields.io/badge/tests-1499%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -181,7 +181,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.2.0"
+version = "0.4.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -204,8 +204,8 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Pattern matching** | `match expr { 1 => "one", _ => "other" }` |
 | **Error handling** | `try { ... } catch e { ... }`, `error("msg")`, try-as-expression |
 | **Concurrency** | `scope`/`spawn`, channels (buffered & unbuffered), `for msg in ch` |
-| **Actors** | `actor struct`, `spawn Actor.new(...)`, sync calls, async `send` |
-| **Java interop** | `import java "java.net.Socket"`, constructors, static & instance methods |
+| **Actors** | `actor Store` (`actor struct Store` is accepted for compatibility), `spawn Actor.new(...)`, sync calls, async `send` |
+| **Java interop** | `import java "java.net.Socket"`, Java types in signatures, constructors, static & instance methods, overload resolution |
 | **Modules** | `import "file"` |
 | **String interpolation** | `"Hello, $name! You are $age years old."` / `"${expr}"` |
 
@@ -272,7 +272,7 @@ src/main/java/
     ├── SiyoRuntime.java                Compiled-code runtime helpers
     ├── BuiltinFunctions.java           37 stdlib functions
     └── ...                             Types, diagnostics, symbols
-src/test/java/                          1475 tests
+src/test/java/                          1499 tests
 examples/                               29 standalone examples
 projects/                               Multi-file projects (siyodb, chat)
 ```
@@ -283,22 +283,25 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-1475 tests across 8 suites — lexer, parser, binder, evaluator, compilation (bytecode-vs-interpreter parity), syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+1499 tests across 11 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.2.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.4.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.2.0)
+## Known limitations (0.4.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
 - No implicit `int + double` promotion (use `toDouble(n)`)
 - No set literal syntax — use `set()` + `.add()`
 - No hex literals, no `do-while`
-- Closure captures are read-only
+- Closure captures are read-only, and writes to a captured variable are silently discarded
+- No `throw` — errors come from `error()` and Java interop only
+- A value caught by `catch e` exposes the exception message only; the exception
+  type is not observable, so a message-less exception prints as `null`
 - No generics, no interfaces
 
 ## Contributing

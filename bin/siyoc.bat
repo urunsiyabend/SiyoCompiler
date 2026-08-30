@@ -12,8 +12,9 @@ if exist "%SIYO_HOME%\lib\siyoc.jar" (
     )
 )
 
-REM Development mode: shaded JAR from Maven build
-set "SIYO_JAR=%SIYO_HOME%\target\siyo-compiler-0.2.0-shaded.jar"
+REM Development mode: select the highest built release, ignoring Shade's backup JAR
+set "SIYO_JAR="
+for /f "delims=" %%F in ('dir /b /a-d /o:n "%SIYO_HOME%\target\siyo-compiler-*.jar" 2^>nul ^| findstr /v /i "original-"') do set "SIYO_JAR=%SIYO_HOME%\target\%%F"
 
 if not exist "%SIYO_JAR%" (
     echo Error: siyo-compiler JAR not found. Run 'mvn package -DskipTests'

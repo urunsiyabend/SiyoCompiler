@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.3.0)
+# Siyo Language Grammar (0.4.0)
 
 ## Lexical Grammar
 
@@ -130,6 +130,17 @@ struct_declaration
 enum_declaration
     : 'enum' IDENTIFIER '{' IDENTIFIER (',' IDENTIFIER)* '}'
 
+actor_declaration
+    : 'actor' 'struct'? IDENTIFIER '{' field_list '}'
+    // `actor Name` is the idiomatic form; `actor struct Name` is accepted for
+    // backward compatibility with 0.3.x sources.
+
+impl_declaration
+    : 'impl' IDENTIFIER '{' function_declaration* '}'
+    // Methods take an explicit `self` first parameter; `fn new()` is the
+    // constructor used by struct construction and by `spawn Type.new(...)`.
+    // There is no `fn Type.method(...)` top-level spelling.
+
 try_catch_statement
     : 'try' block 'catch' IDENTIFIER block
 
@@ -224,6 +235,24 @@ struct_literal
 | `set` | `SiyoSet` | Unique value set |
 | `object` / `any` | `Object` | Any type |
 
+### Structs, enums and `impl`
+
+```siyo
+struct Page { title: string, kind: int }
+enum PageKind { Post, Page }
+
+impl Page {
+    fn new(title: string) -> Page { Page { title: title, kind: PageKind.Post } }
+    fn isPost(self) -> bool { self.kind == PageKind.Post }
+}
+
+mut p = Page { title: "hello", kind: PageKind.Post }
+println(toString(p.isPost()))
+```
+
+Methods live in an `impl` block and take `self` as their first parameter.
+Enum members are integer-backed and referenced as `EnumName.Member`.
+
 ### Type Rules
 
 - Arithmetic operators work on `int`, `long`, `double` (same-type operands)
@@ -298,13 +327,24 @@ for key in prices {       // iterates keys
 
 ### Actors
 ```siyo
-actor struct Counter { count: int }
-fn Counter.increment(n: int) -> int { self.count += n; self.count }
+actor Counter { count: int }      // `actor struct Counter` also accepted
 
-mut c = spawn Counter.new(Counter { count: 0 })
+impl Counter {
+    fn new() -> Counter { Counter { count: 0 } }
+    fn increment(self, n: int) -> int {
+        self.count += n
+        self.count
+    }
+}
+
+mut c = spawn Counter.new()
 imut result = c.increment(5)   // synchronous call
 send c.increment(1)            // fire-and-forget
 ```
+
+Actor state is reached through `self` inside `impl` methods, exactly as for a
+plain struct. `spawn Type.new(...)` calls the type's `new` method and returns an
+actor handle rather than the struct itself.
 
 ## Modules
 
@@ -340,7 +380,28 @@ Two zero-arg functions have special runtime semantics:
 
 A file that is run as the entrypoint and defines both functions runs `init()` first, then `main()`. A file with neither is a no-op when run as the entrypoint.
 
-Functions and top-level variables are exported as `moduleName.symbol` when imported from another file.
+Functions and top-level variables are exported as `moduleName.symbol` when
+imported from another file. Structs, enums and `impl` methods are exported too:
+
+```siyo
+// model.siyo
+struct Page { title: string, kind: int }
+enum PageKind { Post, Page }
+
+impl Page {
+    fn isPost(self) -> bool { self.kind == PageKind.Post }
+}
+
+// consumer.siyo
+import "model"
+mut p = Page { title: "hi", kind: PageKind.Post }   // struct and enum in scope
+println(toString(p.isPost()))                        // impl method dispatches
+                                                     // to the declaring module
+```
+
+An imported symbol keeps the module that declared it as its JVM owner, including
+in diamond-shaped import graphs — a module that imports a symbol does not
+re-export it under its own name.
 
 ### Import
 
@@ -376,6 +437,26 @@ mut s = Socket.new("localhost", 8080)
 ```
 
 Static methods, constructors, and instance methods are callable. Return types are mapped automatically.
+
+An imported Java class is also usable as a type annotation — in function
+parameters and returns, lambda parameters, and `impl` method signatures:
+
+```siyo
+import java "java.io.File"
+import java "java.io.FileInputStream"
+
+fn open(file: File) -> object { FileInputStream.new(file) }
+```
+
+Overload selection prefers the exact JVM descriptor of the argument types and
+falls back to reference-supertype compatibility. An argument whose static type
+is erased to `object` and that matches more than one overload is a compile-time
+error rather than an arbitrary runtime cast:
+
+```text
+Java call 'FileInputStream.new' is ambiguous for erased object arguments;
+add an imported Java type annotation
+```
 
 ## Standard Library
 
@@ -506,7 +587,7 @@ project/
 ```toml
 [project]
 name = "myapp"
-version = "0.1.0"
+version = "0.4.0"
 main = "src/main.siyo"
 
 [dependencies]

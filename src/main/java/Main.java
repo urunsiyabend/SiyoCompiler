@@ -14,7 +14,7 @@ import java.util.*;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.3.1";
+    private static final String VERSION = "0.4.0";
 
     public static void main(String[] args) {
         if (System.getenv("SIYO_DEBUG") != null) {
@@ -191,7 +191,9 @@ public class Main {
 
             byte[] bytecode = compilation.compile(className);
             if (bytecode == null) {
-                DiagnosticBox diagnostics = tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                DiagnosticBox diagnostics = tree.diagnostics().size() > 0
+                        ? tree.diagnostics()
+                        : tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
                 String diagFileName = java.nio.file.Paths.get(path).getFileName().toString();
                 java.util.Set<String> seen = new java.util.LinkedHashSet<>();
                 while (diagnostics.hasNext()) {
@@ -265,7 +267,9 @@ public class Main {
 
             byte[] bytecode = compilation.compile(className);
             if (bytecode == null) {
-                DiagnosticBox diagnostics = tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                DiagnosticBox diagnostics = tree.diagnostics().size() > 0
+                        ? tree.diagnostics()
+                        : tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
                 while (diagnostics.hasNext()) {
                     System.err.println(diagnostics.next());
                 }

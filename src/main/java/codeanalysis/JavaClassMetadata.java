@@ -20,6 +20,7 @@ public class JavaClassMetadata {
     private final List<JavaMethodSignature> _constructors;
     private final java.util.Map<String, String> _staticFields;
     private final List<String> _typeParams; // class-level type parameter names: ["E"], ["K","V"]
+    private boolean _lastResolutionAmbiguous;
 
     private JavaClassMetadata(String simpleName, String fullName, String internalName,
                                boolean isInterface, String superClassName,
@@ -130,23 +131,33 @@ public class JavaClassMetadata {
      * Resolve method with optional argument type matching for overload resolution.
      */
     public JavaMethodSignature resolveMethod(String name, int argCount, Class<?>[] argTypes) {
-        JavaMethodSignature result = findMethodInClass(name, argCount, argTypes);
-        if (result != null) return result;
+        return resolveMethod(name, argCount, argTypes, null);
+    }
+
+    public JavaMethodSignature resolveMethod(String name, int argCount, Class<?>[] argTypes, String[] argJvmDescriptors) {
+        _lastResolutionAmbiguous = false;
+        JavaMethodSignature result = findMethodInClass(name, argCount, argTypes, argJvmDescriptors);
+        if (result != null || _lastResolutionAmbiguous) return result;
 
         // Search superclass hierarchy
         if (_superClassName != null) {
             JavaClassMetadata superMeta = load(_superClassName);
             if (superMeta != null) {
-                return superMeta.resolveMethod(name, argCount, argTypes);
+                JavaMethodSignature inherited = superMeta.resolveMethod(name, argCount, argTypes, argJvmDescriptors);
+                _lastResolutionAmbiguous = superMeta.wasLastResolutionAmbiguous();
+                return inherited;
             }
         }
         return null;
     }
 
-    private JavaMethodSignature findMethodInClass(String name, int argCount, Class<?>[] argTypes) {
+    private JavaMethodSignature findMethodInClass(String name, int argCount, Class<?>[] argTypes, String[] argJvmDescriptors) {
         JavaMethodSignature fallback = null;
         JavaMethodSignature bestMatch = null;
         int bestScore = -1;
+        int compatibleCount = 0;
+        boolean hasErasedArgument = false;
+        boolean hasSafeObjectOverload = false;
         for (JavaMethodSignature sig : _methods) {
             if (!sig.getName().equals(name) || sig.getParamCount() != argCount) continue;
 
@@ -160,17 +171,35 @@ public class JavaClassMetadata {
             int score = 0;
             String[] paramDescs = sig.getParamDescriptors();
             for (int i = 0; i < argCount; i++) {
-                if (!isTypeCompatible(argTypes[i], paramDescs[i])) {
+                String exactDesc = argJvmDescriptors != null ? argJvmDescriptors[i] : null;
+                if (!isTypeCompatible(argTypes[i], exactDesc, paramDescs[i])) {
                     match = false;
                     break;
                 }
-                score += typeMatchScore(argTypes[i], paramDescs[i]);
+                score += typeMatchScore(argTypes[i], exactDesc, paramDescs[i]);
             }
             if (match && score > bestScore) {
                 bestScore = score;
                 bestMatch = sig;
             }
+            if (match) {
+                compatibleCount++;
+                boolean safeForErasedArgs = true;
+                for (int i = 0; i < argCount; i++) {
+                    boolean erased = argTypes[i] == Object.class
+                            && (argJvmDescriptors == null || argJvmDescriptors[i] == null);
+                    if (erased) {
+                        hasErasedArgument = true;
+                        if (!paramDescs[i].equals("Ljava/lang/Object;")) safeForErasedArgs = false;
+                    }
+                }
+                if (safeForErasedArgs) hasSafeObjectOverload = true;
+            }
             if (argTypes == null && fallback == null) fallback = sig;
+        }
+        if (hasErasedArgument && compatibleCount > 1 && !hasSafeObjectOverload) {
+            _lastResolutionAmbiguous = true;
+            return null;
         }
         if (bestMatch != null) return bestMatch;
         return fallback; // only used when no type info provided
@@ -180,7 +209,9 @@ public class JavaClassMetadata {
      * Score a type match — higher is better (more specific).
      * Exact match scores highest; Object→Object preferred over Object→char[].
      */
-    private int typeMatchScore(Class<?> siyoType, String jvmDesc) {
+    private int typeMatchScore(Class<?> siyoType, String exactJvmDesc, String jvmDesc) {
+        if (exactJvmDesc != null && exactJvmDesc.equals(jvmDesc)) return 100;
+        if (exactJvmDesc != null && jvmDesc.equals("Ljava/lang/Object;")) return 1;
         if (siyoType == Integer.class && jvmDesc.equals("I")) return 10;
         if (siyoType == Integer.class && jvmDesc.equals("J")) return 5;
         if (siyoType == Long.class && jvmDesc.equals("J")) return 10;
@@ -201,8 +232,16 @@ public class JavaClassMetadata {
         return 5;
     }
 
-    private boolean isTypeCompatible(Class<?> siyoType, String jvmDesc) {
+    private boolean isTypeCompatible(Class<?> siyoType, String exactJvmDesc, String jvmDesc) {
         if (siyoType == null) return true;
+        if (exactJvmDesc != null) {
+            if (exactJvmDesc.equals(jvmDesc) || jvmDesc.equals("Ljava/lang/Object;")) return true;
+            // The metadata loader deliberately avoids reflection, so it does not
+            // have a complete assignability graph here. Keep reference candidates
+            // eligible (FileReader -> Reader, for example); the exact descriptor
+            // still wins decisively in typeMatchScore when an overload exists.
+            return exactJvmDesc.startsWith("L") && jvmDesc.startsWith("L");
+        }
         // Any reference type is compatible with Object parameter
         if (jvmDesc.equals("Ljava/lang/Object;")) return true; // any Siyo type compatible with Object param (boxed if needed)
         if (siyoType == Integer.class) return jvmDesc.equals("I") || jvmDesc.equals("J");
@@ -219,30 +258,58 @@ public class JavaClassMetadata {
     }
 
     public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes) {
-        JavaMethodSignature fallback = null;
+        return resolveConstructor(argCount, argTypes, null);
+    }
+
+    public JavaMethodSignature resolveConstructor(int argCount, Class<?>[] argTypes, String[] argJvmDescriptors) {
+        _lastResolutionAmbiguous = false;
+        JavaMethodSignature bestMatch = null;
+        int bestScore = -1;
+        int compatibleCount = 0;
+        boolean hasErasedArgument = false;
+        boolean hasSafeObjectOverload = false;
         for (JavaMethodSignature sig : _constructors) {
             if (sig.getParamCount() != argCount) continue;
 
             if (argTypes == null) return sig;
 
             boolean match = true;
-            boolean hasObjectArg = false;
+            int score = 0;
             String[] paramDescs = sig.getParamDescriptors();
             for (int i = 0; i < argCount; i++) {
-                if (argTypes[i] == Object.class) hasObjectArg = true;
-                if (!isTypeCompatible(argTypes[i], paramDescs[i])) {
+                String exactDesc = argJvmDescriptors != null ? argJvmDescriptors[i] : null;
+                if (!isTypeCompatible(argTypes[i], exactDesc, paramDescs[i])) {
                     match = false;
                     break;
                 }
+                score += typeMatchScore(argTypes[i], exactDesc, paramDescs[i]);
+            }
+            if (match && score > bestScore) {
+                bestScore = score;
+                bestMatch = sig;
             }
             if (match) {
-                if (!hasObjectArg) return sig; // exact match — prefer
-                fallback = sig; // Object arg — keep searching for better match
+                compatibleCount++;
+                boolean safeForErasedArgs = true;
+                for (int i = 0; i < argCount; i++) {
+                    boolean erased = argTypes[i] == Object.class
+                            && (argJvmDescriptors == null || argJvmDescriptors[i] == null);
+                    if (erased) {
+                        hasErasedArgument = true;
+                        if (!paramDescs[i].equals("Ljava/lang/Object;")) safeForErasedArgs = false;
+                    }
+                }
+                if (safeForErasedArgs) hasSafeObjectOverload = true;
             }
-            if (argTypes == null && fallback == null) fallback = sig;
         }
-        return fallback;
+        if (hasErasedArgument && compatibleCount > 1 && !hasSafeObjectOverload) {
+            _lastResolutionAmbiguous = true;
+            return null;
+        }
+        return bestMatch;
     }
+
+    public boolean wasLastResolutionAmbiguous() { return _lastResolutionAmbiguous; }
 
     public List<JavaMethodSignature> getMethods() { return _methods; }
     public List<JavaMethodSignature> getConstructors() { return _constructors; }

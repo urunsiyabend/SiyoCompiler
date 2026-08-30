@@ -290,9 +290,11 @@ public class Binder {
                 if (st != null) _typeResolver.trackStructType(variableSymbol, st);
             }
         } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
-            // Track element type for built-in functions that return arrays
+            // Track element type (and struct identity) for functions returning arrays.
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
-            _typeResolver.trackArrayType(variableSymbol, elemType);
+            StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(initializer);
+            if (elemStruct != null) _typeResolver.trackArrayType(variableSymbol, elemType, elemStruct);
+            else _typeResolver.trackArrayType(variableSymbol, elemType);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
         } else if (initializer instanceof BoundJavaMethodCallExpression javaArrCall && javaArrCall.getClassType() == SiyoArray.class) {
@@ -665,6 +667,7 @@ public class Binder {
         BoundExpression target = bindExpression(syntax.getTarget());
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
         Class<?> resultType = null;
+        boolean resultTypeInitialized = false;
         for (MatchArmSyntax arm : syntax.getArms()) {
             BoundExpression pattern = arm.isDefault() ? null : bindExpression(arm.getPattern());
             BoundExpression body;
@@ -674,10 +677,18 @@ public class Binder {
             } else {
                 body = bindExpression(arm.getBody());
             }
-            if (resultType == null) resultType = body.getClassType();
+            Class<?> bodyType = body.getClassType();
+            if (!resultTypeInitialized) {
+                // null is a meaningful type here: every arm may be void.
+                resultType = bodyType;
+                resultTypeInitialized = true;
+            } else if (resultType != bodyType) {
+                _diagnostics.reportError(arm.getBody().getSpan(),
+                        "All match arms must return the same type; cannot mix void and value arms");
+            }
             arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(), preStatements));
         }
-        if (resultType == null) resultType = Object.class;
+        if (!resultTypeInitialized) resultType = Object.class;
         return new BoundMatchExpression(target, arms, resultType);
     }
 
@@ -981,7 +992,10 @@ public class Binder {
                 String typeName = syntax.getParameters().get(paramIdx).getTypeToken().getData();
                 Class<?> elemType = _typeResolver.lookupElementType(typeName);
                 if (elemType != null) {
-                    _typeResolver.trackArrayType(parameter, elemType);
+                    String elementName = typeName.substring(0, typeName.length() - 2);
+                    StructSymbol elementStruct = _structTypes.get(elementName);
+                    if (elementStruct != null) _typeResolver.trackArrayType(parameter, elemType, elementStruct);
+                    else _typeResolver.trackArrayType(parameter, elemType);
                 }
                 // Track struct types from parameter type names
                 String baseTypeName = typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName;
@@ -989,6 +1003,8 @@ public class Binder {
                 if (structSym != null && parameter.getType() == SiyoStruct.class) {
                     _typeResolver.trackStructType(parameter, structSym);
                 }
+                codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
+                if (javaType != null) _typeResolver.trackJavaClassType(parameter, javaType);
             }
             paramIdx++;
         }
@@ -1575,6 +1591,19 @@ public class Binder {
             ParameterSymbol param = new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType);
             parameters.add(param);
             _scope.tryDeclare(param);
+            Class<?> elementType = _typeResolver.lookupElementType(typeName);
+            if (elementType != null) {
+                String elementName = typeName.substring(0, typeName.length() - 2);
+                StructSymbol elementStruct = _structTypes.get(elementName);
+                if (elementStruct != null) _typeResolver.trackArrayType(param, elementType, elementStruct);
+                else _typeResolver.trackArrayType(param, elementType);
+            }
+            StructSymbol structType = _structTypes.get(typeName);
+            if (structType != null && paramType == SiyoStruct.class) {
+                _typeResolver.trackStructType(param, structType);
+            }
+            codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
+            if (javaType != null) _typeResolver.trackJavaClassType(param, javaType);
         }
 
         // Return type
@@ -1732,17 +1761,26 @@ public class Binder {
 
                 // Compile-time method resolution
                 codeanalysis.JavaMethodSignature resolved = isConstructor
-                        ? javaClass.resolveConstructor(boundArgs.size(), getArgTypes(boundArgs))
-                        : javaClass.resolveMethod(funcName, boundArgs.size(), getArgTypes(boundArgs));
+                        ? javaClass.resolveConstructor(boundArgs.size(), getArgTypes(boundArgs), getArgJvmDescriptors(boundArgs))
+                        : javaClass.resolveMethod(funcName, boundArgs.size(), getArgTypes(boundArgs), getArgJvmDescriptors(boundArgs));
 
                 if (resolved == null) {
-                    _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+                    if (javaClass.wasLastResolutionAmbiguous()) {
+                        _diagnostics.reportAmbiguousJavaCall(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+                    } else {
+                        _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), targetName + "." + funcName);
+                    }
                     return new BoundLiteralExpression(0);
                 }
 
                 codeanalysis.JavaResolvedType returnType = _typeResolver.resolveMethodReturnType(
                         resolved, new codeanalysis.JavaResolvedType(javaClass));
                 return new BoundJavaMethodCallExpression(javaClass, null, funcName, boundArgs, resolved, returnType);
+            }
+
+            if (_moduleHandler.isImportedQualifier(targetName)) {
+                _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), qualifiedName);
+                return new BoundLiteralExpression(0);
             }
 
             // Not a module or Java class - fall through to instance method call
@@ -1780,14 +1818,20 @@ public class Binder {
         codeanalysis.JavaMethodSignature resolved = null;
         codeanalysis.JavaResolvedType resolvedReturnType = null;
         if (targetClassInfo != null) {
-            resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(), getArgTypes(boundArgs));
+            resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(),
+                    getArgTypes(boundArgs), getArgJvmDescriptors(boundArgs));
             if (resolved == null) {
                 if (targetClassInfo.getFullName().equals("java.lang.Object")) {
                     // Object class — method not found, fall through to dynamic dispatch
                     targetClassInfo = null;
                 } else {
-                    _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
-                            targetClassInfo.getSimpleName() + "." + methodName);
+                    if (targetClassInfo.wasLastResolutionAmbiguous()) {
+                        _diagnostics.reportAmbiguousJavaCall(memberAccess.getMember().getSpan(),
+                                targetClassInfo.getSimpleName() + "." + methodName);
+                    } else {
+                        _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(),
+                                targetClassInfo.getSimpleName() + "." + methodName);
+                    }
                     return new BoundLiteralExpression(0);
                 }
             }
@@ -1841,11 +1885,29 @@ public class Binder {
             // Bind the method body in a new scope with parameters
             _scope = new BoundScope(_scope);
             _moduleHandler.setScope(_scope);
+            int parameterIndex = 0;
             for (ParameterSymbol param : func.getParameters()) {
                 _scope.tryDeclare(param);
                 if (param.getName().equals("self") && structType != null) {
                     _typeResolver.trackStructType(param, structType);
                 }
+                if (parameterIndex < method.getParameters().getCount()) {
+                    String typeName = method.getParameters().get(parameterIndex).getTypeToken().getData();
+                    codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
+                    if (javaType != null) _typeResolver.trackJavaClassType(param, javaType);
+                    Class<?> elementType = _typeResolver.lookupElementType(typeName);
+                    if (elementType != null) {
+                        String elementName = typeName.substring(0, typeName.length() - 2);
+                        StructSymbol elementStruct = _structTypes.get(elementName);
+                        if (elementStruct != null) _typeResolver.trackArrayType(param, elementType, elementStruct);
+                        else _typeResolver.trackArrayType(param, elementType);
+                    }
+                    StructSymbol parameterStruct = _structTypes.get(typeName);
+                    if (parameterStruct != null && param.getType() == SiyoStruct.class) {
+                        _typeResolver.trackStructType(param, parameterStruct);
+                    }
+                }
+                parameterIndex++;
             }
 
             _currentFunction = func;
@@ -1880,6 +1942,17 @@ public class Binder {
         Class<?>[] types = new Class<?>[args.size()];
         for (int i = 0; i < args.size(); i++) types[i] = args.get(i).getClassType();
         return types;
+    }
+
+    private String[] getArgJvmDescriptors(List<BoundExpression> args) {
+        String[] descriptors = new String[args.size()];
+        for (int i = 0; i < args.size(); i++) {
+            codeanalysis.JavaResolvedType resolved = _typeResolver.resolveJavaResolvedType(args.get(i));
+            if (resolved != null && resolved.getClassInfo() != null) {
+                descriptors[i] = "L" + resolved.getClassInfo().getInternalName() + ";";
+            }
+        }
+        return descriptors;
     }
 
     // --- Public accessors ---

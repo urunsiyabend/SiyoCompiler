@@ -6,6 +6,7 @@ import codeanalysis.FunctionSymbol;
 import codeanalysis.ModuleRegistry;
 import codeanalysis.ModuleSymbol;
 import codeanalysis.ParameterSymbol;
+import codeanalysis.SiyoArray;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
 import codeanalysis.syntax.*;
@@ -79,6 +80,18 @@ public class ModuleHandler {
         return _enumTypes;
     }
 
+    public boolean isImportedQualifier(String qualifier) {
+        for (String moduleName : _importedModules) {
+            String shortName = moduleName;
+            int slash = shortName.lastIndexOf('/');
+            if (slash >= 0) shortName = shortName.substring(slash + 1);
+            int dot = shortName.lastIndexOf('.');
+            if (dot >= 0) shortName = shortName.substring(dot + 1);
+            if (shortName.equals(qualifier)) return true;
+        }
+        return false;
+    }
+
     // --- Import handling ---
 
     public BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
@@ -138,6 +151,9 @@ public class ModuleHandler {
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
             importedFunc.setReturnStructName(func.getReturnStructName());
+            importedFunc.setReturnElementType(func.getReturnElementType());
+            importedFunc.setReturnElementStructName(func.getReturnElementStructName());
+            importedFunc.setJvmMethodName(func.getName().replace('.', '$'));
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
@@ -152,14 +168,25 @@ public class ModuleHandler {
             _structTypes.put(entry.getKey(), entry.getValue());
         }
 
+        // Register imported enums so EnumName.Member remains usable across modules.
+        for (var entry : module.getEnums().entrySet()) {
+            _enumTypes.putIfAbsent(entry.getKey(), new HashMap<>(entry.getValue()));
+        }
+
         // Register imported impl methods (Struct.method)
         for (FunctionSymbol func : module.getFunctions()) {
             if (func.getName().contains(".") && !func.getName().startsWith(moduleName + ".")) {
                 // This is a struct impl method like "Vec2.new"
-                _scope.tryDeclareFunction(func);
+                FunctionSymbol importedImpl = new FunctionSymbol(
+                        func.getName(), func.getParameters(), func.getReturnType(), className);
+                importedImpl.setReturnStructName(func.getReturnStructName());
+                importedImpl.setReturnElementType(func.getReturnElementType());
+                importedImpl.setReturnElementStructName(func.getReturnElementStructName());
+                importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
+                _scope.tryDeclareFunction(importedImpl);
                 BoundBlockStatement body = module.getFunctionBodies().get(func);
                 if (body != null) {
-                    _functionBodies.put(func, body);
+                    _functionBodies.put(importedImpl, body);
                 }
             }
         }
@@ -306,7 +333,16 @@ public class ModuleHandler {
                 className = "Siyo_" + className;
             }
 
-            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>(moduleBinder._functionBodies);
+            // A module exports only functions declared in that source file.
+            // Imported symbols also live in the binder's body map so local calls
+            // can resolve, but re-exporting them changes their JVM owner in the
+            // next importer (A -> B -> C becomes C.B$method).
+            Map<FunctionSymbol, BoundBlockStatement> bodies = new HashMap<>();
+            for (var entry : moduleBinder._functionBodies.entrySet()) {
+                if (entry.getKey().getModuleName() == null) {
+                    bodies.put(entry.getKey(), entry.getValue());
+                }
+            }
             List<FunctionSymbol> functions = new ArrayList<>(bodies.keySet());
             Map<String, StructSymbol> structs = new HashMap<>(moduleBinder.getStructTypes());
 
@@ -317,7 +353,12 @@ public class ModuleHandler {
                 topLevelBlock = codeanalysis.lowering.Lowerer.lower(blk);
             }
 
-            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath, functions, bodies, structs, topLevelBlock);
+            Map<String, Map<String, Integer>> enums = new HashMap<>();
+            for (var entry : moduleBinder.getModuleHandler().getEnumTypes().entrySet()) {
+                enums.put(entry.getKey(), new HashMap<>(entry.getValue()));
+            }
+            ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath,
+                    functions, bodies, structs, enums, topLevelBlock);
             if (_registry != null) {
                 _registry.register(filePath, module);
                 _registry.markComplete(filePath);
@@ -351,6 +392,15 @@ public class ModuleHandler {
         FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
         if (returnType == SiyoStruct.class && syntax.getTypeClause() != null) {
             function.setReturnStructName(syntax.getTypeClause().getIdentifier().getData());
+        }
+        if (returnType == SiyoArray.class && syntax.getTypeClause() != null) {
+            String typeName = syntax.getTypeClause().getIdentifier().getData();
+            Class<?> elementType = _typeResolver.lookupElementType(typeName);
+            function.setReturnElementType(elementType != null ? elementType : Object.class);
+            if (typeName.endsWith("[]")) {
+                String elementName = typeName.substring(0, typeName.length() - 2);
+                if (_structTypes.containsKey(elementName)) function.setReturnElementStructName(elementName);
+            }
         }
         _scope.tryDeclareFunction(function);
     }
@@ -403,6 +453,15 @@ public class ModuleHandler {
             FunctionSymbol func = new FunctionSymbol(qualifiedName, parameters, returnType);
             if (returnType == SiyoStruct.class && method.getTypeClause() != null) {
                 func.setReturnStructName(method.getTypeClause().getIdentifier().getData());
+            }
+            if (returnType == SiyoArray.class && method.getTypeClause() != null) {
+                String typeName = method.getTypeClause().getIdentifier().getData();
+                Class<?> elementType = _typeResolver.lookupElementType(typeName);
+                func.setReturnElementType(elementType != null ? elementType : Object.class);
+                if (typeName.endsWith("[]")) {
+                    String elementName = typeName.substring(0, typeName.length() - 2);
+                    if (_structTypes.containsKey(elementName)) func.setReturnElementStructName(elementName);
+                }
             }
             _scope.tryDeclareFunction(func);
         }

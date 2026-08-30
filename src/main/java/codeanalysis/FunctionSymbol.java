@@ -16,6 +16,9 @@ public class FunctionSymbol {
     private final Class<?> _returnType;
     private final String _moduleName;
     private String _returnStructName; // if return type is SiyoStruct, which struct
+    private Class<?> _returnElementType; // if return type is SiyoArray
+    private String _returnElementStructName; // if returning Struct[]
+    private String _jvmMethodName; // declaring module's emitted method name, when imported
 
     public FunctionSymbol(String name, List<ParameterSymbol> parameters, Class<?> returnType) {
         this(name, parameters, returnType, null);
@@ -31,6 +34,12 @@ public class FunctionSymbol {
     public String getModuleName() { return _moduleName; }
     public String getReturnStructName() { return _returnStructName; }
     public void setReturnStructName(String name) { _returnStructName = name; }
+    public Class<?> getReturnElementType() { return _returnElementType; }
+    public void setReturnElementType(Class<?> type) { _returnElementType = type; }
+    public String getReturnElementStructName() { return _returnElementStructName; }
+    public void setReturnElementStructName(String name) { _returnElementStructName = name; }
+    public String getJvmMethodName() { return _jvmMethodName; }
+    public void setJvmMethodName(String name) { _jvmMethodName = name; }
 
     /**
      * Gets the name of the function.
