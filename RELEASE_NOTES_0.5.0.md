@@ -1,9 +1,9 @@
 # Siyo 0.5.0
 
-This release is driven by evidence. [Morioh](https://github.com/urunsiyabend/morioh), a
-3,000-line HTTP library, was written in Siyo 0.4.0 specifically to find out where
-the language breaks under real use. It produced 32 reproducible defects. Most of
-them are fixed here.
+This release is driven by evidence. Morioh — a 3,000-line HTTP library with a
+server, a client, routing and middleware — was written in Siyo 0.4.0
+specifically to find out where the language breaks under real use. It produced
+32 reproducible defects. Most of them are fixed here.
 
 Two themes dominated the findings, and both are addressed:
 
@@ -17,7 +17,7 @@ that compiled, ran, and gave a wrong answer. Eleven surfaced as raw Java stack
 traces with no Siyo source location. Silent wrongness is now reported, and an
 internal failure is now a located diagnostic instead of a stack trace.
 
-1,537 tests pass, up from 1,499. Morioh's own 102 tests — which exercise real
+1,565 tests pass, up from 1,499. Morioh's own 102 tests — which exercise real
 sockets, concurrency and malformed HTTP — pass against this compiler unchanged.
 
 ---
