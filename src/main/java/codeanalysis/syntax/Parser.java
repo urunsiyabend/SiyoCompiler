@@ -158,7 +158,11 @@ public class Parser {
             case IfKeyword -> parseIfStatement();
             case WhileKeyword -> parseWhileStatement();
             case ForKeyword -> parseForStatement();
-            case FnKeyword -> parseFunctionDeclaration();
+            // `fn name(...)` declares; `fn(...)` is a lambda expression, which
+            // is what a block's tail value looks like.
+            case FnKeyword -> peek(1).getType() == SyntaxType.OpenParenthesisToken
+                    ? parseExpressionStatement()
+                    : parseFunctionDeclaration();
             case ReturnKeyword -> parseReturnStatement();
             case BreakKeyword -> parseBreakStatement();
             case ContinueKeyword -> parseContinueStatement();
@@ -343,6 +347,8 @@ public class Parser {
         if (current().getType() == SyntaxType.NewKeyword) {
             SyntaxToken newToken = nextToken();
             identifier = new SyntaxToken(SyntaxType.IdentifierToken, newToken.getPosition(), "new", null);
+        } else if (isContextualKeywordName(current().getType())) {
+            identifier = asIdentifier(nextToken());
         } else {
             identifier = match(SyntaxType.IdentifierToken);
         }
@@ -388,6 +394,24 @@ public class Parser {
      *
      * @return The parsed parameter syntax.
      */
+    /**
+     * Whether a keyword may also be used as a name.
+     *
+     * <p>`send` only means something as a statement prefix, so reserving it
+     * everywhere cost the language a common method name — an HTTP response
+     * could not have a send() method.
+     *
+     * @param type The token type in name position.
+     * @return true when it may be read as a name.
+     */
+    private boolean isContextualKeywordName(SyntaxType type) {
+        return type == SyntaxType.SendKeyword;
+    }
+
+    private SyntaxToken asIdentifier(SyntaxToken token) {
+        return new SyntaxToken(SyntaxType.IdentifierToken, token.getPosition(), token.getData(), null);
+    }
+
     private ParameterSyntax parseParameter() {
         // self parameter (no type needed): fn greet(self)
         if (current().getType() == SyntaxType.SelfKeyword) {
@@ -549,11 +573,30 @@ public class Parser {
         SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
 
         List<SyntaxToken> members = new ArrayList<>();
+        List<Integer> explicitValues = new ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
             SyntaxToken startToken = current();
             SyntaxToken member = match(SyntaxType.IdentifierToken);
             members.add(member);
+
+            // Optional explicit value: `OK = 200`, or `= -1`.
+            Integer explicitValue = null;
+            if (current().getType() == SyntaxType.EqualsToken) {
+                nextToken();
+                boolean negative = false;
+                if (current().getType() == SyntaxType.MinusToken) {
+                    negative = true;
+                    nextToken();
+                }
+                SyntaxToken numberToken = match(SyntaxType.NumberToken);
+                Object value = numberToken.getValue();
+                if (value instanceof Integer number) {
+                    explicitValue = negative ? -number : number;
+                }
+            }
+            explicitValues.add(explicitValue);
+
             if (current().getType() == SyntaxType.CommaToken) {
                 nextToken();
             }
@@ -565,7 +608,7 @@ public class Parser {
         }
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
-        return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, closeBrace);
+        return new EnumDeclarationSyntax(enumKeyword, identifier, openBrace, members, explicitValues, closeBrace);
     }
 
     private ExpressionSyntax parseTryExpression() {
@@ -637,20 +680,7 @@ public class Parser {
         java.util.List<ParameterSyntax> fields = new java.util.ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
             SyntaxToken startToken = current();
-            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
-            SyntaxToken colon = match(SyntaxType.ColonToken);
-            SyntaxToken fieldType;
-            if (current().getType() == SyntaxType.FnKeyword) {
-                SyntaxToken fnToken = nextToken();
-                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
-            } else {
-                fieldType = match(SyntaxType.IdentifierToken);
-            }
-            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-                nextToken(); nextToken();
-                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(), fieldType.getData() + "[]", fieldType.getValue());
-            }
-            fields.add(new ParameterSyntax(fieldName, colon, fieldType));
+            fields.add(parseFieldDeclaration());
             if (current().getType() == SyntaxType.CommaToken) nextToken();
 
             // Prevent infinite loop on bad input
@@ -681,6 +711,49 @@ public class Parser {
         return new ImplDeclarationSyntax(implKeyword, typeName, openBrace, methods, closeBrace);
     }
 
+    /**
+     * Parses one field of a struct or actor: {@code name: type}.
+     *
+     * <p>Shared by both declarations so the two cannot drift: `fn` used to be a
+     * legal field type in an actor and a parse error in a struct.
+     *
+     * @return The parsed field.
+     */
+    private ParameterSyntax parseFieldDeclaration() {
+        SyntaxToken fieldName = isContextualKeywordName(current().getType())
+                ? asIdentifier(nextToken())
+                : match(SyntaxType.IdentifierToken);
+        SyntaxToken colon = match(SyntaxType.ColonToken);
+        SyntaxToken fieldType;
+        if (current().getType() == SyntaxType.FnKeyword) {
+            SyntaxToken fnToken = nextToken();
+            // An optional signature — fn(int) -> int — is accepted and skipped.
+            if (current().getType() == SyntaxType.OpenParenthesisToken) {
+                int depth = 1;
+                nextToken();
+                while (depth > 0 && current().getType() != SyntaxType.EOFToken) {
+                    if (current().getType() == SyntaxType.OpenParenthesisToken) depth++;
+                    else if (current().getType() == SyntaxType.CloseParenthesisToken) depth--;
+                    nextToken();
+                }
+                if (current().getType() == SyntaxType.ArrowToken) {
+                    nextToken();
+                    nextToken();
+                }
+            }
+            fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+        } else {
+            fieldType = match(SyntaxType.IdentifierToken);
+        }
+        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
+            nextToken();
+            nextToken();
+            fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(),
+                    fieldType.getData() + "[]", fieldType.getValue());
+        }
+        return new ParameterSyntax(fieldName, colon, fieldType);
+    }
+
     private StatementSyntax parseStructDeclaration() {
         SyntaxToken structKeyword = match(SyntaxType.StructKeyword);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
@@ -690,15 +763,7 @@ public class Parser {
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
             SyntaxToken startToken = current();
-            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
-            SyntaxToken colon = match(SyntaxType.ColonToken);
-            SyntaxToken fieldType = match(SyntaxType.IdentifierToken);
-            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-                nextToken();
-                nextToken();
-                fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(), fieldType.getData() + "[]", fieldType.getValue());
-            }
-            fields.add(new ParameterSyntax(fieldName, colon, fieldType));
+            fields.add(parseFieldDeclaration());
 
             // Optional comma between fields
             if (current().getType() == SyntaxType.CommaToken) {

@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.4.0-green" alt="v0.4.0">
-  <img src="https://img.shields.io/badge/tests-1499%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.5.0-green" alt="v0.5.0">
+  <img src="https://img.shields.io/badge/tests-1565%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -181,7 +181,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.4.0"
+version = "0.5.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -272,7 +272,7 @@ src/main/java/
     ├── SiyoRuntime.java                Compiled-code runtime helpers
     ├── BuiltinFunctions.java           37 stdlib functions
     └── ...                             Types, diagnostics, symbols
-src/test/java/                          1499 tests
+src/test/java/                          1565 tests
 examples/                               29 standalone examples
 projects/                               Multi-file projects (siyodb, chat)
 ```
@@ -283,26 +283,34 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-1499 tests across 11 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+1565 tests across 15 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, language semantics, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.4.0 through 1.0.0
+- **[RELEASE_NOTES_0.5.0.md](RELEASE_NOTES_0.5.0.md)** — What changed in 0.5.0, and why
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.5.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.4.0)
+## Known limitations (0.5.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
+- No sum types: a result that is one of several shapes must be a record with
+  flags. This is the largest remaining expressiveness gap.
+- No `throw`, and an error carries only text — `error()` cannot attach a status
+  code or any other payload, and `catch e` cannot match on a type. A
+  message-less Java exception still prints as `null`.
+- A declared function type (`fn(int) -> int`) is parsed but not checked, so a
+  callback with the wrong arity fails at run time.
+- `std/json` cannot report a parse failure: malformed input returns an empty map.
+- No generics, no interfaces, and no reflection over struct fields — a struct
+  must be converted to a map by hand to be serialised.
 - No implicit `int + double` promotion (use `toDouble(n)`)
 - No set literal syntax — use `set()` + `.add()`
-- No hex literals, no `do-while`
-- Closure captures are read-only, and writes to a captured variable are silently discarded
-- No `throw` — errors come from `error()` and Java interop only
-- A value caught by `catch e` exposes the exception message only; the exception
-  type is not observable, so a message-less exception prints as `null`
-- No generics, no interfaces
+- No hex literals, no long literals, no `do-while`
+- Closure captures are read-only. Writing to one is now a compile error rather
+  than a silently discarded write.
 
 ## Contributing
 

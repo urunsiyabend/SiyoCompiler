@@ -156,6 +156,16 @@ public class BuiltinFunctions {
             String.class
     );
 
+    /**
+     * toInt(long) -> int. Every java.lang.System and java.io call returns a
+     * long, so narrowing one used to require a round trip through text.
+     */
+    public static final FunctionSymbol TO_INT_LONG = new FunctionSymbol(
+            "toInt",
+            List.of(new ParameterSymbol("value", Long.class)),
+            Integer.class
+    );
+
     // toInt(string) -> int — alias for parseInt
     public static final FunctionSymbol TO_INT_STR = new FunctionSymbol(
             "toInt",
@@ -256,7 +266,7 @@ public class BuiltinFunctions {
     );
 
     public static List<FunctionSymbol> getAll() {
-        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
+        return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_LONG, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
                 PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
     }

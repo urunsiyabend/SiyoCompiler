@@ -117,7 +117,7 @@ impl TodoList {
     }
 
     fn load(self) {
-        if !io.fileExists(self.filename) { return }
+        if !io.exists(self.filename) { return }
 
         mut lines = io.readLines(self.filename)
         if len(lines) == 0 { return }

@@ -384,6 +384,23 @@ public class Evaluator {
             arguments[i] = evaluateExpression(args.get(i));
         }
 
+        return invokeFunction(function, arguments);
+    }
+
+    /**
+     * Invoke a Siyo function with already-evaluated arguments.
+     *
+     * <p>Public so an entry point can run {@code init()} and {@code main()} the
+     * way the bytecode backend does. Without it the interpreter evaluated only
+     * the declarations in a module-style file and exited, which made every
+     * program a silent no-op under {@code siyoc interpret}.
+     *
+     * @param function The function to call.
+     * @param arguments Its arguments, already evaluated.
+     * @return The function's value.
+     * @throws Exception if evaluation fails.
+     */
+    public Object invokeFunction(FunctionSymbol function, Object[] arguments) throws Exception {
         // Handle built-in functions
         if (BuiltinFunctions.isBuiltin(function)) {
             return evaluateBuiltinFunction(function, arguments);
@@ -955,6 +972,9 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.TO_INT) {
             return ((Double) arguments[0]).intValue();
+        }
+        if (function == BuiltinFunctions.TO_INT_LONG) {
+            return ((Long) arguments[0]).intValue();
         }
         if (function == BuiltinFunctions.TO_INT_STR) {
             try { return Integer.parseInt((String) arguments[0]); }

@@ -14,7 +14,7 @@ import java.util.*;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.4.0";
+    private static final String VERSION = "0.5.0";
 
     public static void main(String[] args) {
         if (System.getenv("SIYO_DEBUG") != null) {
@@ -175,9 +175,31 @@ public class Main {
 
     private static String[] _programArgs = new String[0];
 
+    /**
+     * Loads the project that owns {@code sourceFile}, if any, so imports resolve
+     * the same way for a file run directly as for {@code siyoc run} and
+     * {@code siyoc test}.
+     *
+     * <p>The search starts at the file's own directory rather than the working
+     * directory: running examples/hello.siyo from the project root used to miss
+     * src/ entirely, so an import that worked in a test failed in an example.
+     *
+     * @param sourceFile Absolute path of the file about to be compiled.
+     */
+    private static void loadOwningProject(String sourceFile) {
+        if (SiyoProject.getCurrent() != null) return;
+        java.nio.file.Path parent = java.nio.file.Paths.get(sourceFile).toAbsolutePath().getParent();
+        if (parent == null) return;
+        SiyoProject project = SiyoProject.load(parent);
+        if (project == null) return;
+        project.resolveDependencies();
+        SiyoProject.setCurrent(project);
+    }
+
     private static void compileAndRun(String path) {
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            loadOwningProject(absPath);
             String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
             SyntaxTree tree = SyntaxTree.parse(source);
             codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
@@ -194,15 +216,13 @@ public class Main {
                 DiagnosticBox diagnostics = tree.diagnostics().size() > 0
                         ? tree.diagnostics()
                         : tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                if (compilation.getEmitDiagnostics() != null) {
+                    diagnostics = diagnostics.addAll(compilation.getEmitDiagnostics());
+                }
                 String diagFileName = java.nio.file.Paths.get(path).getFileName().toString();
                 java.util.Set<String> seen = new java.util.LinkedHashSet<>();
                 while (diagnostics.hasNext()) {
-                    Diagnostic diagnostic = diagnostics.next();
-                    var lineIndex = tree.getText().getLineIndex(diagnostic.getSpan().getStart());
-                    var lineNumber = lineIndex + 1;
-                    var line = tree.getText().getLines().get(lineIndex);
-                    var character = diagnostic.getSpan().getStart() - line.getStart() + 1;
-                    String msg = String.format("%s(%d, %d): %s", diagFileName, lineNumber, character, diagnostic);
+                    String msg = formatDiagnostic(diagnostics.next(), tree.getText(), diagFileName);
                     if (seen.add(msg)) System.err.println(msg);
                 }
                 System.exit(1);
@@ -253,9 +273,41 @@ public class Main {
         }
     }
 
+    /**
+     * Renders one diagnostic as "file(line, column): message".
+     *
+     * <p>A diagnostic raised while binding an imported module carries that
+     * module's file and text, and is reported against it. Everything else is
+     * reported against the file being compiled.
+     *
+     * @param diagnostic The diagnostic.
+     * @param defaultText Text of the file being compiled.
+     * @param defaultFileName Its display name.
+     * @return The formatted line.
+     */
+    private static String formatDiagnostic(Diagnostic diagnostic,
+                                           codeanalysis.text.SourceText defaultText,
+                                           String defaultFileName) {
+        codeanalysis.text.SourceText text = diagnostic.getSourceText() != null
+                ? diagnostic.getSourceText()
+                : defaultText;
+        String fileName = diagnostic.getSourceFile() != null
+                ? java.nio.file.Paths.get(diagnostic.getSourceFile()).getFileName().toString()
+                : defaultFileName;
+        int start = diagnostic.getSpan().getStart();
+        if (text == null || start < 0 || start > text.length()) {
+            return String.format("%s: %s", fileName, diagnostic);
+        }
+        int lineIndex = text.getLineIndex(start);
+        var line = text.getLines().get(lineIndex);
+        int character = start - line.getStart() + 1;
+        return String.format("%s(%d, %d): %s", fileName, lineIndex + 1, character, diagnostic);
+    }
+
     private static void compileFile(String path) {
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            loadOwningProject(absPath);
             String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
             SyntaxTree tree = SyntaxTree.parse(source);
             codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
@@ -270,6 +322,9 @@ public class Main {
                 DiagnosticBox diagnostics = tree.diagnostics().size() > 0
                         ? tree.diagnostics()
                         : tree.diagnostics().addAll(compilation.getGlobalScope().getDiagnostics());
+                if (compilation.getEmitDiagnostics() != null) {
+                    diagnostics = diagnostics.addAll(compilation.getEmitDiagnostics());
+                }
                 while (diagnostics.hasNext()) {
                     System.err.println(diagnostics.next());
                 }
@@ -308,6 +363,7 @@ public class Main {
     private static void runFile(String path) {
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
+            loadOwningProject(absPath);
             String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(absPath)));
             SyntaxTree tree = SyntaxTree.parse(source);
             codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();

@@ -93,8 +93,44 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param span    The TextSpan representing the location of the issue in the source code.
      * @param message The error message describing the issue.
      */
+    private String _sourceFile;
+    private codeanalysis.text.SourceText _sourceText;
+    private final java.util.Set<String> _failedModules = new java.util.HashSet<>();
+
+    /**
+     * Names the file that subsequent diagnostics belong to, so an error raised
+     * while binding an imported module is reported against that module.
+     *
+     * @param sourceFile The file path.
+     * @param sourceText Its text, for resolving line and column.
+     */
+    public void setSource(String sourceFile, codeanalysis.text.SourceText sourceText) {
+        _sourceFile = sourceFile;
+        _sourceText = sourceText;
+    }
+
+    /**
+     * Records that a module failed to compile. Every symbol it would have
+     * exported is then missing, and reporting each one buries the real error,
+     * so those follow-on diagnostics are suppressed.
+     *
+     * @param moduleName The module's short name, as used to qualify its symbols.
+     */
+    public void markModuleFailed(String moduleName) {
+        if (moduleName != null) _failedModules.add(moduleName);
+    }
+
+    /** Whether a qualified name belongs to a module that already failed. */
+    public boolean isFromFailedModule(String qualifiedName) {
+        if (qualifiedName == null) return false;
+        int dot = qualifiedName.indexOf('.');
+        if (dot <= 0) return false;
+        return _failedModules.contains(qualifiedName.substring(0, dot));
+    }
+
     private void report(TextSpan span, String message) {
         Diagnostic diagnostic = new Diagnostic(span, message);
+        diagnostic.setSource(_sourceFile, _sourceText);
         _diagnostics.add(diagnostic);
     }
 
@@ -166,6 +202,7 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param name The undefined name.
      */
     public void reportUndefinedName(TextSpan span, String name) {
+        if (isFromFailedModule(name)) return;
         String message = String.format("Name '%s' does not exist", name);
         report(span, message);
     }
@@ -253,6 +290,9 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param name The undefined function name.
      */
     public void reportUndefinedFunction(TextSpan span, String name) {
+        // A module that failed to compile exports nothing. Reporting each of its
+        // symbols as missing would bury the error that actually needs fixing.
+        if (isFromFailedModule(name)) return;
         String message = String.format("Function '%s' does not exist", name);
         report(span, message);
     }
@@ -272,14 +312,99 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
         report(span, "send can only be used with actor method calls\n\n  help: send dispatches asynchronously to an actor's mailbox.\n  For regular function calls, just call the function directly.");
     }
 
+    /**
+     * A `mut` binding cannot be shared with a spawned task.
+     *
+     * <p>The suggested keyword is `imut`: Siyo has no `let`, and a reader who
+     * followed the old wording got a parse error.
+     */
     public void reportMutableCaptureInSpawn(TextSpan span, String varName) {
         String message = String.format(
-            "Mutable variable '%s' cannot be captured by spawn block\n\n" +
+            "Mutable variable '%s' cannot be captured by a spawn block\n\n" +
             "  help: consider one of these alternatives:\n" +
-            "    - use a channel to communicate the value\n" +
-            "    - use 'let' instead of 'mut' if the variable doesn't need to change\n" +
-            "    - transfer ownership with a channel: ch.send(%s)", varName, varName);
+            "    - declare it 'imut' if it does not need to change\n" +
+            "    - send the value over a channel: ch.send(%s)\n" +
+            "    - keep the state in an actor and call it from the task", varName, varName);
         report(span, message);
+    }
+
+    /**
+     * An `imut` binding to a mutable container cannot be shared with a spawned
+     * task: the binding is immutable but its contents are not, so two threads
+     * would share unsynchronised state.
+     *
+     * <p>Reported instead of the old "Mutable variable" wording, which
+     * contradicted the source for an `imut` declaration.
+     */
+    public void reportSharedContainerCaptureInSpawn(TextSpan span, String varName, String typeName) {
+        String message = String.format(
+            "'%s' cannot be captured by a spawn block: %s contents are mutable "
+            + "and would be shared between threads\n\n"
+            + "  help: consider one of these alternatives:\n"
+            + "    - keep the state in an actor and call it from the task\n"
+            + "    - send a copy over a channel: ch.send(%s)\n"
+            + "    - capture only the scalar values the task needs", varName, typeName, varName);
+        report(span, message);
+    }
+
+    /**
+     * A closure may read an enclosing variable but not write to it.
+     *
+     * <p>The write used to be discarded silently, so the program compiled, ran,
+     * and produced a wrong answer.
+     */
+    public void reportAssignmentToCapturedVariable(TextSpan span, String varName) {
+        String message = String.format(
+            "Cannot assign to '%s': it is captured by a closure and captured variables are read-only\n\n"
+            + "  help: consider one of these alternatives:\n"
+            + "    - return the new value from the closure instead of writing it\n"
+            + "    - keep the state in a struct and mutate its field\n"
+            + "    - keep the state in an actor when it is shared between threads", varName);
+        report(span, message);
+    }
+
+    /**
+     * A struct field was called but does not hold a function.
+     *
+     * <p>Previously such a call fell through to Java method dispatch and failed
+     * at run time naming the struct's internal representation, a type the Siyo
+     * program never mentions.
+     */
+    public void reportFieldIsNotCallable(TextSpan span, String structName, String fieldName) {
+        report(span, String.format(
+                "Field '%s' of struct '%s' is not callable\n\n"
+                + "  help: declare it 'fn' if it is meant to hold a function", fieldName, structName));
+    }
+
+    /**
+     * The compiler failed while generating code.
+     *
+     * <p>Reported instead of letting an emitter or ASM exception reach the user
+     * as a raw Java stack trace with no Siyo source location.
+     *
+     * @param span Where the failure happened, as precisely as the emitter knows.
+     * @param context What was being emitted — a function name, typically.
+     * @param detail The underlying failure.
+     */
+    public void reportInternalCompilerError(TextSpan span, String context, String detail) {
+        report(span, String.format(
+                "Internal compiler error while emitting %s: %s\n\n"
+                + "  This is a compiler bug. A reduced program that reproduces it is the\n"
+                + "  most useful thing to report.", context, detail));
+    }
+
+    /**
+     * The file being compiled and one of its imports would produce the same JVM
+     * class, so calls resolve to the wrong one.
+     *
+     * <p>Reported here rather than surfacing as a NoSuchMethodError at run time,
+     * where the file's own name is the last thing a reader suspects.
+     */
+    public void reportModuleClassNameCollision(TextSpan span, String fileName, String moduleName) {
+        report(span, String.format(
+                "This file and the module '%s' it imports would both compile to the class '%s'\n\n"
+                + "  help: rename this file so its name differs from the module it imports",
+                moduleName, fileName));
     }
 
     public void reportSpawnOutsideScope(TextSpan span) {

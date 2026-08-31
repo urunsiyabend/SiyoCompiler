@@ -23,6 +23,7 @@ public class BoundGlobalScope {
     private final Iterable<VariableSymbol> _variableSymbols;
     private final BoundStatement _boundStatement;
     private Map<String, codeanalysis.StructSymbol> _structTypes;
+    private java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
 
     /**
      * Initializes a new instance of the BoundGlobalScope class with the specified previous bound global scope, diagnostic box, variable symbols and bound expression.
@@ -41,6 +42,15 @@ public class BoundGlobalScope {
         _functionBodies = functionBodies;
         _variableSymbols = variableSymbols;
         _boundStatement = statement;
+    }
+
+    /** JVM class names of the modules this compilation unit imports. */
+    public java.util.Set<String> getImportedClassNames() {
+        return _importedClassNames;
+    }
+
+    public void setImportedClassNames(java.util.Set<String> names) {
+        _importedClassNames = names != null ? names : new java.util.LinkedHashSet<>();
     }
 
     /**

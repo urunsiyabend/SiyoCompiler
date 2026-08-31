@@ -12,7 +12,7 @@ fn main() {
     }
 
     // Verify file exists
-    println("File exists: ${io.fileExists("hello.txt")}")
+    println("File exists: ${io.exists("hello.txt")}")
 
     // Append to file
     io.appendFile("hello.txt", "\nLine 4 appended.")

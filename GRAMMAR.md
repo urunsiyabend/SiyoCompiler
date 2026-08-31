@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.4.0)
+# Siyo Language Grammar (0.5.0)
 
 ## Lexical Grammar
 
@@ -21,7 +21,7 @@
 | `enum` | Enum type declaration |
 | `import` | Module / Java class import |
 | `scope` / `spawn` | Structured concurrency |
-| `send` | Actor fire-and-forget message |
+| `send` | Actor fire-and-forget message (contextual — also usable as a name) |
 | `actor` | Actor struct marker |
 | `null` | Null literal |
 
@@ -115,6 +115,11 @@ if_statement
 // `if`/`else` is also valid in expression position; both branches must be
 // blocks ending in an expression. Example:
 //     mut label = if score > 50 { "pass" } else { "fail" }
+//
+// A block's value is the value of its tail statement, and a function returns
+// the value of its body. That applies to every form with a value of its own —
+// an expression, an if/else, a try/catch — so this returns a string:
+//     fn reason(code: int) -> string { if code == 200 { "OK" } else { "?" } }
 
 while_statement : 'while' expression block
 for_statement   : 'for' variable_declaration expression expression block
@@ -127,8 +132,21 @@ function_declaration
 struct_declaration
     : 'struct' IDENTIFIER '{' field_list '}'
 
+field_list
+    : field (',' field)*
+
+field
+    : IDENTIFIER ':' type_annotation
+    // A field may be declared `fn` to hold a function value:
+    //     struct Route { pattern: string, handler: fn }
+
 enum_declaration
-    : 'enum' IDENTIFIER '{' IDENTIFIER (',' IDENTIFIER)* '}'
+    : 'enum' IDENTIFIER '{' enum_member (',' enum_member)* '}'
+
+enum_member
+    : IDENTIFIER ('=' '-'? NUMBER)?
+    // A member without an explicit value continues from the previous one, so
+    // `enum E { A = 10, B }` gives B the value 11.
 
 actor_declaration
     : 'actor' 'struct'? IDENTIFIER '{' field_list '}'
@@ -197,6 +215,8 @@ if_expression
 
 lambda_expression
     : 'fn' '(' parameter_list? ')' type_clause? block
+    // `fn` followed by `(` is a lambda, wherever it appears; `fn` followed by a
+    // name is a declaration. A lambda may therefore be a block's tail value.
 
 match_expression
     : 'match' expression '{' match_arm* '}'
@@ -235,6 +255,16 @@ struct_literal
 | `set` | `SiyoSet` | Unique value set |
 | `object` / `any` | `Object` | Any type |
 
+### Enums
+
+Enum members are integer-backed. A member may carry an explicit value, which is
+what an external protocol needs:
+
+```siyo
+enum Status { OK = 200, CREATED = 201, NOT_FOUND = 404, GONE }
+enum Direction { North, East, South, West }   // 0, 1, 2, 3
+```
+
 ### Structs, enums and `impl`
 
 ```siyo
@@ -257,7 +287,12 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 
 - Arithmetic operators work on `int`, `long`, `double` (same-type operands)
 - String supports `+` (concatenation), `==`, `!=`, `<`, `>`, `<=`, `>=`
-- `null` supports `==` and `!=` with any type
+- `null` supports `==` and `!=` with any reference type, collections included
+- `int` widens to `long` and `float` at a declared type
+- A declared type on a variable is binding: `imut x: T = e` gives `x` the type
+  `T` and checks `e` against it. An `object` initializer is accepted — narrowing
+  an erased value is what the annotation is for — as are the numeric widenings
+  below.
 - Assignment requires compatible types; `imut` variables cannot be reassigned
 - Function return type checked against declared type
 - Array elements must be homogeneous
@@ -266,7 +301,7 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 ## Built-in Functions
 
 ### Type Conversion
-`toString(any)`, `toInt(double)`, `toInt(string)`, `toDouble(int)`, `toFloat(int)`, `toLong(int)`, `parseInt(string)`, `parseFloat(string)`, `parseLong(string)`
+`toString(any)`, `toInt(double)`, `toInt(long)`, `toInt(string)`, `toDouble(int)`, `toFloat(int)`, `toLong(int)`, `parseInt(string)`, `parseFloat(string)`, `parseLong(string)`
 
 ### String
 `len(string)`, `substring(s, start, end)`, `contains(s, sub)`, `indexOf(s, sub)`, `startsWith(s, prefix)`, `endsWith(s, suffix)`, `replace(s, old, new)`, `trim(s)`, `toUpper(s)`, `toLower(s)`, `split(s, delim)`, `chr(int)`, `ord(string)`
@@ -381,7 +416,28 @@ Two zero-arg functions have special runtime semantics:
 A file that is run as the entrypoint and defines both functions runs `init()` first, then `main()`. A file with neither is a no-op when run as the entrypoint.
 
 Functions and top-level variables are exported as `moduleName.symbol` when
-imported from another file. Structs, enums and `impl` methods are exported too:
+imported from another file. Structs, enums and `impl` methods are exported too,
+and a struct's methods travel with it however many modules it passes through —
+so a module can act as a facade for a library:
+
+```siyo
+// status.siyo
+imut OK = 200
+mut requests = 0
+fn count() { requests = requests + 1 }
+```
+```siyo
+import "status"
+fn main() {
+    println(toString(status.OK))         // 200
+    status.count()
+    println(toString(status.requests))   // 1
+}
+```
+
+A module does not re-export the *functions* it imports: a module that imports
+`json` does not give its own importers a `json`. Types are the exception,
+because a value of a re-exported type would otherwise have no callable methods.
 
 ```siyo
 // model.siyo
@@ -435,6 +491,17 @@ mut ops: fn[] = [double, double]
 import java "java.net.Socket"
 mut s = Socket.new("localhost", 8080)
 ```
+
+A nested Java class is imported by its dotted name and referred to by its
+innermost name:
+
+```siyo
+import java "java.net.http.HttpRequest.BodyPublishers"
+mut body = BodyPublishers.ofString("hi")
+```
+
+Siyo arrays and Java arrays convert automatically at the call boundary, in both
+directions, so `out.write(text.getBytes())` works as written.
 
 Static methods, constructors, and instance methods are callable. Return types are mapped automatically.
 

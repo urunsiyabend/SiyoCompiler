@@ -39,6 +39,8 @@ public class Emitter {
     private String _sourceFileName = null;
     private int _lastEmittedLine = -1;
     private boolean _isModuleClass = false;
+    private int _lastEmittedOffset = -1;
+    private final java.util.Set<String> _declaredImportedClasses = new java.util.LinkedHashSet<>();
 
     // Lambda/closure tracking for bytecode emission
     private final java.util.List<BoundLambdaExpression> _lambdas = new java.util.ArrayList<>();
@@ -57,6 +59,14 @@ public class Emitter {
 
     public void setModuleClass(boolean isModule) {
         _isModuleClass = isModule;
+    }
+
+    /**
+     * Modules this class imports. A module class force-loads them from its own
+     * static initializer so their init() runs before anything here uses them.
+     */
+    public void setImportedModuleClasses(java.util.Set<String> classNames) {
+        if (classNames != null) _declaredImportedClasses.addAll(classNames);
     }
 
     public DiagnosticBox getDiagnostics() {
@@ -98,6 +108,7 @@ public class Emitter {
         // Generate static fields for global variables (dedup by name)
         java.util.Set<String> emittedFields = new java.util.HashSet<>();
         for (VariableSymbol global : _globalFields) {
+            if (global.getOwnerClass() != null) continue; // lives on the module that declared it
             if (emittedFields.add(global.getName())) {
                 String desc = getTypeDescriptor(global.getType());
                 cw.visitField(ACC_STATIC, global.getName(), desc, null, null).visitEnd();
@@ -199,10 +210,13 @@ public class Emitter {
      * moduleName metadata. Used to force-load imports so their init() fires eagerly.
      */
     private java.util.Set<String> collectImportedModuleClasses() {
-        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        java.util.Set<String> names = new java.util.LinkedHashSet<>(_declaredImportedClasses);
         for (FunctionSymbol func : _functions.keySet()) {
             String mod = func.getModuleName();
             if (mod != null) names.add(mod);
+        }
+        for (VariableSymbol global : _globalFields) {
+            if (global.getOwnerClass() != null) names.add(global.getOwnerClass());
         }
         return names;
     }
@@ -343,13 +357,16 @@ public class Emitter {
         _currentReturnType = function.getReturnType();
 
         // Emit function body, handling implicit return for the last expression
-        emitFunctionBody(body, function);
-
         try {
+            emitFunctionBody(body, function);
             _mv.visitMaxs(0, 0);
-        } catch (Exception e) {
-            System.err.println("[ASM ERROR] Function " + function.getName() + ": " + e.getMessage());
-            throw e;
+        } catch (Exception | StackOverflowError e) {
+            // Whatever went wrong — an unhandled node, an ASM frame merge — the
+            // user gets a located diagnostic naming the function, not a stack
+            // trace from inside the compiler.
+            _diagnostics.reportInternalCompilerError(currentSpan(),
+                    "function '" + function.getName() + "'", describeFailure(e));
+            return;
         }
         _mv.visitEnd();
     }
@@ -414,6 +431,7 @@ public class Emitter {
     // ========== Statement Emission ==========
 
     private void emitStatement(BoundStatement node) {
+        if (node.getSourceOffset() >= 0) _lastEmittedOffset = node.getSourceOffset();
         emitLineNumber(node);
         switch (node.getType()) {
             case BlockStatement -> emitBlockStatement((BoundBlockStatement) node);
@@ -471,6 +489,10 @@ public class Emitter {
         Class<?> varType = node.getVariable().getType();
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
+        } else if (varType == Object.class && exprType != Object.class) {
+            emitBoxIfNeeded(exprType);
+        } else {
+            emitNumericWidening(exprType, varType);
         }
         // For declarations: use identity check only. A new VariableSymbol that is not
         // the exact global instance is a local (possibly shadowing the global).
@@ -621,6 +643,11 @@ public class Emitter {
     }
 
     private void emitVariableLoad(VariableSymbol var) {
+        if (var.getOwnerClass() != null) {
+            _mv.visitFieldInsn(GETSTATIC, var.getOwnerClass(), var.getFieldName(),
+                    getTypeDescriptor(var.getType()));
+            return;
+        }
         if (isGlobalField(var)) {
             _mv.visitFieldInsn(GETSTATIC, _className, var.getName(), getTypeDescriptor(var.getType()));
             return;
@@ -663,7 +690,10 @@ public class Emitter {
         } else {
             _mv.visitInsn(DUP);
         }
-        if (isGlobalField(node.getVariable())) {
+        if (node.getVariable().getOwnerClass() != null) {
+            _mv.visitFieldInsn(PUTSTATIC, node.getVariable().getOwnerClass(),
+                    node.getVariable().getFieldName(), getTypeDescriptor(varType));
+        } else if (isGlobalField(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
         } else {
             int slot = getLocal(node.getVariable());
@@ -788,48 +818,98 @@ public class Emitter {
         }
     }
 
+    /**
+     * The numeric type two operands are compared as, when at least one of them
+     * is erased to {@code object}. The known side decides; two unknown sides
+     * compare as int, which is what an erased Java call such as
+     * {@code stream.read()} yields.
+     */
+    private Class<?> numericComparisonType(Class<?> leftType, Class<?> rightType) {
+        Class<?> known = leftType != Object.class ? leftType : rightType;
+        if (known == Double.class || known == Long.class) return known;
+        return Integer.class;
+    }
+
+    /** Compare the two values already on the stack, leaving a boolean. */
+    private void emitNumericComparison(BoundBinaryOperatorType operator, Class<?> type) {
+        Label trueLabel = new Label();
+        Label endLabel = new Label();
+        if (type == Double.class) {
+            _mv.visitInsn(DCMPG);
+            _mv.visitJumpInsn(zeroCompareInstruction(operator), trueLabel);
+        } else if (type == Long.class) {
+            _mv.visitInsn(LCMP);
+            _mv.visitJumpInsn(zeroCompareInstruction(operator), trueLabel);
+        } else {
+            _mv.visitJumpInsn(intCompareInstruction(operator), trueLabel);
+        }
+        _mv.visitInsn(ICONST_0);
+        _mv.visitJumpInsn(GOTO, endLabel);
+        _mv.visitLabel(trueLabel);
+        _mv.visitInsn(ICONST_1);
+        _mv.visitLabel(endLabel);
+    }
+
+    private int zeroCompareInstruction(BoundBinaryOperatorType operator) {
+        return switch (operator) {
+            case Equals -> IFEQ;
+            case NotEquals -> IFNE;
+            case LessThan -> IFLT;
+            case LessOrEqualsThan -> IFLE;
+            case GreaterThan -> IFGT;
+            case GreaterOrEqualsThen -> IFGE;
+            default -> throw new UnsupportedOperationException("Not a comparison: " + operator);
+        };
+    }
+
+    private int intCompareInstruction(BoundBinaryOperatorType operator) {
+        return switch (operator) {
+            case Equals -> IF_ICMPEQ;
+            case NotEquals -> IF_ICMPNE;
+            case LessThan -> IF_ICMPLT;
+            case LessOrEqualsThan -> IF_ICMPLE;
+            case GreaterThan -> IF_ICMPGT;
+            case GreaterOrEqualsThen -> IF_ICMPGE;
+            default -> throw new UnsupportedOperationException("Not a comparison: " + operator);
+        };
+    }
+
     private void emitComparisonExpression(BoundBinaryExpression node) {
         Class<?> leftType = node.getLeft().getClassType();
         Class<?> rightType = node.getRight().getClassType();
 
-        // If either side is Object, box both sides and use Object.equals
+        // Equality against an erased operand compares the boxed values.
         if (leftType == Object.class || rightType == Object.class) {
-            emitExpression(node.getLeft());
-            emitBoxIfNeeded(leftType);
-            emitExpression(node.getRight());
-            emitBoxIfNeeded(rightType);
-
-            Label trueLabel = new Label();
-            Label endLabel = new Label();
-
-            if (node.getOperator().getType() == BoundBinaryOperatorType.Equals) {
-                _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals", "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
-                return;
-            } else if (node.getOperator().getType() == BoundBinaryOperatorType.NotEquals) {
-                _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals", "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
-                _mv.visitInsn(ICONST_1);
-                _mv.visitInsn(IXOR); // negate
+            var operator = node.getOperator().getType();
+            if (operator == BoundBinaryOperatorType.Equals
+                    || operator == BoundBinaryOperatorType.NotEquals) {
+                emitExpression(node.getLeft());
+                emitBoxIfNeeded(leftType);
+                emitExpression(node.getRight());
+                emitBoxIfNeeded(rightType);
+                _mv.visitMethodInsn(INVOKESTATIC, "java/util/Objects", "equals",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Z", false);
+                if (operator == BoundBinaryOperatorType.NotEquals) {
+                    _mv.visitInsn(ICONST_1);
+                    _mv.visitInsn(IXOR);
+                }
                 return;
             }
-            // For <, >, <=, >= with Object types, unbox to int and compare
-            // This is a fallback - ideally types should be resolved
+
+            // Ordering against an erased operand: unbox both sides to one
+            // numeric type, taking it from whichever side still has one.
+            // Each operand is emitted exactly once — emitting them twice left
+            // stale values on the stack and the method failed verification.
+            Class<?> compareAs = numericComparisonType(leftType, rightType);
             emitExpression(node.getLeft());
-            emitUnboxIfNeeded(Integer.class);
+            if (leftType == Object.class) emitUnboxIfNeeded(compareAs);
+            else if (compareAs == Long.class && leftType == Integer.class) _mv.visitInsn(I2L);
+            else if (compareAs == Double.class && leftType == Integer.class) _mv.visitInsn(I2D);
             emitExpression(node.getRight());
-            emitUnboxIfNeeded(Integer.class);
-            int jumpInsn = switch (node.getOperator().getType()) {
-                case LessThan -> IF_ICMPLT;
-                case LessOrEqualsThan -> IF_ICMPLE;
-                case GreaterThan -> IF_ICMPGT;
-                case GreaterOrEqualsThen -> IF_ICMPGE;
-                default -> throw new UnsupportedOperationException();
-            };
-            _mv.visitJumpInsn(jumpInsn, trueLabel);
-            _mv.visitInsn(ICONST_0);
-            _mv.visitJumpInsn(GOTO, endLabel);
-            _mv.visitLabel(trueLabel);
-            _mv.visitInsn(ICONST_1);
-            _mv.visitLabel(endLabel);
+            if (rightType == Object.class) emitUnboxIfNeeded(compareAs);
+            else if (compareAs == Long.class && rightType == Integer.class) _mv.visitInsn(I2L);
+            else if (compareAs == Double.class && rightType == Integer.class) _mv.visitInsn(I2D);
+            emitNumericComparison(node.getOperator().getType(), compareAs);
             return;
         }
 
@@ -1010,21 +1090,35 @@ public class Emitter {
         _mv.visitLabel(catchEnd);
     }
 
-    /** Emit a block where all statements are emitted normally except the last
-     *  expression statement, which leaves its value on the stack (no POP). */
+    /**
+     * Emit a block, leaving the value of its tail expression on the stack.
+     *
+     * <p>A block whose tail is not an expression has no value, and null is
+     * pushed for it. The block is emitted exactly once either way: the old
+     * fallback re-emitted the whole block after already emitting its
+     * statements.
+     */
     private void emitBlockLastAsValue(BoundStatement body) {
-        if (body instanceof BoundBlockStatement block) {
-            var stmts = block.getStatements();
-            for (int i = 0; i < stmts.size(); i++) {
-                if (i == stmts.size() - 1 && stmts.get(i) instanceof BoundExpressionStatement exprStmt) {
-                    emitExpression(exprStmt.getExpression());
-                    return;
-                }
-                emitStatement(stmts.get(i));
-            }
+        if (!(body instanceof BoundBlockStatement block)) {
+            emitStatement(body);
+            _mv.visitInsn(ACONST_NULL);
+            return;
         }
-        // Fallback: emit as statement, push null
-        emitStatement(body);
+        var statements = block.getStatements();
+        if (statements.isEmpty()) {
+            _mv.visitInsn(ACONST_NULL);
+            return;
+        }
+        for (int i = 0; i < statements.size() - 1; i++) {
+            emitStatement(statements.get(i));
+        }
+        BoundStatement last = statements.get(statements.size() - 1);
+        if (last instanceof BoundExpressionStatement expressionStatement) {
+            emitExpression(expressionStatement.getExpression());
+            emitBoxIfNeeded(expressionStatement.getExpression().getClassType());
+            return;
+        }
+        emitStatement(last);
         _mv.visitInsn(ACONST_NULL);
     }
 
@@ -1641,6 +1735,20 @@ public class Emitter {
         }
     }
 
+    /**
+     * Convert the Siyo value on the stack into the Java array {@code arrayDesc}
+     * names, leaving a reference of that exact array type.
+     *
+     * @param arrayDesc JVM descriptor of the array parameter, e.g. "[B".
+     */
+    private void emitToJavaArray(String arrayDesc) {
+        String componentDesc = arrayDesc.substring(1);
+        _mv.visitLdcInsn(componentDesc);
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoArray", "toJavaArray",
+                "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
+        _mv.visitTypeInsn(CHECKCAST, arrayDesc);
+    }
+
     /** Convert Java return types to Siyo types on the stack */
     private void emitJavaReturnConversion(JavaMethodSignature sig) {
         String ret = sig.getReturnDescriptor();
@@ -1678,14 +1786,23 @@ public class Emitter {
                 // double → double
             } else if (argType == Double.class && paramDesc.equals("F")) {
                 _mv.visitInsn(D2F); // double → float
-            } else if (paramDesc.startsWith("L") || paramDesc.startsWith("[")) {
+            } else if (paramDesc.startsWith("[")) {
+                // A Java array parameter. Siyo arrays are SiyoArray at run time,
+                // so the value is converted to the real array type here rather
+                // than handed over as-is — which used to fail verification.
+                if (argType == Integer.class || argType == Long.class
+                        || argType == Boolean.class || argType == Double.class) {
+                    emitBoxIfNeeded(argType);
+                }
+                emitToJavaArray(paramDesc);
+            } else if (paramDesc.startsWith("L")) {
                 // Reference type parameter
                 if (argType == Integer.class || argType == Long.class || argType == Boolean.class || argType == Double.class) {
                     emitBoxIfNeeded(argType); // box primitive to Object
                 }
                 // Cast to expected type if not Object
                 if (!paramDesc.equals("Ljava/lang/Object;") && argType == Object.class) {
-                    String castType = paramDesc.startsWith("[") ? paramDesc : paramDesc.substring(1, paramDesc.length() - 1);
+                    String castType = paramDesc.substring(1, paramDesc.length() - 1);
                     _mv.visitTypeInsn(CHECKCAST, castType);
                 }
             }
@@ -1896,6 +2013,11 @@ public class Emitter {
         if (function == BuiltinFunctions.TO_INT) {
             emitExpression(node.getArguments().get(0));
             _mv.visitInsn(D2I);
+            return;
+        }
+        if (function == BuiltinFunctions.TO_INT_LONG) {
+            emitCoerceArg(node.getArguments().get(0), Long.class);
+            _mv.visitInsn(L2I);
             return;
         }
         if (function == BuiltinFunctions.TO_INT_STR) {
@@ -2176,6 +2298,18 @@ public class Emitter {
 
     // ========== Helpers ==========
 
+    /** The best source location the emitter currently knows about. */
+    private codeanalysis.text.TextSpan currentSpan() {
+        int offset = Math.max(_lastEmittedOffset, 0);
+        return new codeanalysis.text.TextSpan(offset, 0);
+    }
+
+    private static String describeFailure(Throwable failure) {
+        String message = failure.getMessage();
+        String type = failure.getClass().getSimpleName();
+        return message == null || message.isBlank() ? type : type + ": " + message;
+    }
+
     private void emitLineNumber(BoundNode node) {
         if (_sourceText == null || _mv == null) return;
         int offset = node.getSourceOffset();
@@ -2251,6 +2385,7 @@ public class Emitter {
     private boolean _inIsolatedMethod = false; // true in spawn/lambda methods
 
     private boolean isGlobalField(VariableSymbol var) {
+        if (var.getOwnerClass() != null) return true;
         if (_inIsolatedMethod) return false;
         // If this exact variable is already declared as a local, it shadows the global
         if (_locals.containsKey(var)) return false;
@@ -2395,8 +2530,15 @@ public class Emitter {
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Double", "doubleValue", "()D", false);
         } else if (type == String.class) {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
+        } else if (type != null && type != Object.class) {
+            // Any other declared type is a reference type: narrow so the local
+            // slot really holds what the declaration says it holds.
+            String descriptor = getTypeDescriptor(type);
+            if (descriptor.startsWith("L") && descriptor.endsWith(";")) {
+                _mv.visitTypeInsn(CHECKCAST, descriptor.substring(1, descriptor.length() - 1));
+            }
         }
-        // Object.class and others: leave as Object on stack
+        // Object.class: leave as Object on stack
     }
 
     /**
@@ -2406,7 +2548,13 @@ public class Emitter {
     private void emitCoerceArg(BoundExpression arg, Class<?> expectedType) {
         emitExpression(arg);
         Class<?> argType = arg.getClassType();
-        if (argType == expectedType || expectedType == Object.class) return;
+        if (argType == expectedType) return;
+        if (expectedType == Object.class) {
+            // `object` is a reference type; a primitive reaching it must be boxed
+            // or the class fails verification.
+            emitBoxIfNeeded(argType);
+            return;
+        }
         if (argType == Object.class) {
             if (expectedType == Integer.class) emitUnboxIfNeeded(Integer.class);
             else if (expectedType == Long.class) emitUnboxIfNeeded(Long.class);
@@ -2420,6 +2568,22 @@ public class Emitter {
             else if (expectedType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
             else if (expectedType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
         }
+    }
+
+    /**
+     * Widen a numeric value already on the stack to the declared type.
+     *
+     * <p>A declared type is binding, so {@code imut wide: long = 5} has to store
+     * a long even though the literal is an int.
+     *
+     * @param from The expression's type.
+     * @param to The declared type.
+     */
+    private void emitNumericWidening(Class<?> from, Class<?> to) {
+        if (from == to || from == null || to == null) return;
+        if (to == Long.class && from == Integer.class) _mv.visitInsn(I2L);
+        else if (to == Double.class && from == Integer.class) _mv.visitInsn(I2D);
+        else if (to == Double.class && from == Long.class) _mv.visitInsn(L2D);
     }
 
     private void emitBoxIfNeeded(Class<?> type) {

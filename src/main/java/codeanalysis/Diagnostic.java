@@ -14,6 +14,8 @@ import codeanalysis.text.TextSpan;
 public class Diagnostic {
     private final TextSpan _span;
     private final String _message;
+    private String _sourceFile;
+    private codeanalysis.text.SourceText _sourceText;
 
     /**
      * Constructs a Diagnostic object with the specified TextSpan and error message.
@@ -33,6 +35,34 @@ public class Diagnostic {
      */
     public TextSpan getSpan() {
         return _span;
+    }
+
+    /**
+     * The file this diagnostic belongs to, when it did not come from the file
+     * being compiled — an imported module, typically.
+     *
+     * <p>Without it, an error inside a module was printed against the importing
+     * file at a position that file does not have.
+     *
+     * @return The source file path, or null for the current compilation unit.
+     */
+    public String getSourceFile() {
+        return _sourceFile;
+    }
+
+    /**
+     * The text of {@link #getSourceFile()}, so a printer can turn the span into
+     * a line and column of the right file.
+     *
+     * @return The source text, or null.
+     */
+    public codeanalysis.text.SourceText getSourceText() {
+        return _sourceText;
+    }
+
+    public void setSource(String sourceFile, codeanalysis.text.SourceText sourceText) {
+        _sourceFile = sourceFile;
+        _sourceText = sourceText;
     }
 
     /**

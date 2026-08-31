@@ -26,6 +26,7 @@ public class Compilation {
     private final AtomicReference<BoundGlobalScope> _globalScope = new AtomicReference<>(null);
     private ModuleRegistry _registry;
     private String _filePath;
+    private DiagnosticBox _emitDiagnostics;
 
     public Compilation(SyntaxTree syntaxTree) {
         this(null, syntaxTree);
@@ -109,7 +110,39 @@ public class Compilation {
             }
         }
         Object value = evaluator.evaluate();
+
+        // A file compiled as an entry point runs init() then main(). The
+        // interpreter follows the same protocol as the bytecode backend, so
+        // both agree on what a module-style program does.
+        if (_filePath != null) {
+            FunctionSymbol init = findEntryPoint(functions, "init");
+            if (init != null) evaluator.invokeFunction(init, new Object[0]);
+            FunctionSymbol main = findEntryPoint(functions, "main");
+            if (main != null) {
+                value = evaluator.invokeFunction(main, new Object[0]);
+                if (main.getReturnType() == null) value = null;
+            }
+        }
         return new EvaluationResult(new DiagnosticBox(), value);
+    }
+
+    /**
+     * Finds a zero-argument entry point declared by this file. Functions
+     * imported from a module carry their module's name and are skipped, so an
+     * imported main() never runs.
+     *
+     * @param functions Every known function body.
+     * @param name The entry point name — "init" or "main".
+     * @return The function, or null when the file declares none.
+     */
+    private static FunctionSymbol findEntryPoint(Map<FunctionSymbol, BoundBlockStatement> functions, String name) {
+        for (FunctionSymbol function : functions.keySet()) {
+            if (function.getModuleName() != null) continue;
+            if (function.getName().equals(name) && function.getParameters().isEmpty()) {
+                return function;
+            }
+        }
+        return null;
     }
 
     /**
@@ -135,9 +168,19 @@ public class Compilation {
             return null;
         }
 
+        // A source file compiles to a class named after it. If an import would
+        // produce the same class, calls silently resolve to the wrong one.
+        if (getGlobalScope().getImportedClassNames().contains(className)) {
+            _emitDiagnostics = new DiagnosticBox();
+            _emitDiagnostics.reportModuleClassNameCollision(
+                    new codeanalysis.text.TextSpan(0, 0), className, className.toLowerCase());
+            return null;
+        }
+
         BoundBlockStatement statement = getStatement();
         Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
         codeanalysis.emitting.Emitter emitter = new codeanalysis.emitting.Emitter(statement, functions);
+        emitter.setImportedModuleClasses(getGlobalScope().getImportedClassNames());
         // Pass source text for line number emission
         if (_syntaxTree.getText() != null) {
             String fileName = _filePath != null
@@ -150,7 +193,31 @@ public class Compilation {
                 emitter.registerActorType(entry.getKey());
             }
         }
-        return emitter.emit(className);
+        byte[] bytecode;
+        try {
+            bytecode = emitter.emit(className);
+        } catch (Exception | StackOverflowError e) {
+            _emitDiagnostics = new DiagnosticBox();
+            _emitDiagnostics.reportInternalCompilerError(
+                    new codeanalysis.text.TextSpan(0, 0), "class '" + className + "'",
+                    e.getClass().getSimpleName() + (e.getMessage() == null ? "" : ": " + e.getMessage()));
+            return null;
+        }
+        if (emitter.getDiagnostics().size() > 0) {
+            _emitDiagnostics = emitter.getDiagnostics();
+            return null;
+        }
+        return bytecode;
+    }
+
+    /**
+     * Diagnostics raised while generating code, if any. Separate from binding
+     * diagnostics because they are produced after the global scope is built.
+     *
+     * @return The emit diagnostics, or null when code generation succeeded.
+     */
+    public DiagnosticBox getEmitDiagnostics() {
+        return _emitDiagnostics;
     }
 
     public void emitTree(PrintWriter printWriter) throws IOException {

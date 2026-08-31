@@ -102,4 +102,101 @@ public class SiyoArray extends AbstractList<Object> implements List<Object> {
         }
         return new SiyoArray(elements, Object.class);
     }
+
+    /**
+     * Convert a Siyo value into the Java array a Java method expects.
+     *
+     * <p>The compiler calls this at a Java call boundary whose parameter is an
+     * array type. Without it a SiyoArray reference reached a method declared to
+     * take {@code byte[]} and the class failed JVM verification before running:
+     * every socket and file write in a Siyo program hit this.
+     *
+     * @param value The Siyo value — a SiyoArray, a List, or an already-Java array.
+     * @param componentDescriptor JVM descriptor of the array's component type,
+     *                            e.g. "B" for byte[] or "Ljava/lang/String;".
+     * @return A Java array of the requested component type.
+     */
+    public static Object toJavaArray(Object value, String componentDescriptor) {
+        if (value == null) return null;
+        Class<?> component = componentTypeOf(componentDescriptor);
+        if (component != null && value.getClass().isArray()
+                && value.getClass().getComponentType() == component) {
+            return value; // already the right shape
+        }
+
+        List<Object> elements;
+        if (value instanceof SiyoArray siyoArray) elements = siyoArray.getElements();
+        else if (value instanceof List<?> list) elements = new ArrayList<>(list);
+        else if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            elements = new ArrayList<>(length);
+            for (int i = 0; i < length; i++) elements.add(java.lang.reflect.Array.get(value, i));
+        } else {
+            elements = List.of(value);
+        }
+
+        if (component == null) component = Object.class;
+        Object result = java.lang.reflect.Array.newInstance(component, elements.size());
+        for (int i = 0; i < elements.size(); i++) {
+            java.lang.reflect.Array.set(result, i, coerceElement(elements.get(i), component));
+        }
+        return result;
+    }
+
+    private static Class<?> componentTypeOf(String descriptor) {
+        if (descriptor == null || descriptor.isEmpty()) return Object.class;
+        return switch (descriptor.charAt(0)) {
+            case 'B' -> byte.class;
+            case 'S' -> short.class;
+            case 'I' -> int.class;
+            case 'J' -> long.class;
+            case 'F' -> float.class;
+            case 'D' -> double.class;
+            case 'Z' -> boolean.class;
+            case 'C' -> char.class;
+            case 'L' -> {
+                String name = descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
+                try {
+                    yield Class.forName(name);
+                } catch (ClassNotFoundException e) {
+                    yield Object.class;
+                }
+            }
+            case '[' -> {
+                try {
+                    yield Class.forName(descriptor.replace('/', '.'));
+                } catch (ClassNotFoundException e) {
+                    yield Object.class;
+                }
+            }
+            default -> Object.class;
+        };
+    }
+
+    /** Narrow a Siyo element to the Java component type the array needs. */
+    private static Object coerceElement(Object element, Class<?> component) {
+        if (element == null) return component.isPrimitive() ? zeroOf(component) : null;
+        if (component == byte.class) return (byte) ((Number) element).intValue();
+        if (component == short.class) return (short) ((Number) element).intValue();
+        if (component == int.class) return ((Number) element).intValue();
+        if (component == long.class) return ((Number) element).longValue();
+        if (component == float.class) return ((Number) element).floatValue();
+        if (component == double.class) return ((Number) element).doubleValue();
+        if (component == boolean.class) return element instanceof Boolean b ? b : Boolean.parseBoolean(element.toString());
+        if (component == char.class) {
+            if (element instanceof Character c) return c;
+            String text = element.toString();
+            return text.isEmpty() ? (char) 0 : text.charAt(0);
+        }
+        return element;
+    }
+
+    private static Object zeroOf(Class<?> primitive) {
+        if (primitive == boolean.class) return false;
+        if (primitive == char.class) return (char) 0;
+        if (primitive == long.class) return 0L;
+        if (primitive == float.class) return 0.0f;
+        if (primitive == double.class) return 0.0d;
+        return 0;
+    }
 }

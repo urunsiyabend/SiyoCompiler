@@ -172,6 +172,20 @@ public class BoundBinaryOperator {
                 return op;
             }
         }
+        // Equality against an erased operand — which is what `null` is — works
+        // for every type. Without this a `map` could not be compared to null
+        // even though null is documented to work with any type.
+        if (syntaxType == SyntaxType.EqualsEqualsToken || syntaxType == SyntaxType.BangEqualsToken) {
+            if (leftType == Object.class || rightType == Object.class) {
+                for (var op : _operators) {
+                    if (op.getSyntaxType() == syntaxType
+                            && op.getLeftType() == Object.class
+                            && op.getRightType() == Object.class) {
+                        return op;
+                    }
+                }
+            }
+        }
         return null;
     }
 

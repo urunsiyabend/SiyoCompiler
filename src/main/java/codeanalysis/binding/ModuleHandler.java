@@ -9,6 +9,7 @@ import codeanalysis.ParameterSymbol;
 import codeanalysis.SiyoArray;
 import codeanalysis.SiyoStruct;
 import codeanalysis.StructSymbol;
+import codeanalysis.VariableSymbol;
 import codeanalysis.syntax.*;
 
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import java.util.Map;
  */
 public class ModuleHandler {
     private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
+    private final java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
     private ModuleRegistry _registry;
     private String _filePath;
@@ -80,6 +82,11 @@ public class ModuleHandler {
         return _enumTypes;
     }
 
+    /** JVM class names of every module imported by the file being bound. */
+    public java.util.Set<String> getImportedClassNames() {
+        return _importedClassNames;
+    }
+
     public boolean isImportedQualifier(String qualifier) {
         for (String moduleName : _importedModules) {
             String shortName = moduleName;
@@ -129,6 +136,7 @@ public class ModuleHandler {
         } else {
             module = compileModule(moduleName, moduleFilePath);
             if (module == null) {
+                _diagnostics.markModuleFailed(shortModuleName(moduleName));
                 return new BoundExpressionStatement(new BoundLiteralExpression(0));
             }
         }
@@ -144,6 +152,8 @@ public class ModuleHandler {
         if (moduleName.startsWith("std/") || moduleName.startsWith("std.")) {
             className = "Siyo_" + className;
         }
+        _importedClassNames.add(className);
+
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
             // Register with qualified name: module.func
@@ -154,13 +164,44 @@ public class ModuleHandler {
             importedFunc.setReturnElementType(func.getReturnElementType());
             importedFunc.setReturnElementStructName(func.getReturnElementStructName());
             importedFunc.setJvmMethodName(func.getName().replace('.', '$'));
+            importedFunc.setOriginModule(func.getOriginModule());
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
+                // Only the qualified symbol carries the body. Registering the
+                // module's own bare symbol here used to leak it into this file's
+                // exports, which made two modules' same-named functions collide
+                // and emitted a module's body into the wrong class — taking its
+                // static fields out of scope with it.
                 _functionBodies.put(importedFunc, body);
-                // Also register with original unqualified name for internal cross-references
-                _functionBodies.put(func, body);
             }
+        }
+
+        // Methods of re-exported structs travel with them, keeping the class
+        // that declared each one as its JVM owner.
+        for (var entry : module.getInheritedMethods().entrySet()) {
+            FunctionSymbol source = entry.getKey();
+            FunctionSymbol inherited = new FunctionSymbol(source.getName(), source.getParameters(),
+                    source.getReturnType(), source.getModuleName());
+            inherited.setReturnStructName(source.getReturnStructName());
+            inherited.setReturnElementType(source.getReturnElementType());
+            inherited.setReturnElementStructName(source.getReturnElementStructName());
+            inherited.setJvmMethodName(source.getJvmMethodName());
+            inherited.setOriginModule(source.getOriginModule());
+            if (_scope.tryDeclareFunction(inherited) && entry.getValue() != null) {
+                _functionBodies.put(inherited, entry.getValue());
+            }
+        }
+
+        // Module-level variables are exported as module.name, reading the static
+        // field on the module's own class.
+        for (var entry : module.getVariables().entrySet()) {
+            String qualifiedName = shortName + "." + entry.getKey();
+            VariableSymbol source = entry.getValue();
+            VariableSymbol imported = new VariableSymbol(
+                    qualifiedName, source.isReadOnly(), source.getType());
+            imported.setOwner(className, entry.getKey());
+            _scope.tryDeclare(imported);
         }
 
         // Register imported structs
@@ -183,6 +224,7 @@ public class ModuleHandler {
                 importedImpl.setReturnElementType(func.getReturnElementType());
                 importedImpl.setReturnElementStructName(func.getReturnElementStructName());
                 importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
+                importedImpl.setOriginModule(func.getOriginModule());
                 _scope.tryDeclareFunction(importedImpl);
                 BoundBlockStatement body = module.getFunctionBodies().get(func);
                 if (body != null) {
@@ -194,23 +236,68 @@ public class ModuleHandler {
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
+    /** The name a module's symbols are qualified with. */
+    static String shortModuleName(String moduleName) {
+        if (moduleName == null) return null;
+        int slash = moduleName.lastIndexOf('/');
+        if (slash >= 0) return moduleName.substring(slash + 1);
+        int dot = moduleName.lastIndexOf('.');
+        if (dot >= 0) return moduleName.substring(dot + 1);
+        return moduleName;
+    }
+
     public BoundStatement bindJavaImportStatement(JavaImportStatementSyntax syntax) {
-        String fullClassName = (String) syntax.getClassName().getValue();
-        if (fullClassName == null) return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        String requestedName = (String) syntax.getClassName().getValue();
+        if (requestedName == null) return new BoundExpressionStatement(new BoundLiteralExpression(0));
 
-        String simpleName = fullClassName.contains(".")
-                ? fullClassName.substring(fullClassName.lastIndexOf('.') + 1)
-                : fullClassName;
-
-        // Load class metadata via ASM ClassReader (no reflection!)
-        codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(fullClassName);
-        if (metadata == null) {
-            _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), fullClassName);
+        // A nested class may be written either way: java.net.http.HttpResponse$BodyHandlers
+        // or the dotted java.net.http.HttpResponse.BodyHandlers. Both bind to
+        // the innermost name, so the class can actually be referred to — the
+        // binary name is not a Siyo identifier.
+        String binaryName = resolveJavaBinaryName(requestedName);
+        if (binaryName == null) {
+            _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), requestedName);
             return new BoundExpressionStatement(new BoundLiteralExpression(0));
         }
-        _typeResolver.getJavaClasses().put(simpleName, new codeanalysis.JavaClassInfo(simpleName, fullClassName, metadata));
+
+        codeanalysis.JavaClassMetadata metadata = codeanalysis.JavaClassMetadata.load(binaryName);
+        if (metadata == null) {
+            _diagnostics.reportModuleNotFound(syntax.getClassName().getSpan(), requestedName);
+            return new BoundExpressionStatement(new BoundLiteralExpression(0));
+        }
+        String simpleName = simpleJavaName(binaryName);
+        _typeResolver.getJavaClasses().put(simpleName,
+                new codeanalysis.JavaClassInfo(simpleName, binaryName, metadata));
 
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * Finds the JVM binary name for an imported Java class.
+     *
+     * <p>Tries the name as written, then treats trailing dotted segments as
+     * nested classes, right to left: {@code a.b.C.D} becomes {@code a.b.C$D}.
+     *
+     * @param requestedName The name as written in the import.
+     * @return The binary name of a class that loads, or null.
+     */
+    static String resolveJavaBinaryName(String requestedName) {
+        if (codeanalysis.JavaClassMetadata.load(requestedName) != null) return requestedName;
+        StringBuilder candidate = new StringBuilder(requestedName);
+        for (int dot = candidate.lastIndexOf("."); dot > 0; dot = candidate.lastIndexOf(".", dot - 1)) {
+            candidate.setCharAt(dot, '$');
+            String attempt = candidate.toString();
+            if (codeanalysis.JavaClassMetadata.load(attempt) != null) return attempt;
+        }
+        return null;
+    }
+
+    /** The name a nested or top-level Java class is referred to by in Siyo. */
+    static String simpleJavaName(String binaryName) {
+        int nested = binaryName.lastIndexOf('$');
+        if (nested >= 0) return binaryName.substring(nested + 1);
+        int dot = binaryName.lastIndexOf('.');
+        return dot >= 0 ? binaryName.substring(dot + 1) : binaryName;
     }
 
     public String resolveModulePath(String moduleName) {
@@ -309,6 +396,9 @@ public class ModuleHandler {
             // Create a dedicated binder for the module so we can access its struct types
             var parentScope = Binder.createParentScopes(null);
             Binder moduleBinder = new Binder(parentScope);
+            // Diagnostics raised while binding this module name this module, not
+            // whichever file happened to import it.
+            moduleBinder.getDiagnostics().setSource(filePath, tree.getText());
             moduleBinder.getModuleHandler().setRegistry(_registry);
             moduleBinder.getModuleHandler().setFilePath(filePath);
             // Derive short module name for self-reference resolution
@@ -322,6 +412,9 @@ public class ModuleHandler {
 
             if (moduleBinder._diagnostics.size() > 0) {
                 _diagnostics.addAll(moduleBinder._diagnostics);
+                // Everything this module would have exported is now missing.
+                // Reporting each missing symbol would bury the real error.
+                _diagnostics.markModuleFailed(shortName);
                 if (_registry != null) _registry.markComplete(filePath);
                 return null;
             }
@@ -359,6 +452,10 @@ public class ModuleHandler {
             }
             ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath,
                     functions, bodies, structs, enums, topLevelBlock);
+            module.setVariables(collectTopLevelVariables(topLevelBlock, className));
+            module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
+            module.setImportedClassNames(
+                    new java.util.LinkedHashSet<>(moduleBinder.getModuleHandler().getImportedClassNames()));
             if (_registry != null) {
                 _registry.register(filePath, module);
                 _registry.markComplete(filePath);
@@ -368,6 +465,44 @@ public class ModuleHandler {
             if (_registry != null) _registry.markComplete(filePath);
             return null;
         }
+    }
+
+    /**
+     * Impl methods that reached this module through its own imports, for the
+     * structs it re-exports. They keep their declaring class as JVM owner.
+     */
+    private Map<FunctionSymbol, BoundBlockStatement> collectInheritedMethods(
+            Binder moduleBinder, Map<String, StructSymbol> structs) {
+        Map<FunctionSymbol, BoundBlockStatement> methods = new java.util.LinkedHashMap<>();
+        for (var entry : moduleBinder._functionBodies.entrySet()) {
+            FunctionSymbol function = entry.getKey();
+            if (function.getModuleName() == null) continue; // declared here, already exported
+            int dot = function.getName().indexOf('.');
+            if (dot <= 0) continue;
+            String owner = function.getName().substring(0, dot);
+            if (!structs.containsKey(owner)) continue; // not a method of a re-exported struct
+            methods.put(function, entry.getValue());
+        }
+        return methods;
+    }
+
+    /**
+     * Top-level variable declarations become static fields on the module class,
+     * so they are the module's exportable state. Synthetic variables introduced
+     * by lowering are not part of the module's surface.
+     */
+    private Map<String, codeanalysis.VariableSymbol> collectTopLevelVariables(
+            BoundBlockStatement topLevelBlock, String className) {
+        Map<String, codeanalysis.VariableSymbol> variables = new java.util.LinkedHashMap<>();
+        if (topLevelBlock == null) return variables;
+        for (BoundStatement stmt : topLevelBlock.getStatements()) {
+            if (!(stmt instanceof BoundVariableDeclaration declaration)) continue;
+            codeanalysis.VariableSymbol variable = declaration.getVariable();
+            String name = variable.getName();
+            if (name.startsWith("_idx") || name.startsWith("_col") || name.startsWith("_ch")) continue;
+            variables.putIfAbsent(name, variable);
+        }
+        return variables;
     }
 
     // --- Registration (first pass) ---
@@ -390,6 +525,7 @@ public class ModuleHandler {
         }
 
         FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
+        function.setOriginModule(_filePath);
         if (returnType == SiyoStruct.class && syntax.getTypeClause() != null) {
             function.setReturnStructName(syntax.getTypeClause().getIdentifier().getData());
         }
@@ -451,6 +587,7 @@ public class ModuleHandler {
             }
 
             FunctionSymbol func = new FunctionSymbol(qualifiedName, parameters, returnType);
+            func.setOriginModule(_filePath);
             if (returnType == SiyoStruct.class && method.getTypeClause() != null) {
                 func.setReturnStructName(method.getTypeClause().getIdentifier().getData());
             }
@@ -470,10 +607,17 @@ public class ModuleHandler {
     public void registerEnumDeclaration(EnumDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
         if (_enumTypes.containsKey(name)) return;
+        // A member without an explicit value continues from the previous one,
+        // so `enum E { A = 10, B }` gives B the value 11.
         Map<String, Integer> members = new HashMap<>();
-        int ordinal = 0;
-        for (SyntaxToken member : syntax.getMembers()) {
-            members.put(member.getData(), ordinal++);
+        List<SyntaxToken> memberTokens = syntax.getMembers();
+        List<Integer> explicitValues = syntax.getExplicitValues();
+        int next = 0;
+        for (int i = 0; i < memberTokens.size(); i++) {
+            Integer explicit = i < explicitValues.size() ? explicitValues.get(i) : null;
+            int value = explicit != null ? explicit : next;
+            members.put(memberTokens.get(i).getData(), value);
+            next = value + 1;
         }
         _enumTypes.put(name, members);
     }

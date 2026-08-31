@@ -19,6 +19,7 @@ public class FunctionSymbol {
     private Class<?> _returnElementType; // if return type is SiyoArray
     private String _returnElementStructName; // if returning Struct[]
     private String _jvmMethodName; // declaring module's emitted method name, when imported
+    private String _originModule;  // file that declared it; distinguishes same-named functions
 
     public FunctionSymbol(String name, List<ParameterSymbol> parameters, Class<?> returnType) {
         this(name, parameters, returnType, null);
@@ -40,6 +41,19 @@ public class FunctionSymbol {
     public void setReturnElementStructName(String name) { _returnElementStructName = name; }
     public String getJvmMethodName() { return _jvmMethodName; }
     public void setJvmMethodName(String name) { _jvmMethodName = name; }
+
+    /**
+     * The source file that declared this function.
+     *
+     * <p>Two modules may each declare a function called {@code parse}. Without
+     * this, the two symbols compare equal and collide in every map the compiler
+     * keys by symbol, so one module's body ends up emitted under the other's
+     * signature.
+     *
+     * @return The declaring file path, or null for the entry compilation unit.
+     */
+    public String getOriginModule() { return _originModule; }
+    public void setOriginModule(String origin) { _originModule = origin; }
 
     /**
      * Gets the name of the function.
@@ -84,11 +98,12 @@ public class FunctionSymbol {
         if (!(obj instanceof FunctionSymbol other)) return false;
         return _name.equals(other._name)
                 && java.util.Objects.equals(_moduleName, other._moduleName)
+                && java.util.Objects.equals(_originModule, other._originModule)
                 && _parameters.size() == other._parameters.size();
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(_name, _moduleName, _parameters.size());
+        return java.util.Objects.hash(_name, _moduleName, _originModule, _parameters.size());
     }
 }

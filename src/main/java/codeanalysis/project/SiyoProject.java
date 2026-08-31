@@ -24,7 +24,7 @@ public class SiyoProject {
         _projectRoot = projectRoot;
         _config = config;
         _name = config.getString("project", "name", "untitled");
-        _version = config.getString("project", "version", "0.4.0");
+        _version = config.getString("project", "version", "0.5.0");
         _main = config.getString("project", "main", "src/main.siyo");
     }
 
@@ -107,7 +107,7 @@ public class SiyoProject {
             // siyo.toml
             String toml = "[project]\n" +
                     "name = \"" + name + "\"\n" +
-                    "version = \"0.4.0\"\n" +
+                    "version = \"0.5.0\"\n" +
                     "main = \"src/main.siyo\"\n" +
                     "\n" +
                     "[dependencies]\n";

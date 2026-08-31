@@ -12,6 +12,8 @@ public class VariableSymbol {
     private final String _name;
     private final boolean _isReadOnly;
     private final Class<?> _type;
+    private String _ownerClass;
+    private String _fieldName;
 
     /**
      * Creates a new instance of the VariableSymbol class with the specified name and type.
@@ -23,6 +25,36 @@ public class VariableSymbol {
         _name = name;
         _isReadOnly = isReadOnly;
         _type = type;
+    }
+
+    /**
+     * The JVM class that owns this variable as a static field, or null when it
+     * belongs to the class currently being emitted.
+     *
+     * <p>Set for a module-level variable reached through an import, so that
+     * {@code status.OK} reads the field on the module's own class instead of
+     * looking for a field that the importing class never declared.
+     *
+     * @return The owning class name, or null.
+     */
+    public String getOwnerClass() {
+        return _ownerClass;
+    }
+
+    /**
+     * The field name to use on the owning class. Differs from {@link #getName()}
+     * for an imported variable, whose Siyo name is qualified ("status.OK") while
+     * its field name is not ("OK").
+     *
+     * @return The field name.
+     */
+    public String getFieldName() {
+        return _fieldName != null ? _fieldName : _name;
+    }
+
+    public void setOwner(String ownerClass, String fieldName) {
+        _ownerClass = ownerClass;
+        _fieldName = fieldName;
     }
 
     /**
