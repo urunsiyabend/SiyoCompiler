@@ -37,6 +37,10 @@ class SourceTextTest {
     private static Stream<Arguments> sourceTextProvider() {
         return Stream.of(
                 Arguments.of(".", 1),
+                Arguments.of("", 1),
+                Arguments.of(".\n", 2),
+                Arguments.of(".\n\n", 3),
+                Arguments.of(".\r", 2),
                 Arguments.of(".\r\n", 2),
                 Arguments.of(".\r\n\r\n", 3)
         );
