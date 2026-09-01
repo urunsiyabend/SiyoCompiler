@@ -56,8 +56,8 @@ mvn test
 Useful manual checks:
 
 ```bash
-java -jar target/siyo-compiler-0.4.0.jar run examples/compile_test.siyo
-java -jar target/siyo-compiler-0.4.0.jar test
+java -jar target/siyo-compiler-0.5.0.jar run examples/compile_test.siyo
+java -jar target/siyo-compiler-0.5.0.jar test
 ```
 
 If you change parser, binder, evaluator, emitter, modules, or stdlib behavior, include automated coverage in `src/test/java`.
