@@ -314,7 +314,7 @@ These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
 ## Contributing
 
-This is an experimental language project. Issues and discussions are welcome at [github.com/urunsiyabend/SiyoCompiler/issues](https://github.com/urunsiyabend/SiyoCompiler/issues).
+This is an experimental language project. Before opening a pull request, please read [CONTRIBUTING.md](./CONTRIBUTING.md). You can also browse open [good first issues](https://github.com/urunsiyabend/SiyoCompiler/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22).
 
 ## License
 
