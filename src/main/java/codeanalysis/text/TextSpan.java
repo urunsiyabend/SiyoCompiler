@@ -77,6 +77,16 @@ public class TextSpan {
     }
 
     /**
+     * Returns a hash code based on the start position and length.
+     *
+     * @return The hash code for this text span.
+     */
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(_start, _length);
+    }
+
+    /**
      * Returns the string representation of this text span.
      *
      * @return The string representation.
