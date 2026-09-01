@@ -110,6 +110,9 @@ public class SyntaxRules {
             case ContinueKeyword -> "continue";
             case StructKeyword -> "struct";
             case EnumKeyword -> "enum";
+            case ImportKeyword -> "import";
+            case JavaKeyword -> "java";
+            case NewKeyword -> "new";
             case TryKeyword -> "try";
             case CatchKeyword -> "catch";
             case InKeyword -> "in";
