@@ -146,6 +146,10 @@ class StdLibTest {
             {"StringsPadLeft", "import \"std/strings\"\nprintln(strings.padLeft(\"5\", 4, \"0\"))"},
             {"StringsPadRight", "import \"std/strings\"\nprintln(strings.padRight(\"hi\", 6, \".\"))"},
             {"StringsLines", "import \"std/strings\"\nmut ls = strings.lines(\"one\\ntwo\\nthree\")\nprintln(toString(len(ls)))"},
+            {"StringsChars", "import \"std/strings\"\nmut chars = strings.chars(\"abc\")\nprintln(toString(len(chars)))\nprintln(chars[0])\nprintln(chars[1])\nprintln(chars[2])"},
+            {"StringsTrimStart", "import \"std/strings\"\nprintln(strings.trimStart(\"  hi\"))"},
+            {"StringsTrimEnd", "import \"std/strings\"\nprintln(strings.trimEnd(\"hi  \"))"},
+            {"StringsLastIndexOf", "import \"std/strings\"\nprintln(toString(strings.lastIndexOf(\"banana\", \"na\")))"},
 
             // std/io (uses temp files)
             {"IoWriteRead", "import \"std/io\"\nio.writeFile(\"" + testFile + "\", \"hello\")\nprintln(io.readFile(\"" + testFile + "\"))"},
