@@ -519,9 +519,27 @@ public class Lexer {
     }
 
     /**
-     * Reads the number token from the text being analyzed and moves the cursor. If the number is invalid, it reports an error.
+     * Reads a number token from the text being analyzed and moves the cursor.
+     *
+     * <p>Three literal shapes are recognised:</p>
+     * <ul>
+     *   <li>a decimal integer, which becomes an {@code int} when it fits and a
+     *       {@code long} when it does not</li>
+     *   <li>an explicit long, written with an {@code L} or {@code l} suffix</li>
+     *   <li>a hexadecimal integer, written {@code 0x1F}, with the same widening
+     *       rule and the same optional suffix</li>
+     * </ul>
+     *
+     * <p>A fractional part produces a float token. A value that does not fit in
+     * a {@code long}, a hexadecimal literal with no digits, and a fractional
+     * part carrying a long suffix are all reported as diagnostics.</p>
      */
     private void readNumberToken() {
+        if (currentChar() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
+            readHexNumberToken();
+            return;
+        }
+
         while (Character.isDigit(currentChar())) {
             next();
         }
@@ -532,29 +550,117 @@ public class Lexer {
             while (Character.isDigit(currentChar())) {
                 next();
             }
+            boolean hasLongSuffix = isLongSuffix(currentChar());
+            if (hasLongSuffix) {
+                next(); // consume the suffix so it is part of the reported text
+            }
             int length = _position - _start;
             String text = _text.toString(_start, _start + length);
+            if (hasLongSuffix) {
+                _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Long.class);
+                _value = 0L;
+                _type = SyntaxType.LongToken;
+                return;
+            }
             double value = 0.0;
             try {
                 value = Double.parseDouble(text);
             } catch (NumberFormatException e) {
-                _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Integer.class);
+                _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Double.class);
             }
             _value = value;
             _type = SyntaxType.FloatToken;
             return;
         }
 
+        int digitsEnd = _position;
+        boolean hasLongSuffix = isLongSuffix(currentChar());
+        if (hasLongSuffix) {
+            next();
+        }
         int length = _position - _start;
         String text = _text.toString(_start, _start + length);
-        int value = 0;
-        try {
-            value = Integer.parseInt(text);
-        } catch (NumberFormatException e) {
-            _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Integer.class);
+        String digits = _text.toString(_start, digitsEnd);
+        finishIntegerToken(text, digits, 10, hasLongSuffix, length);
+    }
+
+    /**
+     * Reads a hexadecimal number token, starting at the {@code 0x} prefix.
+     */
+    private void readHexNumberToken() {
+        next(2); // consume "0x"
+        int digitsStart = _position;
+        while (isHexDigit(currentChar())) {
+            next();
         }
-        _value = value;
+        int digitsEnd = _position;
+        boolean hasLongSuffix = isLongSuffix(currentChar());
+        if (hasLongSuffix) {
+            next();
+        }
+        int length = _position - _start;
+        String text = _text.toString(_start, _start + length);
+        if (digitsEnd == digitsStart) {
+            _diagnostics.reportInvalidNumber(new TextSpan(_start, length), text, Integer.class);
+            _value = 0;
+            _type = SyntaxType.NumberToken;
+            return;
+        }
+        String digits = _text.toString(digitsStart, digitsEnd);
+        finishIntegerToken(text, digits, 16, hasLongSuffix, length);
+    }
+
+    /**
+     * Turns the digits of an integer literal into a token, choosing between
+     * {@code int} and {@code long} and reporting a value that fits in neither.
+     *
+     * @param text          The full literal text, suffix included, used in diagnostics.
+     * @param digits        The digits to parse, without prefix or suffix.
+     * @param radix         The radix of the digits.
+     * @param hasLongSuffix Whether the literal carried an {@code L} suffix.
+     * @param length        The length of the literal, used in diagnostics.
+     */
+    private void finishIntegerToken(String text, String digits, int radix, boolean hasLongSuffix, int length) {
+        long value;
+        try {
+            value = Long.parseLong(digits, radix);
+        } catch (NumberFormatException e) {
+            _diagnostics.reportNumberOutOfRange(new TextSpan(_start, length), text, Long.class);
+            _value = hasLongSuffix ? 0L : 0;
+            _type = hasLongSuffix ? SyntaxType.LongToken : SyntaxType.NumberToken;
+            return;
+        }
+
+        if (hasLongSuffix || value > Integer.MAX_VALUE) {
+            _value = value;
+            _type = SyntaxType.LongToken;
+            return;
+        }
+
+        _value = (int) value;
         _type = SyntaxType.NumberToken;
+    }
+
+    /**
+     * Reports whether the given character marks an explicit long literal.
+     *
+     * @param c The character to test.
+     * @return True when the character is an {@code L} suffix.
+     */
+    private static boolean isLongSuffix(char c) {
+        return c == 'L' || c == 'l';
+    }
+
+    /**
+     * Reports whether the given character is a hexadecimal digit.
+     *
+     * @param c The character to test.
+     * @return True when the character is a hexadecimal digit.
+     */
+    private static boolean isHexDigit(char c) {
+        return Character.isDigit(c)
+                || (c >= 'a' && c <= 'f')
+                || (c >= 'A' && c <= 'F');
     }
 
     /**

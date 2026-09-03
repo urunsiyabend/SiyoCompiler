@@ -141,9 +141,37 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param text The invalid number text.
      * @param type The expected type of the number.
      */
-    public void reportInvalidNumber(TextSpan span, String text, Class<Integer> type) {
-        String message = String.format("The number %s is not valid <%s>", text, type);
+    public void reportInvalidNumber(TextSpan span, String text, Class<?> type) {
+        String message = String.format("The number %s is not a valid %s", text, siyoTypeName(type));
         report(span, message);
+    }
+
+    /**
+     * Reports an error for a numeric literal whose value does not fit the widest
+     * type that can hold it.
+     *
+     * @param span The TextSpan representing the location of the literal.
+     * @param text The literal text.
+     * @param type The widest type that was tried.
+     */
+    public void reportNumberOutOfRange(TextSpan span, String text, Class<?> type) {
+        String message = String.format("The number %s does not fit in a %s", text, siyoTypeName(type));
+        report(span, message);
+    }
+
+    /**
+     * Maps a Java class to the Siyo type name used in diagnostics.
+     *
+     * @param type The Java class backing a Siyo type.
+     * @return The Siyo name of the type.
+     */
+    private static String siyoTypeName(Class<?> type) {
+        if (type == Integer.class) return "int";
+        if (type == Long.class) return "long";
+        if (type == Double.class) return "float";
+        if (type == Boolean.class) return "bool";
+        if (type == String.class) return "string";
+        return type.getSimpleName();
     }
 
     /**

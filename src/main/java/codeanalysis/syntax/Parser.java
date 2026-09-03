@@ -901,6 +901,7 @@ public class Parser {
             case FalseKeyword, TrueKeyword -> parseBooleanLiteral();
             case NullKeyword -> parseNullLiteral();
             case NumberToken -> parseNumberLiteral();
+            case LongToken -> parseLongLiteral();
             case FloatToken -> parseFloatLiteral();
             case StringToken -> parseStringLiteral();
             case InterpolatedStringStartToken -> parseInterpolatedString();
@@ -1157,6 +1158,16 @@ public class Parser {
     private ExpressionSyntax parseFloatLiteral() {
         SyntaxToken floatToken = match(SyntaxType.FloatToken);
         return new LiteralExpressionSyntax(floatToken);
+    }
+
+    /**
+     * Parses a long literal.
+     *
+     * @return The parsed expression syntax.
+     */
+    private ExpressionSyntax parseLongLiteral() {
+        SyntaxToken longToken = match(SyntaxType.LongToken);
+        return new LiteralExpressionSyntax(longToken);
     }
 
     /**

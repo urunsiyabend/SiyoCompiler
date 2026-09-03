@@ -130,35 +130,82 @@ Driven by the Aja static-site-generator maturity test — see
 
 ---
 
-## 0.5.0 — Advanced Types
+## 0.5.0 — Module Namespaces & Located Errors (Released)
 
-### Closures & Collections (carried over)
-- Closure variable mutation — writes to a captured variable are currently
-  discarded silently
-- `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`, `forEach(arr, fn)`
-- Method chaining
+Driven by Morioh — a 3,000-line HTTP library (server, client, routing,
+middleware) written in Siyo 0.4.0 to find out where the language breaks under
+real use. It produced 32 reproducible defects; most are fixed here. See
+`RELEASE_NOTES_0.5.0.md` for the full list.
 
-### Module System (carried over)
-- Public/private visibility (`pub` keyword)
-- Circular import detection
-- Module aliasing (`import "std/math" as m`)
+- **A module is a namespace again.** Every function carries the file that
+  declared it, so two modules may both declare `parse`, a module no longer
+  exports what it imported, and a module-level variable keeps working when its
+  module is reached through another module
+- **The Java value boundary keeps types honest.** Erased operands compare and
+  widen without truncating, Siyo and Java arrays convert in both directions,
+  and primitives box when they reach an `object` parameter or struct field
+- **Every failure has a source location.** An internal emitter or ASM failure is
+  reported as a located diagnostic instead of a raw Java stack trace
+- **Silent wrongness is now reported.** A local type annotation is checked
+  (`imut x: string = 5` used to compile), and a write to a captured variable is
+  a diagnostic instead of a silently discarded write
+- `siyoc interpret` runs `init()` and `main()`, so the interpreter-versus-
+  bytecode comparison works again for module-style programs
+- 1,565 tests at release (1,581 on master today)
+
+---
+
+## 0.6.0 — Advanced Types (Next)
+
+### Small and self-contained (first batch)
+- **Long literals** — `Lexer.readNumberToken()` reads only int and float, so a
+  value that overflows `int` is reported as an invalid number instead of
+  becoming a `long`. Wide values come from `toLong()` today
+- **`std/json` cannot report a parse failure** — `json.parse("not json")`
+  returns an empty map, the same value as the valid document `{}`
+- **A declared function type is not checked** — `fn(int) -> int` is parsed and
+  discarded, so a callback with the wrong arity fails at run time
+- **Hex literals** (`0xFF`)
 
 ### Error Handling
 - `throw` / user-raised errors
-- Observable exception type in `catch` (today only the message is reachable, so
-  a message-less exception prints as `null`)
+- An error payload: `error(msg)` raises text and `catch e` binds text, so an
+  error cannot carry a status code or be matched on by type
+- Observable exception type in `catch` (a message-less Java exception prints as
+  `null`)
+
+### Closures & Collections
+- Closure variable mutation — a write to a captured variable is a diagnostic as
+  of 0.5.0; making it work is still open
+- `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`, `forEach(arr, fn)`
+  — note that today's `map` builtin is the map constructor, not a higher-order
+  function
+- Method chaining
+
+### Module System
+- Public/private visibility (`pub` keyword)
+- Module aliasing (`import "std/math" as m`)
+
+### Algebraic Types
+- `type Result = Ok(value) | Err(msg)`
+- Exhaustive match checking
+- This is the largest remaining expressiveness gap: a function whose result is
+  one of several shapes has to return a record carrying every field of every
+  case plus flags to say which is live
 
 ### Generics
 - `Array<int>`, `Map<string, int>`
 - Generic functions: `fn identity<T>(x: T) -> T`
+- Reflection over struct fields, so a struct can be serialised without being
+  converted to a map by hand
 
 ### Interfaces / Traits
 - `interface Printable { fn print() }`
 - Struct implementation
 
-### Algebraic Types
-- `type Result = Ok(value) | Err(msg)`
-- Exhaustive match checking
+### Already implemented, previously listed here as pending
+- `expr as Type` casts and circular-import detection have both existed since
+  0.1.0. Casts are still undocumented in `GRAMMAR.md`
 
 ---
 

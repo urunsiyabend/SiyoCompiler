@@ -289,7 +289,7 @@ mvn test
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
 - **[RELEASE_NOTES_0.5.0.md](RELEASE_NOTES_0.5.0.md)** — What changed in 0.5.0, and why
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.5.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.6.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
 ## Known limitations (0.5.0)

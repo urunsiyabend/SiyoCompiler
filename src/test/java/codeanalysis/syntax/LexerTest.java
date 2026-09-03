@@ -60,6 +60,68 @@ class LexerTest {
 
 
     /**
+     * Test that the lexer reads hexadecimal notation as an integer literal.
+     */
+    @org.junit.jupiter.api.Test
+    public void Lexer_Lex_HexLiteral() {
+        ArrayList<SyntaxToken> tokens = (ArrayList<SyntaxToken>) SyntaxTree.parseTokens("0xFF");
+
+        Assertions.assertEquals(1, tokens.size());
+        Assertions.assertEquals(SyntaxType.NumberToken, tokens.get(0).getType());
+        Assertions.assertEquals(255, tokens.get(0).getValue());
+    }
+
+    /**
+     * Test that a hexadecimal literal too wide for an int widens to a long.
+     */
+    @org.junit.jupiter.api.Test
+    public void Lexer_Lex_WideHexLiteral() {
+        ArrayList<SyntaxToken> tokens = (ArrayList<SyntaxToken>) SyntaxTree.parseTokens("0xFFFFFFFF");
+
+        Assertions.assertEquals(1, tokens.size());
+        Assertions.assertEquals(SyntaxType.LongToken, tokens.get(0).getType());
+        Assertions.assertEquals(4294967295L, tokens.get(0).getValue());
+    }
+
+    /**
+     * Test that an L suffix produces a long token whatever its case.
+     */
+    @org.junit.jupiter.api.Test
+    public void Lexer_Lex_LongSuffix() {
+        for (String text : new String[]{"7L", "7l"}) {
+            ArrayList<SyntaxToken> tokens = (ArrayList<SyntaxToken>) SyntaxTree.parseTokens(text);
+
+            Assertions.assertEquals(1, tokens.size());
+            Assertions.assertEquals(SyntaxType.LongToken, tokens.get(0).getType());
+            Assertions.assertEquals(7L, tokens.get(0).getValue());
+        }
+    }
+
+    /**
+     * Test that a decimal literal that does not fit an int becomes a long.
+     */
+    @org.junit.jupiter.api.Test
+    public void Lexer_Lex_WidensOverflowingDecimal() {
+        ArrayList<SyntaxToken> tokens = (ArrayList<SyntaxToken>) SyntaxTree.parseTokens("2147483648");
+
+        Assertions.assertEquals(1, tokens.size());
+        Assertions.assertEquals(SyntaxType.LongToken, tokens.get(0).getType());
+        Assertions.assertEquals(2147483648L, tokens.get(0).getValue());
+    }
+
+    /**
+     * Test that the widest int value is still an int.
+     */
+    @org.junit.jupiter.api.Test
+    public void Lexer_Lex_KeepsIntAtItsUpperBound() {
+        ArrayList<SyntaxToken> tokens = (ArrayList<SyntaxToken>) SyntaxTree.parseTokens("2147483647");
+
+        Assertions.assertEquals(1, tokens.size());
+        Assertions.assertEquals(SyntaxType.NumberToken, tokens.get(0).getType());
+        Assertions.assertEquals(2147483647, tokens.get(0).getValue());
+    }
+
+    /**
      * Provides a list of tokens to be used in the tests.
      *
      * @return A list of tokens to be used in the tests.
@@ -135,6 +197,15 @@ class LexerTest {
             return true;
 
         if (t1Type == SyntaxType.NumberToken && t2Type == SyntaxType.NumberToken)
+            return true;
+
+        if (t1Type == SyntaxType.IdentifierToken && t2Type == SyntaxType.LongToken)
+            return true;
+
+        if (t1IsKeyword && t2Type == SyntaxType.LongToken)
+            return true;
+
+        if (t1Type == SyntaxType.NumberToken && t2Type == SyntaxType.LongToken)
             return true;
 
         if (t1Type == SyntaxType.BangToken && t2Type == SyntaxType.EqualsToken)
@@ -227,6 +298,7 @@ class LexerTest {
         ArrayList<Token> tokens = new ArrayList<>();
         tokens.add(new Token(SyntaxType.NumberToken, "1"));
         tokens.add(new Token(SyntaxType.NumberToken, "123"));
+        tokens.add(new Token(SyntaxType.LongToken, "1L"));
         tokens.add(new Token(SyntaxType.IdentifierToken, "a"));
         tokens.add(new Token(SyntaxType.IdentifierToken, "abc"));
         tokens.add(new Token(SyntaxType.PlusToken, "+"));

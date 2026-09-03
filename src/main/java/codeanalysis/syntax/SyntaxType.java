@@ -26,6 +26,9 @@ public enum SyntaxType {
     /* Represents the end of an interpolated string: } text" */
     InterpolatedStringEndToken,
 
+    /* Represents a long token. */
+    LongToken,
+
     /* Represents a float token. */
     FloatToken,
 
