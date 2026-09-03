@@ -17,6 +17,23 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SourceTextTest {
     /**
+     * Test that positions at line starts, inside lines, and on line breaks map to the expected line.
+     */
+    @org.junit.jupiter.api.Test
+    void SourceText_MapsPositionsToLineIndexes() {
+        SourceText sourceText = SourceText.from("ab\ncd\nef");
+
+        assertEquals(0, sourceText.getLineIndex(0));
+        assertEquals(0, sourceText.getLineIndex(1));
+        assertEquals(0, sourceText.getLineIndex(2));
+        assertEquals(1, sourceText.getLineIndex(3));
+        assertEquals(1, sourceText.getLineIndex(4));
+        assertEquals(1, sourceText.getLineIndex(5));
+        assertEquals(2, sourceText.getLineIndex(6));
+        assertEquals(2, sourceText.getLineIndex(7));
+    }
+
+    /**
      * Test if the source text correctly includes the last line.
      *
      * @param text The text data of the source text.
