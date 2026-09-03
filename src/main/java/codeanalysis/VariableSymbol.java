@@ -14,6 +14,7 @@ public class VariableSymbol {
     private final Class<?> _type;
     private String _ownerClass;
     private String _fieldName;
+    private String _declaredTypeName;
 
     /**
      * Creates a new instance of the VariableSymbol class with the specified name and type.
@@ -50,6 +51,23 @@ public class VariableSymbol {
      */
     public String getFieldName() {
         return _fieldName != null ? _fieldName : _name;
+    }
+
+    /**
+     * The type name this variable was declared with, when one was written.
+     *
+     * <p>The Java class alone loses what a declaration said: every function
+     * type is {@code SiyoClosure}, so {@code fn(int) -> int} and
+     * {@code fn(string)} are indistinguishable without the name.</p>
+     *
+     * @return The declared type name, or null.
+     */
+    public String getDeclaredTypeName() {
+        return _declaredTypeName;
+    }
+
+    public void setDeclaredTypeName(String declaredTypeName) {
+        _declaredTypeName = declaredTypeName;
     }
 
     public void setOwner(String ownerClass, String fieldName) {

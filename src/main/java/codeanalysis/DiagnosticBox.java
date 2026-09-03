@@ -336,6 +336,17 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Reports a value that does not have the declared function type.
+     *
+     * @param span     The span of the value.
+     * @param declared The declared function type, as written.
+     * @param actual   A description of the value's own shape.
+     */
+    public void reportFunctionTypeMismatch(TextSpan span, String declared, String actual) {
+        report(span, String.format("Expected %s, but got %s", declared, actual));
+    }
+
+    /**
      * Reports a match over a sum type that does not cover every variant.
      *
      * @param span     The span of the match.

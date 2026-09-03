@@ -233,8 +233,7 @@ public class Parser {
             nextToken(); // consume ':'
             SyntaxToken typeToken;
             if (current().getType() == SyntaxType.FnKeyword) {
-                SyntaxToken fnToken = nextToken();
-                typeToken = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+                typeToken = parseFunctionTypeName(nextToken());
             } else {
                 typeToken = match(SyntaxType.IdentifierToken);
             }
@@ -459,25 +458,7 @@ public class Parser {
         // Supports: fn, fn(int) -> int, fn(int, string) -> bool, fn() -> string
         SyntaxToken type;
         if (current().getType() == SyntaxType.FnKeyword) {
-            SyntaxToken fnToken = nextToken();
-            // Skip optional function type signature: fn(...) -> type
-            if (current().getType() == SyntaxType.OpenParenthesisToken) {
-                nextToken(); // consume (
-                // Skip parameter types until )
-                while (current().getType() != SyntaxType.CloseParenthesisToken &&
-                       current().getType() != SyntaxType.EOFToken) {
-                    nextToken();
-                }
-                if (current().getType() == SyntaxType.CloseParenthesisToken) {
-                    nextToken(); // consume )
-                }
-                // Skip -> returnType
-                if (current().getType() == SyntaxType.ArrowToken) {
-                    nextToken(); // consume ->
-                    nextToken(); // consume return type
-                }
-            }
-            type = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            type = parseFunctionTypeName(nextToken());
         } else {
             type = match(SyntaxType.IdentifierToken);
         }
@@ -506,24 +487,7 @@ public class Parser {
         SyntaxToken arrowToken = match(SyntaxType.ArrowToken);
         // Handle function type: -> fn(int, int) -> int
         if (current().getType() == SyntaxType.FnKeyword) {
-            SyntaxToken fnToken = nextToken();
-            SyntaxToken identifier = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
-            // Skip the parameter list and optional return type of the function signature
-            if (current().getType() == SyntaxType.OpenParenthesisToken) {
-                int depth = 1;
-                nextToken(); // skip '('
-                while (depth > 0 && current().getType() != SyntaxType.EOFToken) {
-                    if (current().getType() == SyntaxType.OpenParenthesisToken) depth++;
-                    else if (current().getType() == SyntaxType.CloseParenthesisToken) depth--;
-                    nextToken();
-                }
-                // Skip optional return type: -> int
-                if (current().getType() == SyntaxType.ArrowToken) {
-                    nextToken(); // skip '->'
-                    nextToken(); // skip return type identifier
-                }
-            }
-            return new TypeClauseSyntax(arrowToken, identifier);
+            return new TypeClauseSyntax(arrowToken, parseFunctionTypeName(nextToken()));
         }
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
         // Handle array return type: -> int[]
@@ -604,6 +568,47 @@ public class Parser {
     }
 
     /**
+     * Reads a function type, keeping the signature written with it.
+     *
+     * <p>The signature used to be parsed and thrown away, so a callback of the
+     * wrong shape failed at run time. It is now encoded into the type name —
+     * {@code fn(int)->bool} — the same way an array type carries {@code []},
+     * which lets the binder check a closure against it.</p>
+     *
+     * @param fnToken The {@code fn} keyword already consumed.
+     * @return The type name token.
+     */
+    private SyntaxToken parseFunctionTypeName(SyntaxToken fnToken) {
+        if (current().getType() != SyntaxType.OpenParenthesisToken) {
+            return new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+        }
+
+        nextToken(); // consume '('
+        List<String> parameterTypeNames = new ArrayList<>();
+        while (current().getType() != SyntaxType.CloseParenthesisToken
+                && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            parameterTypeNames.add(parseTypeName().getData());
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+            if (current() == startToken) {
+                nextToken(); // malformed input: keep making progress
+            }
+        }
+        match(SyntaxType.CloseParenthesisToken);
+
+        String returnTypeName = null;
+        if (current().getType() == SyntaxType.ArrowToken) {
+            nextToken(); // consume '->'
+            returnTypeName = parseTypeName().getData();
+        }
+
+        String encoded = codeanalysis.FunctionTypeSignature.encode(parameterTypeNames, returnTypeName);
+        return new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), encoded, null);
+    }
+
+    /**
      * Parses a type name in a payload or annotation position, including the
      * array suffix and the bare {@code fn} type.
      *
@@ -612,8 +617,7 @@ public class Parser {
     private SyntaxToken parseTypeName() {
         SyntaxToken typeToken;
         if (current().getType() == SyntaxType.FnKeyword) {
-            SyntaxToken fnToken = nextToken();
-            typeToken = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            typeToken = parseFunctionTypeName(nextToken());
         } else {
             typeToken = match(SyntaxType.IdentifierToken);
         }
@@ -900,22 +904,7 @@ public class Parser {
         SyntaxToken colon = match(SyntaxType.ColonToken);
         SyntaxToken fieldType;
         if (current().getType() == SyntaxType.FnKeyword) {
-            SyntaxToken fnToken = nextToken();
-            // An optional signature — fn(int) -> int — is accepted and skipped.
-            if (current().getType() == SyntaxType.OpenParenthesisToken) {
-                int depth = 1;
-                nextToken();
-                while (depth > 0 && current().getType() != SyntaxType.EOFToken) {
-                    if (current().getType() == SyntaxType.OpenParenthesisToken) depth++;
-                    else if (current().getType() == SyntaxType.CloseParenthesisToken) depth--;
-                    nextToken();
-                }
-                if (current().getType() == SyntaxType.ArrowToken) {
-                    nextToken();
-                    nextToken();
-                }
-            }
-            fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+            fieldType = parseFunctionTypeName(nextToken());
         } else {
             fieldType = match(SyntaxType.IdentifierToken);
         }

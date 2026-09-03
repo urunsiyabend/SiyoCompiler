@@ -10,10 +10,23 @@ import java.util.List;
 public class BoundClosureCallExpression extends BoundExpression {
     private final BoundExpression _closure;
     private final List<BoundExpression> _arguments;
+    private final Class<?> _resultType;
 
     public BoundClosureCallExpression(BoundExpression closure, List<BoundExpression> arguments) {
+        this(closure, arguments, Object.class);
+    }
+
+    /**
+     * @param closure    The expression holding the closure.
+     * @param arguments  The call arguments.
+     * @param resultType The declared return type, or {@code Object} when the
+     *                   closure's shape is only known at run time.
+     */
+    public BoundClosureCallExpression(BoundExpression closure, List<BoundExpression> arguments,
+                                      Class<?> resultType) {
         _closure = closure;
         _arguments = arguments;
+        _resultType = resultType;
     }
 
     public BoundExpression getClosure() { return _closure; }
@@ -23,7 +36,7 @@ public class BoundClosureCallExpression extends BoundExpression {
     public BoundNodeType getType() { return BoundNodeType.ClosureCallExpression; }
 
     @Override
-    public Class<?> getClassType() { return Object.class; } // return type determined at runtime
+    public Class<?> getClassType() { return _resultType; }
 
     @Override
     public Iterator<BoundNode> getChildren() { return Collections.emptyIterator(); }

@@ -336,6 +336,15 @@ public class TypeResolver {
 
     public Class<?> lookupType(String name) {
         if (name == null) return null;
+        // A function type carries its signature in the name, so it is matched
+        // before the array suffix: fn()->int[] is a function returning an
+        // array, while fn()[] is an array of functions.
+        if (FunctionTypeSignature.isSignature(name)) {
+            return SiyoClosure.class;
+        }
+        if (FunctionTypeSignature.isFunctionArray(name)) {
+            return SiyoArray.class;
+        }
         if (name.endsWith("[]")) {
             return SiyoArray.class;
         }

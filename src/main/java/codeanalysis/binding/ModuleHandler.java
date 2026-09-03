@@ -534,7 +534,9 @@ public class ModuleHandler {
             String typeName = parameterSyntax.getTypeToken().getData();
             Class<?> parameterType = _typeResolver.lookupType(typeName);
             if (parameterType == null) parameterType = Integer.class;
-            parameters.add(new ParameterSymbol(parameterName, parameterSyntax.isMutable(), parameterType));
+            ParameterSymbol parameter = new ParameterSymbol(parameterName, parameterSyntax.isMutable(), parameterType);
+            parameter.setDeclaredTypeName(typeName);
+            parameters.add(parameter);
         }
 
         Class<?> returnType = null;
@@ -597,7 +599,9 @@ public class ModuleHandler {
                 String typeName = paramSyntax.getTypeToken().getData();
                 Class<?> paramType = _typeResolver.lookupType(typeName);
                 if (paramType == null) paramType = Integer.class;
-                parameters.add(new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType));
+                ParameterSymbol parameter = new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType);
+                parameter.setDeclaredTypeName(typeName);
+                parameters.add(parameter);
             }
 
             Class<?> returnType = null;

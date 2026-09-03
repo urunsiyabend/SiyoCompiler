@@ -290,6 +290,17 @@ public class Binder {
             }
         }
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
+        if (annotation != null) {
+            variableSymbol.setDeclaredTypeName(annotation.getData());
+            if (variableType == SiyoClosure.class) {
+                checkAgainstFunctionType(initializer, annotation.getData(),
+                        syntax.getInitializer().getSpan());
+            }
+        } else if (initializer instanceof BoundLambdaExpression lambda) {
+            // With no annotation the lambda's own shape is the declaration, so
+            // a later call through the name is still checked.
+            variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
+        }
 
         if (!_scope.tryDeclare(variableSymbol)) {
             _diagnostics.reportVariableAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
@@ -1119,6 +1130,164 @@ public class Binder {
         return spans;
     }
 
+    /**
+     * Checks a value against a declared function type.
+     *
+     * <p>A signature used to be parsed and discarded, so a callback of the
+     * wrong shape was accepted and failed at run time. A lambda written at the
+     * site is checked against the declaration, and so is a closure read out of
+     * a variable that carries a signature of its own.</p>
+     *
+     * @param value             The value being assigned or passed.
+     * @param declaredTypeName  The type name written at the declaration.
+     * @param span              The span to report against.
+     */
+    private void checkAgainstFunctionType(BoundExpression value, String declaredTypeName,
+                                          codeanalysis.text.TextSpan span) {
+        codeanalysis.FunctionTypeSignature declared =
+                codeanalysis.FunctionTypeSignature.parse(declaredTypeName);
+        if (declared == null) return; // a bare `fn` accepts any closure
+
+        List<Class<?>> actualParameterTypes;
+        Class<?> actualReturnType;
+        if (value instanceof BoundLambdaExpression lambda) {
+            actualParameterTypes = new ArrayList<>();
+            for (ParameterSymbol parameter : lambda.getParameters()) {
+                actualParameterTypes.add(parameter.getType());
+            }
+            actualReturnType = lambda.getReturnType();
+        } else if (value instanceof BoundVariableExpression varExpr) {
+            codeanalysis.FunctionTypeSignature actual =
+                    codeanalysis.FunctionTypeSignature.parse(varExpr.getVariable().getDeclaredTypeName());
+            if (actual == null) return; // nothing known about the closure's shape
+            actualParameterTypes = new ArrayList<>();
+            for (String typeName : actual.getParameterTypeNames()) {
+                actualParameterTypes.add(_typeResolver.lookupType(typeName));
+            }
+            actualReturnType = actual.getReturnTypeName() == null
+                    ? null
+                    : _typeResolver.lookupType(actual.getReturnTypeName());
+        } else {
+            return; // an erased closure: its shape is only known at run time
+        }
+
+        if (actualParameterTypes.size() != declared.getParameterCount()) {
+            _diagnostics.reportFunctionTypeMismatch(span, declared.toString(),
+                    String.format("one taking %d argument%s", actualParameterTypes.size(),
+                            actualParameterTypes.size() == 1 ? "" : "s"));
+            return;
+        }
+
+        for (int i = 0; i < actualParameterTypes.size(); i++) {
+            Class<?> declaredParameter = _typeResolver.lookupType(declared.getParameterTypeNames().get(i));
+            Class<?> actualParameter = actualParameterTypes.get(i);
+            if (declaredParameter == null || actualParameter == null) continue;
+            if (declaredParameter == Object.class || actualParameter == Object.class) continue;
+            if (declaredParameter != actualParameter) {
+                _diagnostics.reportCannotConvert(span, actualParameter, declaredParameter);
+                return;
+            }
+        }
+
+        if (declared.getReturnTypeName() != null && actualReturnType != null) {
+            Class<?> declaredReturn = _typeResolver.lookupType(declared.getReturnTypeName());
+            if (declaredReturn != null && declaredReturn != Object.class && actualReturnType != Object.class
+                    && declaredReturn != actualReturnType) {
+                _diagnostics.reportCannotConvert(span, actualReturnType, declaredReturn);
+            }
+        }
+    }
+
+    /**
+     * Builds the type name for a lambda's own shape, so a name bound to it
+     * carries a signature even when the declaration wrote no annotation.
+     *
+     * @param lambda The lambda.
+     * @return The encoded function type name.
+     */
+    private String signatureNameOf(BoundLambdaExpression lambda) {
+        List<String> parameterTypeNames = new ArrayList<>();
+        for (ParameterSymbol parameter : lambda.getParameters()) {
+            String declared = parameter.getDeclaredTypeName();
+            parameterTypeNames.add(declared != null ? declared : siyoTypeName(parameter.getType()));
+        }
+        String returnTypeName = lambda.getReturnType() == null ? null : siyoTypeName(lambda.getReturnType());
+        return codeanalysis.FunctionTypeSignature.encode(parameterTypeNames, returnTypeName);
+    }
+
+    /**
+     * The Siyo name of a type, for building a signature out of bound types.
+     *
+     * @param type The Java class backing a Siyo type.
+     * @return The Siyo type name.
+     */
+    private static String siyoTypeName(Class<?> type) {
+        if (type == Integer.class) return "int";
+        if (type == Long.class) return "long";
+        if (type == Boolean.class) return "bool";
+        if (type == Double.class) return "float";
+        if (type == String.class) return "string";
+        if (type == SiyoMap.class) return "map";
+        if (type == SiyoSet.class) return "set";
+        if (type == SiyoChannel.class) return "channel";
+        if (type == SiyoClosure.class) return "fn";
+        return "object";
+    }
+
+    /**
+     * The signature a closure-valued expression is known to have, taken from
+     * the declaration it came through.
+     *
+     * @param callee The expression holding the closure.
+     * @return The signature, or null when nothing is known about its shape.
+     */
+    private codeanalysis.FunctionTypeSignature signatureOf(BoundExpression callee) {
+        if (callee instanceof BoundVariableExpression varExpr) {
+            return codeanalysis.FunctionTypeSignature.parse(varExpr.getVariable().getDeclaredTypeName());
+        }
+        return null;
+    }
+
+    /**
+     * Binds a call through a closure-valued name, checking the call against the
+     * signature the closure was declared with and giving the call the declared
+     * return type instead of an erased one.
+     *
+     * @param callee    The expression holding the closure.
+     * @param arguments The bound arguments.
+     * @param span      The span to report against.
+     * @return The bound call.
+     */
+    private BoundExpression bindClosureCall(BoundExpression callee, List<BoundExpression> arguments,
+                                            codeanalysis.text.TextSpan span) {
+        codeanalysis.FunctionTypeSignature signature = signatureOf(callee);
+        if (signature == null) {
+            return new BoundClosureCallExpression(callee, arguments);
+        }
+
+        if (arguments.size() != signature.getParameterCount()) {
+            _diagnostics.reportWrongArgumentCount(span, signature.toString(),
+                    signature.getParameterCount(), arguments.size());
+            return new BoundClosureCallExpression(callee, arguments);
+        }
+
+        for (int i = 0; i < arguments.size(); i++) {
+            Class<?> declared = _typeResolver.lookupType(signature.getParameterTypeNames().get(i));
+            Class<?> actual = arguments.get(i).getClassType();
+            if (declared == null || declared == Object.class || actual == Object.class) continue;
+            if (declared != actual) {
+                _diagnostics.reportCannotConvert(span, actual, declared);
+                break;
+            }
+        }
+
+        Class<?> resultType = signature.getReturnTypeName() == null
+                ? Object.class
+                : _typeResolver.lookupType(signature.getReturnTypeName());
+        return new BoundClosureCallExpression(callee, arguments,
+                resultType == null ? Object.class : resultType);
+    }
+
     private BoundExpression createFunctionReference(FunctionSymbol func) {
         List<ParameterSymbol> params = func.getParameters();
         List<BoundExpression> argExprs = new ArrayList<>();
@@ -1343,7 +1512,7 @@ public class Binder {
                 for (ExpressionSyntax argSyntax : syntax.getArguments()) {
                     args.add(bindExpression(argSyntax));
                 }
-                return new BoundClosureCallExpression(new BoundVariableExpression(var), args);
+                return bindClosureCall(new BoundVariableExpression(var), args, syntax.getSpan());
             }
         }
 
@@ -1380,6 +1549,9 @@ public class Binder {
             // Object.class accepts any type (used by built-in functions like toString)
             if (parameter.getType() != Object.class && argument.getClassType() != Object.class && argument.getClassType() != parameter.getType()) {
                 _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), parameter.getName(), parameter.getType(), argument.getClassType());
+            } else if (parameter.getType() == SiyoClosure.class) {
+                checkAgainstFunctionType(argument, parameter.getDeclaredTypeName(),
+                        syntax.getArguments().get(i).getSpan());
             }
         }
 
@@ -1893,6 +2065,7 @@ public class Binder {
             Class<?> paramType = _typeResolver.lookupType(typeName);
             if (paramType == null) paramType = Object.class;
             ParameterSymbol param = new ParameterSymbol(paramName, paramSyntax.isMutable(), paramType);
+            param.setDeclaredTypeName(typeName);
             parameters.add(param);
             _scope.tryDeclare(param);
             Class<?> elementType = _typeResolver.lookupElementType(typeName);

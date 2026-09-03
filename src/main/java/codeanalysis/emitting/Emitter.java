@@ -1378,6 +1378,13 @@ public class Emitter {
                 "(I[Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
 
         _mv.visitLabel(endLabel);
+
+        // Dispatch always returns Object. When the closure was declared with a
+        // return type, the call has that type, so narrow to it here or the
+        // frame does not verify.
+        if (node.getClassType() != null && node.getClassType() != Object.class) {
+            emitUnboxIfNeeded(node.getClassType());
+        }
     }
 
     private void emitScope(BoundScopeExpression node) {
