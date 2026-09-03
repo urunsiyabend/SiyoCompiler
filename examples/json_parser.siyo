@@ -14,7 +14,7 @@ fn main() {
     mut input1 = ob + q + "name" + q + ": " + q + "Siyo" + q + ", " + q + "version" + q + ": 1, " + q + "compiled" + q + ": true" + cb
     println("Input: " + input1)
     println("Parsed:")
-    mut obj1 = json.parse(input1)
+    mut obj1 = json.parseOrEmpty(input1)
     mut name1 = toString(obj1.get("name"))
     mut ver1 = toString(obj1.get("version"))
     mut comp1 = toString(obj1.get("compiled"))
@@ -37,11 +37,20 @@ fn main() {
 
     // Round-trip: parse then stringify
     mut input3 = ob + q + "lang" + q + ": " + q + "siyo" + q + ", " + q + "fast" + q + ": true" + cb
-    mut obj3 = json.parse(input3)
+    mut obj3 = json.parseOrEmpty(input3)
     mut out3 = json.stringify(obj3)
     println("Round-trip:")
     println("  Input:  " + input3)
     println("  Output: " + out3)
+
+    println("")
+
+    // A parse says why it failed, instead of looking like an empty object
+    println("Malformed input:")
+    match json.parse("not json") {
+        Parsed(m) => println("  parsed " + toString(len(m.keys())) + " keys"),
+        Invalid(why) => println("  " + why),
+    }
 
     println("")
     println("=== Done ===")

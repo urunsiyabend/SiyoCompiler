@@ -528,6 +528,11 @@ public class Evaluator {
                         return ctor.newInstance(args);
                     } catch (IllegalArgumentException e) {
                         continue; // try next constructor
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        Throwable cause = e.getCause() != null ? e.getCause() : e;
+                        if (cause instanceof RuntimeException runtime) throw runtime;
+                        if (cause instanceof Exception checked) throw checked;
+                        throw new RuntimeException(cause);
                     }
                 }
             }
@@ -609,6 +614,14 @@ public class Evaluator {
                         return result;
                     } catch (IllegalArgumentException | java.lang.reflect.InaccessibleObjectException e) {
                         continue;
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        // The method itself threw. Reflection wraps that, so
+                        // `catch e` used to bind "InvocationTargetException"
+                        // while the compiled path bound the real message.
+                        Throwable cause = e.getCause() != null ? e.getCause() : e;
+                        if (cause instanceof RuntimeException runtime) throw runtime;
+                        if (cause instanceof Exception checked) throw checked;
+                        throw new RuntimeException(cause);
                     }
                 }
             }

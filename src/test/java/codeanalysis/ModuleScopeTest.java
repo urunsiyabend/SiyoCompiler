@@ -73,7 +73,7 @@ class ModuleScopeTest {
         write("mid.siyo", """
                 import "mine"
                 import "std/json"
-                fn go(s: string) -> string { toString(json.parse(s).get("a")) }
+                fn go(s: string) -> string { toString(json.parseOrEmpty(s).get("a")) }
                 fn local(s: string) -> string { mine.parse(s) }
                 """);
 

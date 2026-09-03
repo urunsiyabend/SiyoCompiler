@@ -228,12 +228,61 @@ public class SiyoRuntime {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
-    /** Parse a JSON string into a SiyoMap with full nested support. */
-    public static SiyoMap jsonParse(String s) {
+    /**
+     * Parses a JSON object, reporting malformed input.
+     *
+     * <p>The lenient {@link #jsonParse(String)} cannot distinguish a document
+     * it failed to read from the valid document {@code &#123;&#125;}, which is
+     * what {@code std/json} used to expose. This one validates and throws with
+     * the position of the first thing it could not read.</p>
+     *
+     * @param s The JSON text.
+     * @return The parsed object.
+     */
+    public static SiyoMap jsonParseStrict(String s) {
+        if (s == null) throw new RuntimeException("json: no input");
         int[] pos = {0};
         skipWs(s, pos);
-        if (pos[0] >= s.length() || s.charAt(pos[0]) != '{') return new SiyoMap();
-        return parseJsonObject(s, pos);
+        if (pos[0] >= s.length()) throw jsonError("json: empty input", s, pos[0]);
+        if (s.charAt(pos[0]) != '{') {
+            throw jsonError("json: expected an object", s, pos[0]);
+        }
+        SiyoMap parsed = parseJsonObject(s, pos);
+        skipWs(s, pos);
+        if (pos[0] < s.length()) {
+            throw jsonError("json: unexpected trailing input", s, pos[0]);
+        }
+        return parsed;
+    }
+
+    /**
+     * Parses a JSON string into a SiyoMap, returning an empty map for input it
+     * cannot read.
+     *
+     * @param s The JSON text.
+     * @return The parsed object, or an empty map.
+     */
+    public static SiyoMap jsonParse(String s) {
+        try {
+            return jsonParseStrict(s);
+        } catch (RuntimeException e) {
+            return new SiyoMap();
+        }
+    }
+
+    /**
+     * Builds a parse error naming the position it was found at.
+     *
+     * @param message The message.
+     * @param s       The input being parsed.
+     * @param pos     The position of the offending character.
+     * @return The exception to throw.
+     */
+    private static RuntimeException jsonError(String message, String s, int pos) {
+        if (pos < s.length()) {
+            return new RuntimeException(message + " at position " + pos + " ('" + s.charAt(pos) + "')");
+        }
+        return new RuntimeException(message + " at position " + pos + " (end of input)");
     }
 
     private static void skipWs(String s, int[] pos) {
@@ -244,6 +293,9 @@ public class SiyoRuntime {
     }
 
     private static String parseJsonString(String s, int[] pos) {
+        if (pos[0] >= s.length() || s.charAt(pos[0]) != '"') {
+            throw jsonError("json: expected a string", s, pos[0]);
+        }
         pos[0]++; // skip opening "
         StringBuilder sb = new StringBuilder();
         while (pos[0] < s.length()) {
@@ -251,74 +303,135 @@ public class SiyoRuntime {
             if (c == '"') { pos[0]++; return sb.toString(); }
             if (c == '\\') {
                 pos[0]++;
+                if (pos[0] >= s.length()) break;
                 char esc = s.charAt(pos[0]);
                 switch (esc) {
                     case 'n' -> sb.append('\n');
                     case 't' -> sb.append('\t');
                     case 'r' -> sb.append('\r');
+                    case 'b' -> sb.append('\b');
+                    case 'f' -> sb.append('\f');
                     case '\\' -> sb.append('\\');
                     case '"' -> sb.append('"');
                     case '/' -> sb.append('/');
-                    default -> { sb.append('\\'); sb.append(esc); }
+                    case 'u' -> {
+                        if (pos[0] + 4 >= s.length()) {
+                            throw jsonError("json: truncated unicode escape", s, pos[0]);
+                        }
+                        String hex = s.substring(pos[0] + 1, pos[0] + 5);
+                        try {
+                            sb.append((char) Integer.parseInt(hex, 16));
+                        } catch (NumberFormatException e) {
+                            throw jsonError("json: bad unicode escape", s, pos[0]);
+                        }
+                        pos[0] += 4;
+                    }
+                    default -> throw jsonError("json: unknown escape '\\" + esc + "'", s, pos[0]);
                 }
             } else {
                 sb.append(c);
             }
             pos[0]++;
         }
-        return sb.toString();
+        throw jsonError("json: unterminated string", s, pos[0]);
     }
 
     private static Object parseJsonValue(String s, int[] pos) {
         skipWs(s, pos);
-        if (pos[0] >= s.length()) return null;
+        if (pos[0] >= s.length()) throw jsonError("json: expected a value", s, pos[0]);
         char c = s.charAt(pos[0]);
         if (c == '"') return parseJsonString(s, pos);
         if (c == '{') return parseJsonObject(s, pos);
         if (c == '[') return parseJsonArray(s, pos);
-        if (c == 't') { pos[0] += 4; return Boolean.TRUE; }
-        if (c == 'f') { pos[0] += 5; return Boolean.FALSE; }
-        if (c == 'n') { pos[0] += 4; return null; }
-        // Number
+        if (s.startsWith("true", pos[0])) { pos[0] += 4; return Boolean.TRUE; }
+        if (s.startsWith("false", pos[0])) { pos[0] += 5; return Boolean.FALSE; }
+        if (s.startsWith("null", pos[0])) { pos[0] += 4; return null; }
+        return parseJsonNumber(s, pos);
+    }
+
+    /**
+     * Parses a number, including the exponent form the old parser dropped.
+     *
+     * @param s   The input.
+     * @param pos The cursor.
+     * @return An Integer, Long or Double.
+     */
+    private static Object parseJsonNumber(String s, int[] pos) {
         int start = pos[0];
-        if (c == '-') pos[0]++;
-        while (pos[0] < s.length() && (Character.isDigit(s.charAt(pos[0])) || s.charAt(pos[0]) == '.')) pos[0]++;
-        String numStr = s.substring(start, pos[0]);
-        if (numStr.contains(".")) return Double.parseDouble(numStr);
-        try { return Integer.parseInt(numStr); } catch (NumberFormatException e) { return Long.parseLong(numStr); }
+        if (pos[0] < s.length() && s.charAt(pos[0]) == '-') pos[0]++;
+        int digitsStart = pos[0];
+        while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+        if (pos[0] == digitsStart) throw jsonError("json: expected a value", s, start);
+
+        boolean isDecimal = false;
+        if (pos[0] < s.length() && s.charAt(pos[0]) == '.') {
+            isDecimal = true;
+            pos[0]++;
+            int fracStart = pos[0];
+            while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+            if (pos[0] == fracStart) throw jsonError("json: expected a digit", s, pos[0]);
+        }
+        if (pos[0] < s.length() && (s.charAt(pos[0]) == 'e' || s.charAt(pos[0]) == 'E')) {
+            isDecimal = true;
+            pos[0]++;
+            if (pos[0] < s.length() && (s.charAt(pos[0]) == '+' || s.charAt(pos[0]) == '-')) pos[0]++;
+            int expStart = pos[0];
+            while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+            if (pos[0] == expStart) throw jsonError("json: expected an exponent", s, pos[0]);
+        }
+
+        String text = s.substring(start, pos[0]);
+        if (isDecimal) return Double.parseDouble(text);
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            return Long.parseLong(text);
+        }
     }
 
     private static SiyoMap parseJsonObject(String s, int[] pos) {
         pos[0]++; // skip '{'
         SiyoMap m = new SiyoMap();
-        boolean first = true;
-        while (pos[0] < s.length()) {
-            skipWs(s, pos);
-            if (s.charAt(pos[0]) == '}') { pos[0]++; break; }
-            if (!first && s.charAt(pos[0]) == ',') pos[0]++;
-            first = false;
+        skipWs(s, pos);
+        if (pos[0] < s.length() && s.charAt(pos[0]) == '}') { pos[0]++; return m; }
+        while (true) {
             skipWs(s, pos);
             String key = parseJsonString(s, pos);
             skipWs(s, pos);
+            if (pos[0] >= s.length() || s.charAt(pos[0]) != ':') {
+                throw jsonError("json: expected ':' after a key", s, pos[0]);
+            }
             pos[0]++; // skip ':'
-            Object val = parseJsonValue(s, pos);
-            m.set(key, val);
+            m.set(key, parseJsonValue(s, pos));
+            skipWs(s, pos);
+            if (pos[0] >= s.length()) throw jsonError("json: unterminated object", s, pos[0]);
+            char c = s.charAt(pos[0]);
+            if (c == ',') { pos[0]++; continue; }
+            if (c == '}') { pos[0]++; return m; }
+            throw jsonError("json: expected ',' or '}'", s, pos[0]);
         }
-        return m;
     }
 
     private static SiyoArray parseJsonArray(String s, int[] pos) {
         pos[0]++; // skip '['
-        java.util.List<Object> elems = new java.util.ArrayList<>();
-        boolean first = true;
-        while (pos[0] < s.length()) {
-            skipWs(s, pos);
-            if (s.charAt(pos[0]) == ']') { pos[0]++; break; }
-            if (!first && s.charAt(pos[0]) == ',') pos[0]++;
-            first = false;
-            elems.add(parseJsonValue(s, pos));
+        java.util.List<Object> elements = new java.util.ArrayList<>();
+        skipWs(s, pos);
+        if (pos[0] < s.length() && s.charAt(pos[0]) == ']') {
+            pos[0]++;
+            return new SiyoArray(elements, Object.class);
         }
-        return new SiyoArray(elems, Object.class);
+        while (true) {
+            elements.add(parseJsonValue(s, pos));
+            skipWs(s, pos);
+            if (pos[0] >= s.length()) throw jsonError("json: unterminated array", s, pos[0]);
+            char c = s.charAt(pos[0]);
+            if (c == ',') { pos[0]++; continue; }
+            if (c == ']') {
+                pos[0]++;
+                return new SiyoArray(elements, Object.class);
+            }
+            throw jsonError("json: expected ',' or ']'", s, pos[0]);
+        }
     }
 
     /** Stringify any Siyo value to JSON. Handles nested SiyoMap and SiyoArray. */

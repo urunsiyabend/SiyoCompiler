@@ -42,7 +42,7 @@ fn jsonNumber(n: int) -> string {
 
 fn parseJsonField(jsonStr: string, fieldName: string) -> string {
     // Use std/json to parse
-    mut parsed = json.parse(jsonStr)
+    mut parsed = json.parseOrEmpty(jsonStr)
     mut val = parsed[fieldName]
     if val == null return ""
     val

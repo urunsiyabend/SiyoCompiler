@@ -165,9 +165,11 @@ class StdLibTest {
             {"NetModuleLoad", "import \"std/net\"\nprintln(\"loaded\")"},
 
             // std/json
-            {"JsonParse", "import \"std/json\"\nmut ob = chr(123)\nmut cb = chr(125)\nmut q = chr(34)\nmut input = ob + q + \"name\" + q + \": \" + q + \"Siyo\" + q + cb\nmut obj = json.parse(input)\nprintln(toString(obj.get(\"name\")))"},
+            {"JsonParse", "import \"std/json\"\nmut ob = chr(123)\nmut cb = chr(125)\nmut q = chr(34)\nmut input = ob + q + \"name\" + q + \": \" + q + \"Siyo\" + q + cb\nmut obj = json.parseOrEmpty(input)\nprintln(toString(obj.get(\"name\")))"},
             {"JsonStringify", "import \"std/json\"\nmut m = map()\nm.set(\"a\", 1)\nprintln(json.stringify(m))"},
-            {"JsonRoundTrip", "import \"std/json\"\nmut ob = chr(123)\nmut cb = chr(125)\nmut q = chr(34)\nmut input = ob + q + \"x\" + q + \": 42\" + cb\nmut s = json.stringify(json.parse(input))\nprintln(contains(s, \"42\"))"},
+            {"JsonParseResult", "import \"std/json\"\nmut ob = chr(123)\nmut cb = chr(125)\nmut q = chr(34)\nmut input = ob + q + \"x\" + q + \": 42\" + cb\nprintln(match json.parse(input) { Parsed(m) => toString(m[\"x\"]), Invalid(why) => why })"},
+            {"JsonParseFailure", "import \"std/json\"\nprintln(match json.parse(\"not json\") { Parsed(m) => \"parsed\", Invalid(why) => toString(contains(why, \"expected an object\")) })"},
+            {"JsonRoundTrip", "import \"std/json\"\nmut ob = chr(123)\nmut cb = chr(125)\nmut q = chr(34)\nmut input = ob + q + \"x\" + q + \": 42\" + cb\nmut s = json.stringify(json.parseOrEmpty(input))\nprintln(contains(s, \"42\"))"},
 
             // std/testing
             {"TestAssert", "import \"std/testing\"\ntesting.assert(true, \"ok\")\nprintln(\"passed\")"},

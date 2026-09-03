@@ -104,7 +104,7 @@ fn main() {
     println("  " + content)
 
     // Parse back
-    mut parsed = json.parse(content)
+    mut parsed = json.parseOrEmpty(content)
     mut parsedName = toString(parsed.get("name"))
     println("Parsed name: $parsedName")
 

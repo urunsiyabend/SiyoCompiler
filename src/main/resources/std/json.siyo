@@ -1,7 +1,18 @@
 import java "codeanalysis.SiyoRuntime"
 
-fn parse(s: string) -> map {
-    return SiyoRuntime.jsonParse(s)
+// A parse either produces an object or says why it could not.
+type Json = Parsed(map) | Invalid(string)
+
+fn parse(text: string) -> Json {
+    try {
+        Parsed(SiyoRuntime.jsonParseStrict(text))
+    } catch e {
+        Invalid(e)
+    }
+}
+
+fn parseOrEmpty(text: string) -> map {
+    return SiyoRuntime.jsonParse(text)
 }
 
 fn stringify(v: object) -> string {
