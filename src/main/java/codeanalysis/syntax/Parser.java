@@ -628,6 +628,43 @@ public class Parser {
     }
 
     /**
+     * Whether the arm at the cursor is a variant pattern that binds its
+     * payload — {@code Ok(value)} or {@code Result.Ok(value)}.
+     *
+     * <p>The shape is a name, optionally qualified by a type, applied to a
+     * parenthesised list of plain names. That distinguishes destructuring from
+     * a value to compare against: {@code Ok(v)} binds the payload, while
+     * {@code Ok(1)} constructs a value and compares.</p>
+     *
+     * @return true when a variant pattern starts here.
+     */
+    private boolean isVariantPatternAhead() {
+        if (current().getType() != SyntaxType.IdentifierToken) return false;
+
+        int offset = 1;
+        if (peek(1).getType() == SyntaxType.DotToken) {
+            if (peek(2).getType() != SyntaxType.IdentifierToken) return false;
+            offset = 3;
+        }
+        if (peek(offset).getType() != SyntaxType.OpenParenthesisToken) return false;
+
+        // Every argument must be a plain name; anything else is an expression
+        // to compare against, not a payload to bind.
+        int i = offset + 1;
+        if (peek(i).getType() == SyntaxType.CloseParenthesisToken) return false;
+        while (true) {
+            if (peek(i).getType() != SyntaxType.IdentifierToken) return false;
+            i++;
+            if (peek(i).getType() == SyntaxType.CommaToken) {
+                i++;
+                continue;
+            }
+            if (peek(i).getType() != SyntaxType.CloseParenthesisToken) return false;
+            return peek(i + 1).getType() == SyntaxType.FatArrowToken;
+        }
+    }
+
+    /**
      * Parses a return statement.
      * A return statement consists of the return keyword and an optional expression.
      *
@@ -748,9 +785,27 @@ public class Parser {
             SyntaxToken startToken = current();
             boolean isDefault = false;
             ExpressionSyntax pattern = null;
+            SyntaxToken variantTypeName = null;
+            SyntaxToken variantName = null;
+            java.util.List<SyntaxToken> bindings = null;
             if (current().getType() == SyntaxType.IdentifierToken && current().getData().equals("_")) {
                 nextToken(); // consume _
                 isDefault = true;
+            } else if (isVariantPatternAhead()) {
+                if (peek(1).getType() == SyntaxType.DotToken) {
+                    variantTypeName = nextToken();
+                    nextToken(); // consume '.'
+                }
+                variantName = match(SyntaxType.IdentifierToken);
+                bindings = new java.util.ArrayList<>();
+                nextToken(); // consume '('
+                while (current().getType() != SyntaxType.CloseParenthesisToken
+                        && current().getType() != SyntaxType.EOFToken) {
+                    SyntaxToken binding = match(SyntaxType.IdentifierToken);
+                    bindings.add(binding.getData().equals("_") ? null : binding);
+                    if (current().getType() == SyntaxType.CommaToken) nextToken();
+                }
+                match(SyntaxType.CloseParenthesisToken);
             } else {
                 pattern = parseExpression();
             }
@@ -763,7 +818,8 @@ public class Parser {
             } else {
                 body = parseExpression();
             }
-            arms.add(new MatchArmSyntax(pattern, arrow, body, isDefault));
+            arms.add(new MatchArmSyntax(pattern, arrow, body, isDefault,
+                    variantTypeName, variantName, bindings));
             // Optional comma separator
             if (current().getType() == SyntaxType.CommaToken) nextToken();
 

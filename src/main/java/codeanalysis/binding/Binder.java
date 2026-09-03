@@ -739,11 +739,39 @@ public class Binder {
 
     private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax) {
         BoundExpression target = bindExpression(syntax.getTarget());
+        codeanalysis.UnionSymbol targetUnion = _typeResolver.resolveUnionType(target);
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
+        java.util.Set<String> coveredVariants = new java.util.LinkedHashSet<>();
+        boolean hasDefault = false;
         Class<?> resultType = null;
         boolean resultTypeInitialized = false;
         for (MatchArmSyntax arm : syntax.getArms()) {
-            BoundExpression pattern = arm.isDefault() ? null : bindExpression(arm.getPattern());
+            if (arm.isDefault()) hasDefault = true;
+
+            // A variant pattern binds its payload, so the arm body is bound in
+            // a scope holding those bindings.
+            BoundMatchExpression.BoundVariantPattern variant = null;
+            boolean openedScope = false;
+            if (arm.isVariantPattern()) {
+                variant = bindVariantPattern(arm, targetUnion);
+                if (variant != null) {
+                    coveredVariants.add(variant.variantName());
+                    _scope = new BoundScope(_scope);
+                    _moduleHandler.setScope(_scope);
+                    openedScope = true;
+                    for (VariableSymbol binding : variant.bindings()) {
+                        if (binding != null) _scope.tryDeclare(binding);
+                    }
+                }
+            }
+
+            BoundExpression pattern = arm.isDefault() || arm.isVariantPattern()
+                    ? null
+                    : bindExpression(arm.getPattern());
+            if (pattern instanceof BoundUnionLiteralExpression unionPattern) {
+                coveredVariants.add(unionPattern.getVariantName());
+            }
+
             BoundExpression body;
             List<BoundStatement> preStatements = new ArrayList<>();
             if (arm.getBody() instanceof BlockExpressionSyntax blockExpr) {
@@ -751,6 +779,12 @@ public class Binder {
             } else {
                 body = bindExpression(arm.getBody());
             }
+
+            if (openedScope) {
+                _scope = _scope.getParent();
+                _moduleHandler.setScope(_scope);
+            }
+
             Class<?> bodyType = body.getClassType();
             if (!resultTypeInitialized) {
                 // null is a meaningful type here: every arm may be void.
@@ -760,10 +794,93 @@ public class Binder {
                 _diagnostics.reportError(arm.getBody().getSpan(),
                         "All match arms must return the same type; cannot mix void and value arms");
             }
-            arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(), preStatements));
+            arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(),
+                    preStatements, variant));
         }
+
+        // A match over a sum type is checked for exhaustiveness: the set of
+        // variants is closed, so a missing one is a hole the compiler can see.
+        if (targetUnion != null && !hasDefault) {
+            List<String> missing = new ArrayList<>();
+            for (String variantName : targetUnion.getVariantNames()) {
+                if (!coveredVariants.contains(variantName)) missing.add(variantName);
+            }
+            if (!missing.isEmpty()) {
+                _diagnostics.reportNonExhaustiveMatch(syntax.getMatchKeyword().getSpan(),
+                        targetUnion.getName(), missing);
+            }
+        }
+
         if (!resultTypeInitialized) resultType = Object.class;
         return new BoundMatchExpression(target, arms, resultType);
+    }
+
+    /**
+     * Binds a variant pattern, resolving which sum type it selects from and
+     * giving each bound payload slot a variable of the declared payload type.
+     *
+     * @param arm         The arm carrying the pattern.
+     * @param targetUnion The sum type of the matched value, when it is known.
+     * @return The bound pattern, or null when the pattern was rejected.
+     */
+    private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
+                                                                       codeanalysis.UnionSymbol targetUnion) {
+        String variantName = arm.getVariantName().getData();
+        codeanalysis.UnionSymbol union;
+        if (arm.getVariantTypeName() != null) {
+            String typeName = arm.getVariantTypeName().getData();
+            union = _typeResolver.getUnionTypes().get(typeName);
+            if (union == null) {
+                _diagnostics.reportUndefinedType(arm.getVariantTypeName().getSpan(), typeName);
+                return null;
+            }
+        } else if (targetUnion != null && targetUnion.hasVariant(variantName)) {
+            union = targetUnion;
+        } else {
+            union = _moduleHandler.findUnionByVariant(variantName);
+            if (union == null) {
+                _diagnostics.reportUndefinedName(arm.getVariantName().getSpan(), variantName);
+                return null;
+            }
+        }
+
+        codeanalysis.UnionSymbol.Variant variant = union.getVariant(variantName);
+        if (variant == null) {
+            _diagnostics.reportUndefinedVariant(arm.getVariantName().getSpan(), union.getName(),
+                    variantName, union.getVariantNames());
+            return null;
+        }
+        if (targetUnion != null && !targetUnion.getName().equals(union.getName())) {
+            _diagnostics.reportError(arm.getVariantName().getSpan(),
+                    String.format("Variant '%s.%s' cannot match a value of type '%s'",
+                            union.getName(), variantName, targetUnion.getName()));
+            return null;
+        }
+
+        List<codeanalysis.syntax.SyntaxToken> bindingTokens = arm.getBindings();
+        if (bindingTokens.size() != variant.size()) {
+            _diagnostics.reportWrongVariantPayloadCount(arm.getVariantName().getSpan(), union.getName(),
+                    variantName, variant.size(), bindingTokens.size());
+            return null;
+        }
+
+        List<VariableSymbol> bindings = new ArrayList<>();
+        for (int i = 0; i < bindingTokens.size(); i++) {
+            codeanalysis.syntax.SyntaxToken token = bindingTokens.get(i);
+            if (token == null) {
+                bindings.add(null); // the pattern discarded this slot
+                continue;
+            }
+            VariableSymbol binding = new VariableSymbol(token.getData(), true, variant.getPayloadTypes().get(i));
+            bindings.add(binding);
+            String payloadTypeName = variant.getPayloadTypeNames().get(i);
+            StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
+            if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
+            codeanalysis.UnionSymbol payloadUnion = _typeResolver.getUnionTypes().get(payloadTypeName);
+            if (payloadUnion != null) _typeResolver.trackUnionType(binding, payloadUnion);
+        }
+
+        return new BoundMatchExpression.BoundVariantPattern(union.getName(), variantName, bindings);
     }
 
     private BoundExpression bindBlockExpressionBody(StatementSyntax block, List<BoundStatement> preStatements) {

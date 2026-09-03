@@ -1141,6 +1141,43 @@ public class Emitter {
                 defaultArm = arm;
                 continue;
             }
+
+            // A variant pattern tests the variant, then binds its payload into
+            // locals the body can read.
+            if (arm.variant() != null) {
+                Label nextArm = new Label();
+                _mv.visitVarInsn(ALOAD, targetSlot);
+                _mv.visitTypeInsn(INSTANCEOF, "codeanalysis/SiyoUnion");
+                _mv.visitJumpInsn(IFEQ, nextArm);
+
+                _mv.visitVarInsn(ALOAD, targetSlot);
+                _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoUnion");
+                _mv.visitLdcInsn(arm.variant().variantName());
+                _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoUnion", "is",
+                        "(Ljava/lang/String;)Z", false);
+                _mv.visitJumpInsn(IFEQ, nextArm);
+
+                var bindings = arm.variant().bindings();
+                for (int i = 0; i < bindings.size(); i++) {
+                    VariableSymbol binding = bindings.get(i);
+                    if (binding == null) continue; // the pattern discarded this slot
+                    _mv.visitVarInsn(ALOAD, targetSlot);
+                    _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoUnion");
+                    emitIntConstant(i);
+                    _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoUnion", "get",
+                            "(I)Ljava/lang/Object;", false);
+                    emitUnboxIfNeeded(binding.getType());
+                    int slot = declareLocal(binding);
+                    emitStore(binding.getType(), slot);
+                }
+
+                emitMatchArmPreStatements(arm.preStatements());
+                emitExpression(arm.body());
+                _mv.visitJumpInsn(GOTO, endLabel);
+                _mv.visitLabel(nextArm);
+                continue;
+            }
+
             // Compare: target.equals(pattern)
             _mv.visitVarInsn(ALOAD, targetSlot);
             emitExpression(arm.pattern());
@@ -1158,14 +1195,35 @@ public class Emitter {
         }
 
         // Default arm, or a neutral value only for value-producing matches.
+        // The neutral value has to have the match's own type, or the method
+        // fails verification on the path where no arm matched: pushing null
+        // where the caller reads an int is not a well-typed frame.
         if (defaultArm != null) {
             emitMatchArmPreStatements(defaultArm.preStatements());
             emitExpression(defaultArm.body());
         } else if (node.getClassType() != null) {
-            _mv.visitInsn(ACONST_NULL);
+            emitNeutralValue(node.getClassType());
         }
 
         _mv.visitLabel(endLabel);
+    }
+
+    /**
+     * Emits the value a match falls through to when no arm matched: zero for a
+     * primitive, null for a reference.
+     *
+     * @param type The match's result type.
+     */
+    private void emitNeutralValue(Class<?> type) {
+        if (type == Integer.class || type == Boolean.class) {
+            _mv.visitInsn(ICONST_0);
+        } else if (type == Long.class) {
+            _mv.visitInsn(LCONST_0);
+        } else if (type == Double.class) {
+            _mv.visitInsn(DCONST_0);
+        } else {
+            _mv.visitInsn(ACONST_NULL);
+        }
     }
 
     private void emitMatchArmPreStatements(java.util.List<BoundStatement> preStatements) {

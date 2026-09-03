@@ -168,6 +168,255 @@ class SumTypeTest {
                 """, "UnionEquality"));
     }
 
+    // --- matching ------------------------------------------------------------
+
+    @Test
+    void aVariantPatternBindsItsPayload() throws Exception {
+        String source = """
+                type Result = Ok(int) | Err(string)
+                fn show(r: Result) -> string {
+                    match r {
+                        Ok(value) => "ok:" + toString(value),
+                        Err(message) => "err:" + message,
+                    }
+                }
+                fn main() {
+                    println(show(Ok(42)))
+                    println(show(Err("gone")))
+                }
+                """;
+        assertEquals("ok:42\nerr:gone", run(source, "MatchBinding"));
+        assertEquals("ok:42\nerr:gone", interpret(source, "MatchBinding"));
+    }
+
+    @Test
+    void aPayloadLessVariantIsMatchedByName() throws Exception {
+        String source = """
+                type Option = Some(int) | None
+                fn value(o: Option) -> int {
+                    match o {
+                        Some(n) => n,
+                        None => 0,
+                    }
+                }
+                fn main() {
+                    println(toString(value(Some(7))))
+                    println(toString(value(None)))
+                }
+                """;
+        assertEquals("7\n0", run(source, "MatchNone"));
+        assertEquals("7\n0", interpret(source, "MatchNone"));
+    }
+
+    @Test
+    void aPatternMayBindSeveralSlots() throws Exception {
+        assertEquals("3:hi", run("""
+                type Both = Pair(int, string) | Empty
+                fn main() {
+                    imut p = Pair(3, "hi")
+                    println(match p {
+                        Pair(n, text) => toString(n) + ":" + text,
+                        Empty => "none",
+                    })
+                }
+                """, "MatchTwoSlots"));
+    }
+
+    @Test
+    void aPatternMayDiscardASlot() throws Exception {
+        assertEquals("hi", run("""
+                type Both = Pair(int, string) | Empty
+                fn main() {
+                    println(match Pair(3, "hi") {
+                        Pair(_, text) => text,
+                        Empty => "none",
+                    })
+                }
+                """, "MatchDiscardSlot"));
+    }
+
+    @Test
+    void aPatternMayBeQualifiedByItsType() throws Exception {
+        assertEquals("2", run("""
+                type Result = Ok(int) | Err(string)
+                fn main() {
+                    println(match Ok(2) {
+                        Result.Ok(n) => toString(n),
+                        Result.Err(m) => m,
+                    })
+                }
+                """, "MatchQualifiedPattern"));
+    }
+
+    @Test
+    void aVariantPatternWorksOnAFunctionResult() throws Exception {
+        assertEquals("len 3", run("""
+                type Result = Ok(int) | Err(string)
+                fn parse(text: string) -> Result {
+                    if len(text) == 0 { Err("empty") } else { Ok(len(text)) }
+                }
+                fn main() {
+                    println(match parse("abc") {
+                        Ok(n) => "len " + toString(n),
+                        Err(m) => m,
+                    })
+                }
+                """, "MatchOnCall"));
+    }
+
+    @Test
+    void aBoundPayloadKeepsItsStructIdentity() throws Exception {
+        assertEquals("1", run("""
+                struct Point { x: int, y: int }
+                type Hit = Found(Point) | Missing
+                fn main() {
+                    println(match Found(Point { x: 1, y: 2 }) {
+                        Found(p) => toString(p.x),
+                        Missing => "none",
+                    })
+                }
+                """, "MatchStructPayload"));
+    }
+
+    @Test
+    void aMatchArmMayHaveABlockBody() throws Exception {
+        assertEquals("44", run("""
+                type Result = Ok(int) | Err(string)
+                fn main() {
+                    println(match Ok(42) {
+                        Ok(n) => {
+                            imut doubled = n + 2
+                            toString(doubled)
+                        },
+                        Err(m) => m,
+                    })
+                }
+                """, "MatchBlockBody"));
+    }
+
+    @Test
+    void aValuePatternStillComparesByValue() throws Exception {
+        assertEquals("exactly one\nsomething else", run("""
+                type Result = Ok(int) | Err(string)
+                fn describe(r: Result) -> string {
+                    match r {
+                        Ok(1) => "exactly one",
+                        _ => "something else",
+                    }
+                }
+                fn main() {
+                    println(describe(Ok(1)))
+                    println(describe(Ok(2)))
+                }
+                """, "MatchValuePattern"));
+    }
+
+    @Test
+    void aRecursiveTypeIsWalkedByMatching() throws Exception {
+        assertEquals("6", run("""
+                type List = Cons(int, List) | Nil
+                fn sum(l: List) -> int {
+                    match l {
+                        Cons(head, tail) => head + sum(tail),
+                        Nil => 0,
+                    }
+                }
+                fn main() { println(toString(sum(Cons(1, Cons(2, Cons(3, Nil)))))) }
+                """, "MatchRecursive"));
+    }
+
+    @Test
+    void aMatchStatementNeedNotProduceAValue() throws Exception {
+        assertEquals("ok 5", run("""
+                type Result = Ok(int) | Err(string)
+                fn main() {
+                    match Ok(5) {
+                        Ok(n) => println("ok " + toString(n)),
+                        Err(m) => println("err " + m),
+                    }
+                }
+                """, "MatchStatement"));
+    }
+
+    // --- exhaustiveness ------------------------------------------------------
+
+    @Test
+    void aMatchMissingAVariantIsReported() {
+        String message = firstDiagnostic("""
+                type Result = Ok(int) | Err(string)
+                fn main() {
+                    imut r = Ok(1)
+                    println(match r {
+                        Ok(n) => toString(n),
+                    })
+                }
+                """);
+        assertTrue(message.contains("does not cover Err"),
+                "expected a non-exhaustive diagnostic, got: " + message);
+    }
+
+    @Test
+    void aMatchMissingSeveralVariantsNamesThemAll() {
+        String message = firstDiagnostic("""
+                type Colour = Red | Green | Blue
+                fn main() {
+                    imut c: Colour = Red
+                    println(match c {
+                        Red => "red",
+                    })
+                }
+                """);
+        assertTrue(message.contains("does not cover Green, Blue"),
+                "expected both missing variants, got: " + message);
+    }
+
+    @Test
+    void aDefaultArmSatisfiesExhaustiveness() throws Exception {
+        assertEquals("other", run("""
+                type Colour = Red | Green | Blue
+                fn main() {
+                    imut c: Colour = Green
+                    println(match c {
+                        Red => "red",
+                        _ => "other",
+                    })
+                }
+                """, "MatchDefaultArm"));
+    }
+
+    @Test
+    void aPatternForAnotherTypesVariantIsReported() {
+        String message = firstDiagnostic("""
+                type Result = Ok(int) | Err(string)
+                type Other = Yes(int) | No
+                fn main() {
+                    imut r = Ok(1)
+                    println(match r {
+                        Other.Yes(n) => toString(n),
+                        _ => "no",
+                    })
+                }
+                """);
+        assertTrue(message.contains("cannot match a value of type 'Result'"),
+                "expected a type-mismatch diagnostic, got: " + message);
+    }
+
+    @Test
+    void aPatternBindingTheWrongNumberOfSlotsIsReported() {
+        String message = firstDiagnostic("""
+                type Result = Ok(int) | Err(string)
+                fn main() {
+                    imut r = Ok(1)
+                    println(match r {
+                        Ok(a, b) => "two",
+                        Err(m) => m,
+                    })
+                }
+                """);
+        assertTrue(message.contains("carries 1 value"),
+                "expected a payload-count diagnostic, got: " + message);
+    }
+
     // --- rejected programs ---------------------------------------------------
 
     @Test

@@ -12,11 +12,43 @@ public class BoundMatchExpression extends BoundExpression {
     private final List<BoundMatchArm> _arms;
     private final Class<?> _type;
 
+    /**
+     * One arm of a match.
+     *
+     * <p>Exactly one selector is set: {@code pattern} for an arm that compares
+     * the matched value against an expression, {@code variant} for an arm that
+     * selects a variant of a sum type and binds its payload, and neither for
+     * the default arm.</p>
+     *
+     * @param pattern       The value to compare against, or null.
+     * @param body          The arm's result.
+     * @param isDefault     Whether this is the {@code _} arm.
+     * @param preStatements Statements a block body runs before its result.
+     * @param variant       The variant pattern, or null.
+     */
     public record BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault,
-                                    List<BoundStatement> preStatements) {
+                                    List<BoundStatement> preStatements, BoundVariantPattern variant) {
         public BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault) {
-            this(pattern, body, isDefault, List.of());
+            this(pattern, body, isDefault, List.of(), null);
         }
+
+        public BoundMatchArm(BoundExpression pattern, BoundExpression body, boolean isDefault,
+                             List<BoundStatement> preStatements) {
+            this(pattern, body, isDefault, preStatements, null);
+        }
+    }
+
+    /**
+     * A variant pattern: the variant an arm selects, and the variable each
+     * payload slot is bound to, with a null entry where the pattern discarded
+     * the slot with {@code _}.
+     *
+     * @param unionName   The sum type the variant belongs to.
+     * @param variantName The variant selected.
+     * @param bindings    The variable per payload slot, null where discarded.
+     */
+    public record BoundVariantPattern(String unionName, String variantName,
+                                      List<codeanalysis.VariableSymbol> bindings) {
     }
 
     public BoundMatchExpression(BoundExpression target, List<BoundMatchArm> arms, Class<?> type) {

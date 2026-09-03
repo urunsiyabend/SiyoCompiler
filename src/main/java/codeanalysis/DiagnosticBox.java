@@ -336,6 +336,18 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Reports a match over a sum type that does not cover every variant.
+     *
+     * @param span     The span of the match.
+     * @param typeName The sum type being matched.
+     * @param missing  The variants no arm covers.
+     */
+    public void reportNonExhaustiveMatch(TextSpan span, String typeName, java.util.List<String> missing) {
+        report(span, String.format("This match on '%s' does not cover %s%n%n  help: add an arm for each, or a _ arm",
+                typeName, String.join(", ", missing)));
+    }
+
+    /**
      * Reports a variant constructed with the wrong number of payload values.
      *
      * @param span        The span of the construction.

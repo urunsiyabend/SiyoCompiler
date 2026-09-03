@@ -676,6 +676,20 @@ public class Evaluator {
         Object target = evaluateExpression(node.getTarget());
         Object defaultResult = null;
         for (var arm : node.getArms()) {
+            // A variant pattern selects on the variant and binds its payload.
+            if (arm.variant() != null) {
+                if (!(target instanceof SiyoUnion union) || !union.is(arm.variant().variantName())) {
+                    continue;
+                }
+                var bindings = arm.variant().bindings();
+                for (int i = 0; i < bindings.size(); i++) {
+                    if (bindings.get(i) != null) assignVariable(bindings.get(i), union.get(i));
+                }
+                if (!arm.preStatements().isEmpty()) {
+                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
+                }
+                return evaluateExpression(arm.body());
+            }
             if (arm.isDefault()) {
                 if (!arm.preStatements().isEmpty()) {
                     evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
