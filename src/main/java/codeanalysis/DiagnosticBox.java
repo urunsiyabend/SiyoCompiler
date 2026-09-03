@@ -312,6 +312,46 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Reports a sum type that declares the same variant twice.
+     *
+     * @param span        The span of the second declaration.
+     * @param typeName    The sum type being declared.
+     * @param variantName The variant declared twice.
+     */
+    public void reportDuplicateVariant(TextSpan span, String typeName, String variantName) {
+        report(span, String.format("Type '%s' already declares a variant named '%s'", typeName, variantName));
+    }
+
+    /**
+     * Reports a variant that the named sum type does not declare.
+     *
+     * @param span        The span of the use.
+     * @param typeName    The sum type.
+     * @param variantName The variant that does not exist.
+     * @param known       The variants the type does declare.
+     */
+    public void reportUndefinedVariant(TextSpan span, String typeName, String variantName, java.util.List<String> known) {
+        report(span, String.format("Type '%s' has no variant '%s'%n%n  help: it declares %s",
+                typeName, variantName, String.join(", ", known)));
+    }
+
+    /**
+     * Reports a variant constructed with the wrong number of payload values.
+     *
+     * @param span        The span of the construction.
+     * @param typeName    The sum type.
+     * @param variantName The variant.
+     * @param expected    The declared payload size.
+     * @param actual      The number of values supplied.
+     */
+    public void reportWrongVariantPayloadCount(TextSpan span, String typeName, String variantName,
+                                               int expected, int actual) {
+        report(span, String.format("Variant '%s.%s' carries %d value%s, but %d %s given",
+                typeName, variantName, expected, expected == 1 ? "" : "s",
+                actual, actual == 1 ? "was" : "were"));
+    }
+
+    /**
      * Reports an undefined function diagnostic with the specified span and name.
      *
      * @param span The text span where the undefined function is called.

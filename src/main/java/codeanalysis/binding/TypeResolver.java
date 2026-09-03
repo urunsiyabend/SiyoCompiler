@@ -14,9 +14,11 @@ public class TypeResolver {
     private final Map<VariableSymbol, VariableTypeInfo> _typeInfo = new HashMap<>();
     private final Map<String, JavaClassInfo> _javaClasses = new HashMap<>();
     private final Map<String, StructSymbol> _structTypes;
+    private final Map<String, UnionSymbol> _unionTypes;
 
-    public TypeResolver(Map<String, StructSymbol> structTypes) {
+    public TypeResolver(Map<String, StructSymbol> structTypes, Map<String, UnionSymbol> unionTypes) {
         _structTypes = structTypes;
+        _unionTypes = unionTypes;
     }
 
     // --- Type tracking ---
@@ -31,6 +33,37 @@ public class TypeResolver {
 
     public void trackStructType(VariableSymbol var, StructSymbol structType) {
         _typeInfo.put(var, VariableTypeInfo.forStruct(structType));
+    }
+
+    public void trackUnionType(VariableSymbol var, UnionSymbol unionType) {
+        _typeInfo.put(var, VariableTypeInfo.forUnion(unionType));
+    }
+
+    public UnionSymbol getVarUnionType(VariableSymbol var) {
+        VariableTypeInfo info = _typeInfo.get(var);
+        return info != null ? info.getUnionType() : null;
+    }
+
+    /**
+     * Resolves the sum type of an expression, so a match over it can be checked
+     * against the variants the type declares.
+     *
+     * @param target The expression to resolve.
+     * @return The sum type, or null when the expression is not a known one.
+     */
+    public UnionSymbol resolveUnionType(BoundExpression target) {
+        if (target instanceof BoundUnionLiteralExpression unionLit) {
+            return unionLit.getUnionType();
+        }
+        if (target instanceof BoundVariableExpression varExpr) {
+            UnionSymbol type = getVarUnionType(varExpr.getVariable());
+            if (type != null) return type;
+        }
+        if (target instanceof BoundCallExpression callExpr) {
+            String unionName = callExpr.getFunction().getReturnUnionName();
+            if (unionName != null) return _unionTypes.get(unionName);
+        }
+        return null;
     }
 
     public void trackJavaClassType(VariableSymbol var, JavaClassInfo classInfo) {
@@ -317,7 +350,9 @@ public class TypeResolver {
             case "map" -> SiyoMap.class;
             case "set" -> SiyoSet.class;
             case "object", "any" -> Object.class;
-            default -> _structTypes.containsKey(name) ? SiyoStruct.class : null;
+            default -> _structTypes.containsKey(name) ? SiyoStruct.class
+                    : _unionTypes.containsKey(name) ? SiyoUnion.class
+                    : null;
         };
         if (builtin != null) return builtin;
         // Imported Java classes are represented as Object in Siyo function ABI,
@@ -337,5 +372,10 @@ public class TypeResolver {
 
     public Map<String, JavaClassInfo> getJavaClasses() {
         return _javaClasses;
+    }
+
+    /** The sum types in scope, keyed by name. */
+    public Map<String, UnionSymbol> getUnionTypes() {
+        return _unionTypes;
     }
 }

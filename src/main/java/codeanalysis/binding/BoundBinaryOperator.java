@@ -176,7 +176,11 @@ public class BoundBinaryOperator {
         // for every type. Without this a `map` could not be compared to null
         // even though null is documented to work with any type.
         if (syntaxType == SyntaxType.EqualsEqualsToken || syntaxType == SyntaxType.BangEqualsToken) {
-            if (leftType == Object.class || rightType == Object.class) {
+            // A sum type value compares by variant and payload, so equality is
+            // defined for it the same way it is for an erased operand.
+            boolean erased = leftType == Object.class || rightType == Object.class;
+            boolean sumType = leftType == codeanalysis.SiyoUnion.class || rightType == codeanalysis.SiyoUnion.class;
+            if (erased || sumType) {
                 for (var op : _operators) {
                     if (op.getSyntaxType() == syntaxType
                             && op.getLeftType() == Object.class

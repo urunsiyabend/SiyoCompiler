@@ -191,6 +191,7 @@ public class Evaluator {
         return switch (node.getType()) {
             case LiteralExpression -> evaluateLiteralExpression((BoundLiteralExpression) node);
             case StructLiteralExpression -> evaluateStructLiteralExpression((BoundStructLiteralExpression) node);
+            case UnionLiteralExpression -> evaluateUnionLiteralExpression((codeanalysis.binding.BoundUnionLiteralExpression) node);
             case VariableExpression -> evaluateVariableExpression((BoundVariableExpression) node);
             case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
@@ -897,6 +898,21 @@ public class Evaluator {
             fields.put(entry.getKey(), evaluateExpression(entry.getValue()));
         }
         return new SiyoStruct(node.getStructType(), fields);
+    }
+
+    /**
+     * Evaluates the construction of a sum type value.
+     *
+     * @param node The bound construction.
+     * @return The union value.
+     * @throws Exception If evaluating a payload expression fails.
+     */
+    private Object evaluateUnionLiteralExpression(codeanalysis.binding.BoundUnionLiteralExpression node) throws Exception {
+        Object[] payload = new Object[node.getArguments().size()];
+        for (int i = 0; i < payload.length; i++) {
+            payload[i] = evaluateExpression(node.getArguments().get(i));
+        }
+        return SiyoUnion.of(node.getUnionType().getName(), node.getVariantName(), payload);
     }
 
     private Object evaluateMapLiteralExpression(codeanalysis.binding.BoundMapLiteralExpression node) throws Exception {

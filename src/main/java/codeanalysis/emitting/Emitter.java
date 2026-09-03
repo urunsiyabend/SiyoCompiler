@@ -604,6 +604,7 @@ public class Emitter {
             case IndexExpression -> emitIndexExpression((BoundIndexExpression) node);
             case IndexAssignmentExpression -> emitIndexAssignmentExpression((BoundIndexAssignmentExpression) node);
             case StructLiteralExpression -> emitStructLiteralExpression((BoundStructLiteralExpression) node);
+            case UnionLiteralExpression -> emitUnionLiteralExpression((codeanalysis.binding.BoundUnionLiteralExpression) node);
             case MemberAccessExpression -> emitMemberAccessExpression((BoundMemberAccessExpression) node);
             case MemberAssignmentExpression -> emitMemberAssignmentExpression((BoundMemberAssignmentExpression) node);
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
@@ -878,8 +879,10 @@ public class Emitter {
         Class<?> leftType = node.getLeft().getClassType();
         Class<?> rightType = node.getRight().getClassType();
 
-        // Equality against an erased operand compares the boxed values.
-        if (leftType == Object.class || rightType == Object.class) {
+        // Equality against an erased operand — or between sum type values —
+        // compares the boxed values.
+        if (leftType == Object.class || rightType == Object.class
+                || leftType == codeanalysis.SiyoUnion.class || rightType == codeanalysis.SiyoUnion.class) {
             var operator = node.getOperator().getType();
             if (operator == BoundBinaryOperatorType.Equals
                     || operator == BoundBinaryOperatorType.NotEquals) {
@@ -1904,6 +1907,32 @@ public class Emitter {
         // Map remains on stack
     }
 
+    /**
+     * Emits the construction of a sum type value as a call to
+     * {@code SiyoUnion.of(type, variant, payload)}, which is the same entry
+     * point the interpreter uses, so both backends build the same value.
+     *
+     * @param node The bound construction.
+     */
+    private void emitUnionLiteralExpression(codeanalysis.binding.BoundUnionLiteralExpression node) {
+        _mv.visitLdcInsn(node.getUnionType().getName());
+        _mv.visitLdcInsn(node.getVariantName());
+
+        java.util.List<codeanalysis.binding.BoundExpression> payload = node.getArguments();
+        emitIntConstant(payload.size());
+        _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+        for (int i = 0; i < payload.size(); i++) {
+            _mv.visitInsn(DUP);
+            emitIntConstant(i);
+            emitExpression(payload.get(i));
+            emitBoxIfNeeded(payload.get(i).getClassType());
+            _mv.visitInsn(AASTORE);
+        }
+
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoUnion", "of",
+                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Lcodeanalysis/SiyoUnion;", false);
+    }
+
     private void emitMemberAccessExpression(BoundMemberAccessExpression node) {
         // map.get("fieldName") -> unbox
         emitExpression(node.getTarget());
@@ -2566,6 +2595,7 @@ public class Emitter {
             else if (expectedType == SiyoSet.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoSet");
             else if (expectedType == SiyoChannel.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoChannel");
             else if (expectedType == SiyoStruct.class) _mv.visitTypeInsn(CHECKCAST, "java/util/LinkedHashMap");
+            else if (expectedType == codeanalysis.SiyoUnion.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoUnion");
             else if (expectedType == SiyoClosure.class) _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
         }
     }
@@ -2606,6 +2636,7 @@ public class Emitter {
         if (type == String.class) return "Ljava/lang/String;";
         if (type == SiyoArray.class) return "Ljava/util/List;";
         if (type == SiyoStruct.class) return "Ljava/util/Map;";
+        if (type == codeanalysis.SiyoUnion.class) return "Lcodeanalysis/SiyoUnion;";
         if (type == SiyoMap.class) return "Lcodeanalysis/SiyoMap;";
         if (type == SiyoSet.class) return "Lcodeanalysis/SiyoSet;";
         if (type == SiyoChannel.class) return "Lcodeanalysis/SiyoChannel;";

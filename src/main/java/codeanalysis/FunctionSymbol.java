@@ -16,6 +16,7 @@ public class FunctionSymbol {
     private final Class<?> _returnType;
     private final String _moduleName;
     private String _returnStructName; // if return type is SiyoStruct, which struct
+    private String _returnUnionName; // if return type is SiyoUnion, which sum type
     private Class<?> _returnElementType; // if return type is SiyoArray
     private String _returnElementStructName; // if returning Struct[]
     private String _jvmMethodName; // declaring module's emitted method name, when imported
@@ -35,6 +36,8 @@ public class FunctionSymbol {
     public String getModuleName() { return _moduleName; }
     public String getReturnStructName() { return _returnStructName; }
     public void setReturnStructName(String name) { _returnStructName = name; }
+    public String getReturnUnionName() { return _returnUnionName; }
+    public void setReturnUnionName(String name) { _returnUnionName = name; }
     public Class<?> getReturnElementType() { return _returnElementType; }
     public void setReturnElementType(Class<?> type) { _returnElementType = type; }
     public String getReturnElementStructName() { return _returnElementStructName; }

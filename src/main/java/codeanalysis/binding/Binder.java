@@ -42,6 +42,7 @@ public class Binder {
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
     private final Map<String, StructSymbol> _structTypes = new HashMap<>();
+    private final Map<String, codeanalysis.UnionSymbol> _unionTypes = new java.util.LinkedHashMap<>();
 
     private final TypeResolver _typeResolver;
     private final ModuleHandler _moduleHandler;
@@ -61,8 +62,8 @@ public class Binder {
      */
     public Binder(BoundScope parent) {
         _scope = new BoundScope(parent);
-        _typeResolver = new TypeResolver(_structTypes);
-        _moduleHandler = new ModuleHandler(_structTypes, _typeResolver, _functionBodies);
+        _typeResolver = new TypeResolver(_structTypes, _unionTypes);
+        _moduleHandler = new ModuleHandler(_structTypes, _unionTypes, _typeResolver, _functionBodies);
         _moduleHandler.setDiagnostics(_diagnostics);
         _moduleHandler.setScope(_scope);
 
@@ -160,6 +161,7 @@ public class Binder {
             case ContinueStatement -> bindContinueStatement((ContinueStatementSyntax)syntax);
             case StructDeclaration -> _moduleHandler.bindStructDeclaration((StructDeclarationSyntax)syntax);
             case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
+            case TypeDeclaration -> _moduleHandler.bindTypeDeclaration((TypeDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
             case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
             case ActorDeclaration -> bindActorDeclaration((ActorDeclarationSyntax)syntax);
@@ -196,6 +198,8 @@ public class Binder {
                 _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
                 _moduleHandler.registerEnumDeclaration(enumSyntax);
+            } else if (statementSyntax instanceof TypeDeclarationSyntax typeSyntax) {
+                _moduleHandler.registerTypeDeclaration(typeSyntax);
             } else if (statementSyntax instanceof ActorDeclarationSyntax actorSyntax) {
                 // Actor = struct with isActor flag
                 String name = actorSyntax.getIdentifier().getData();
@@ -238,6 +242,7 @@ public class Binder {
             case FunctionDeclaration,
                  StructDeclaration,
                  EnumDeclaration,
+                 TypeDeclaration,
                  ActorDeclaration,
                  ImplDeclaration,
                  ImportStatement,
@@ -329,6 +334,14 @@ public class Binder {
             else _typeResolver.trackArrayType(variableSymbol, elemType);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
+        } else if (initializer.getClassType() == codeanalysis.SiyoUnion.class) {
+            // Track which sum type the value belongs to, so a match over the
+            // variable can be checked against the variants it declares.
+            codeanalysis.UnionSymbol union = _typeResolver.resolveUnionType(initializer);
+            if (union == null && annotation != null) {
+                union = _typeResolver.getUnionTypes().get(annotation.getData());
+            }
+            if (union != null) _typeResolver.trackUnionType(variableSymbol, union);
         } else if (initializer instanceof BoundJavaMethodCallExpression javaArrCall && javaArrCall.getClassType() == SiyoArray.class) {
             // Java methods returning arrays (e.g. File.listFiles()) → track as SiyoArray
             _typeResolver.trackArrayType(variableSymbol, Object.class);
@@ -925,11 +938,68 @@ public class Binder {
                     return createFunctionReference(func);
                 }
             }
+            // A payload-less variant is a value on its own: None, not None().
+            codeanalysis.UnionSymbol union = _moduleHandler.findUnionByVariant(name);
+            if (union != null) {
+                return bindUnionConstruction(union, name, List.of(),
+                        syntax.getIdentifierToken().getSpan(), List.of());
+            }
             _diagnostics.reportUndefinedName(syntax.getIdentifierToken().getSpan(), name);
             return new BoundLiteralExpression(0);
         }
         var variable  = _scope.lookupVariable(name);
         return new BoundVariableExpression(variable);
+    }
+
+    /**
+     * Binds the construction of a sum type value, checking the variant exists
+     * and that its payload is the shape the declaration gave it.
+     *
+     * @param union        The sum type being constructed.
+     * @param variantName  The variant written at the call site.
+     * @param payload      The bound payload expressions.
+     * @param span         The span to report a shape error against.
+     * @param payloadSpans The span of each payload expression, for type errors.
+     * @return The bound construction, or a placeholder when it was rejected.
+     */
+    private BoundExpression bindUnionConstruction(codeanalysis.UnionSymbol union, String variantName,
+                                                  List<BoundExpression> payload,
+                                                  codeanalysis.text.TextSpan span,
+                                                  List<codeanalysis.text.TextSpan> payloadSpans) {
+        codeanalysis.UnionSymbol.Variant variant = union.getVariant(variantName);
+        if (variant == null) {
+            _diagnostics.reportUndefinedVariant(span, union.getName(), variantName, union.getVariantNames());
+            return new BoundLiteralExpression(0);
+        }
+        if (payload.size() != variant.size()) {
+            _diagnostics.reportWrongVariantPayloadCount(span, union.getName(), variantName,
+                    variant.size(), payload.size());
+            return new BoundLiteralExpression(0);
+        }
+        for (int i = 0; i < payload.size(); i++) {
+            Class<?> declared = variant.getPayloadTypes().get(i);
+            Class<?> actual = payload.get(i).getClassType();
+            if (declared != Object.class && actual != Object.class && declared != actual) {
+                codeanalysis.text.TextSpan valueSpan = i < payloadSpans.size() ? payloadSpans.get(i) : span;
+                _diagnostics.reportCannotConvert(valueSpan, actual, declared);
+            }
+        }
+        return new BoundUnionLiteralExpression(union, variantName, payload);
+    }
+
+    /**
+     * Collects the span of each argument, so a payload type error points at the
+     * value that was wrong rather than the whole construction.
+     *
+     * @param arguments The argument syntax list.
+     * @return The spans, in order.
+     */
+    private List<codeanalysis.text.TextSpan> argumentSpans(SeparatedSyntaxList<ExpressionSyntax> arguments) {
+        List<codeanalysis.text.TextSpan> spans = new ArrayList<>();
+        for (int i = 0; i < arguments.getCount(); i++) {
+            spans.add(arguments.get(i).getSpan());
+        }
+        return spans;
     }
 
     private BoundExpression createFunctionReference(FunctionSymbol func) {
@@ -1131,6 +1201,19 @@ public class Binder {
      */
     private BoundExpression bindCallExpression(CallExpressionSyntax syntax) {
         String name = syntax.getIdentifier().getData();
+
+        // A variant of a sum type is constructed by writing it: Ok(5).
+        if (!_scope.tryLookupFunction(name) && !_scope.tryLookup(name)) {
+            codeanalysis.UnionSymbol union = _moduleHandler.findUnionByVariant(name);
+            if (union != null) {
+                List<BoundExpression> payload = new ArrayList<>();
+                for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                    payload.add(bindExpression(argSyntax));
+                }
+                return bindUnionConstruction(union, name, payload, syntax.getSpan(),
+                        argumentSpans(syntax.getArguments()));
+            }
+        }
 
         // Calling a value: f(args). A closure held in a variable is callable
         // whether its static type says `fn` or was erased to `object` — the
@@ -1366,6 +1449,14 @@ public class Binder {
         // Check for enum access: EnumName.MemberName
         if (syntax.getTarget() instanceof NameExpressionSyntax nameExpr) {
             String typeName = nameExpr.getIdentifierToken().getData();
+
+            // A payload-less variant, qualified by its type: Option.None
+            codeanalysis.UnionSymbol union = _moduleHandler.getUnionTypes().get(typeName);
+            if (union != null) {
+                return bindUnionConstruction(union, syntax.getMember().getData(), List.of(),
+                        syntax.getMember().getSpan(), List.of());
+            }
+
             Map<String, Integer> enumMembers = _moduleHandler.getEnumTypes().get(typeName);
             if (enumMembers != null) {
                 String memberName = syntax.getMember().getData();
@@ -1903,6 +1994,21 @@ public class Binder {
 
     private BoundExpression bindMemberCallExpression(MemberCallExpressionSyntax syntax) {
         MemberAccessExpressionSyntax memberAccess = syntax.getMemberAccess();
+
+        // A variant may be written qualified by its type: Result.Ok(5). This is
+        // what disambiguates a variant name that two sum types both declare.
+        if (memberAccess.getTarget() instanceof NameExpressionSyntax typeNameExpr) {
+            codeanalysis.UnionSymbol union = _moduleHandler.getUnionTypes()
+                    .get(typeNameExpr.getIdentifierToken().getData());
+            if (union != null) {
+                List<BoundExpression> payload = new ArrayList<>();
+                for (ExpressionSyntax argSyntax : syntax.getArguments()) {
+                    payload.add(bindExpression(argSyntax));
+                }
+                return bindUnionConstruction(union, memberAccess.getMember().getData(), payload,
+                        syntax.getSpan(), argumentSpans(syntax.getArguments()));
+            }
+        }
 
         // Check if target is a module name
         if (memberAccess.getTarget() instanceof NameExpressionSyntax nameExpr) {

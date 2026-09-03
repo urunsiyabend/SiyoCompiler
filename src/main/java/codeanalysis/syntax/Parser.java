@@ -170,6 +170,9 @@ public class Parser {
             case ImplKeyword -> parseImplDeclaration();
             case ActorKeyword -> parseActorDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
+            case TypeKeyword -> isTypeDeclarationAhead()
+                    ? parseTypeDeclaration()
+                    : parseExpressionStatement();
             case TryKeyword -> parseTryCatchStatement();
             case SendKeyword -> parseSendStatement();
             case ImportKeyword -> parseImportStatement();
@@ -224,7 +227,7 @@ public class Parser {
     private VariableDeclarationSyntax parseVariableDeclaration() {
         SyntaxType expectedKeyword = current().getType() == SyntaxType.ImmutableKeyword ? SyntaxType.ImmutableKeyword : SyntaxType.MutableKeyword;
         SyntaxToken keyword = match(expectedKeyword);
-        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken identifier = matchName();
         SyntaxToken typeAnnotation = null;
         if (current().getType() == SyntaxType.ColonToken) {
             nextToken(); // consume ':'
@@ -405,7 +408,30 @@ public class Parser {
      * @return true when it may be read as a name.
      */
     private boolean isContextualKeywordName(SyntaxType type) {
-        return type == SyntaxType.SendKeyword;
+        return type == SyntaxType.SendKeyword || type == SyntaxType.TypeKeyword;
+    }
+
+    /**
+     * Whether a token may begin a name — an identifier, or a keyword that is
+     * only a keyword in one position.
+     *
+     * @param type The token type.
+     * @return true when a name starts here.
+     */
+    private boolean isNameStart(SyntaxType type) {
+        return type == SyntaxType.IdentifierToken || isContextualKeywordName(type);
+    }
+
+    /**
+     * Reads a name, accepting a contextual keyword in name position.
+     *
+     * @return The name token, always an identifier token.
+     */
+    private SyntaxToken matchName() {
+        if (isContextualKeywordName(current().getType())) {
+            return asIdentifier(nextToken());
+        }
+        return match(SyntaxType.IdentifierToken);
     }
 
     private SyntaxToken asIdentifier(SyntaxToken token) {
@@ -507,6 +533,98 @@ public class Parser {
             identifier = new SyntaxToken(SyntaxType.IdentifierToken, identifier.getPosition(), identifier.getData() + "[]", identifier.getValue());
         }
         return new TypeClauseSyntax(arrowToken, identifier);
+    }
+
+    /**
+     * Whether a {@code type} token at statement position begins a sum type
+     * declaration rather than a use of {@code type} as a name.
+     *
+     * <p>{@code type} is a contextual keyword: {@code type Result = Ok(int)}
+     * declares a type, while {@code type = "GET"} assigns to a variable named
+     * {@code type}. Only the first shape is a declaration.</p>
+     *
+     * @return true when a declaration starts here.
+     */
+    private boolean isTypeDeclarationAhead() {
+        return peek(1).getType() == SyntaxType.IdentifierToken
+                && peek(2).getType() == SyntaxType.EqualsToken;
+    }
+
+    /**
+     * Parses a sum type declaration:
+     * {@code type Result = Ok(int) | Err(string)}.
+     *
+     * @return The parsed declaration.
+     */
+    private StatementSyntax parseTypeDeclaration() {
+        SyntaxToken typeKeyword = match(SyntaxType.TypeKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken equals = match(SyntaxType.EqualsToken);
+
+        List<UnionVariantSyntax> variants = new ArrayList<>();
+        while (true) {
+            SyntaxToken startToken = current();
+            variants.add(parseUnionVariant());
+            if (current().getType() != SyntaxType.PipeToken) break;
+            nextToken(); // consume '|'
+            if (current() == startToken) {
+                nextToken(); // malformed input: keep making progress
+                break;
+            }
+        }
+
+        return new TypeDeclarationSyntax(typeKeyword, identifier, equals, variants);
+    }
+
+    /**
+     * Parses one alternative of a sum type: a name and an optional
+     * parenthesised payload.
+     *
+     * @return The parsed variant.
+     */
+    private UnionVariantSyntax parseUnionVariant() {
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        List<SyntaxToken> payloadTypes = new ArrayList<>();
+        if (current().getType() == SyntaxType.OpenParenthesisToken) {
+            nextToken(); // consume '('
+            while (current().getType() != SyntaxType.CloseParenthesisToken
+                    && current().getType() != SyntaxType.EOFToken) {
+                SyntaxToken startToken = current();
+                payloadTypes.add(parseTypeName());
+                if (current().getType() == SyntaxType.CommaToken) {
+                    nextToken();
+                }
+                if (current() == startToken) {
+                    nextToken(); // malformed input: keep making progress
+                }
+            }
+            match(SyntaxType.CloseParenthesisToken);
+        }
+        return new UnionVariantSyntax(identifier, payloadTypes);
+    }
+
+    /**
+     * Parses a type name in a payload or annotation position, including the
+     * array suffix and the bare {@code fn} type.
+     *
+     * @return The type name, as a single identifier token.
+     */
+    private SyntaxToken parseTypeName() {
+        SyntaxToken typeToken;
+        if (current().getType() == SyntaxType.FnKeyword) {
+            SyntaxToken fnToken = nextToken();
+            typeToken = new SyntaxToken(SyntaxType.IdentifierToken, fnToken.getPosition(), "fn", null);
+        } else {
+            typeToken = match(SyntaxType.IdentifierToken);
+        }
+        if (current().getType() == SyntaxType.OpenBracketToken
+                && peek(1).getType() == SyntaxType.CloseBracketToken) {
+            nextToken(); // consume '['
+            nextToken(); // consume ']'
+            typeToken = new SyntaxToken(SyntaxType.IdentifierToken, typeToken.getPosition(),
+                    typeToken.getData() + "[]", typeToken.getValue());
+        }
+        return typeToken;
     }
 
     /**
@@ -804,16 +922,16 @@ public class Parser {
      * @return The parsed expression syntax.
      */
     public ExpressionSyntax parseAssignmentExpression() {
-        if (peek(0).getType() == SyntaxType.IdentifierToken && peek(1).getType() == SyntaxType.EqualsToken) {
-            SyntaxToken identifierToken = nextToken();
+        if (isNameStart(peek(0).getType()) && peek(1).getType() == SyntaxType.EqualsToken) {
+            SyntaxToken identifierToken = asIdentifier(nextToken());
             SyntaxToken operatorToken = nextToken();
             ExpressionSyntax right = parseAssignmentExpression();
             return new AssignmentExpressionSyntax(identifierToken, operatorToken, right);
         }
 
         // Compound assignment: x += 5 desugars to x = x + 5
-        if (peek(0).getType() == SyntaxType.IdentifierToken && isCompoundAssignment(peek(1).getType())) {
-            SyntaxToken identifierToken = nextToken();
+        if (isNameStart(peek(0).getType()) && isCompoundAssignment(peek(1).getType())) {
+            SyntaxToken identifierToken = asIdentifier(nextToken());
             SyntaxToken compoundOp = nextToken();
             ExpressionSyntax right = parseAssignmentExpression();
 
@@ -944,12 +1062,12 @@ public class Parser {
                 SyntaxToken selfId = new SyntaxToken(SyntaxType.IdentifierToken, selfToken.getPosition(), "self", null);
                 yield new NameExpressionSyntax(selfId);
             }
-            case IdentifierToken -> {
+            case IdentifierToken, TypeKeyword -> {
                 if (peek(1).getType() == SyntaxType.OpenParenthesisToken) {
                     yield parseCallExpression();
                 }
                 if (peek(1).getType() == SyntaxType.OpenBraceToken &&
-                    peek(2).getType() == SyntaxType.IdentifierToken &&
+                    isNameStart(peek(2).getType()) &&
                     peek(3).getType() == SyntaxType.ColonToken) {
                     yield parseStructLiteral();
                 }
@@ -970,7 +1088,7 @@ public class Parser {
                 // Allow keywords as member names (new, send, etc.) for Java interop
                 SyntaxToken member;
                 if (current().getType() == SyntaxType.NewKeyword
-                        || current().getType() == SyntaxType.SendKeyword) {
+                        || isContextualKeywordName(current().getType())) {
                     SyntaxToken kwToken = nextToken();
                     member = new SyntaxToken(SyntaxType.IdentifierToken, kwToken.getPosition(), kwToken.getData(), null);
                 } else {
@@ -1052,7 +1170,7 @@ public class Parser {
         while (current().getType() != SyntaxType.CloseBraceToken &&
                current().getType() != SyntaxType.EOFToken) {
             SyntaxToken startToken = current();
-            SyntaxToken fieldName = match(SyntaxType.IdentifierToken);
+            SyntaxToken fieldName = matchName();
             SyntaxToken colon = match(SyntaxType.ColonToken);
             ExpressionSyntax value = parseExpression();
             fieldAssignments.add(new FieldAssignmentSyntax(fieldName, colon, value));
@@ -1239,7 +1357,7 @@ public class Parser {
      * @return The parsed expression syntax.
      */
     private ExpressionSyntax parseNameExpression() {
-        SyntaxToken identifierToken = match(SyntaxType.IdentifierToken);
+        SyntaxToken identifierToken = matchName();
         return new NameExpressionSyntax(identifierToken);
     }
 
@@ -1250,7 +1368,7 @@ public class Parser {
      * @return The parsed call expression syntax.
      */
     private ExpressionSyntax parseCallExpression() {
-        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken identifier = matchName();
         SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
         SeparatedSyntaxList<ExpressionSyntax> arguments = parseArguments();
         SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);

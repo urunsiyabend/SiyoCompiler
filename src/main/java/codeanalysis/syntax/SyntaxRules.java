@@ -49,6 +49,7 @@ public class SyntaxRules {
             case "null" -> SyntaxType.NullKeyword;
             case "match" -> SyntaxType.MatchKeyword;
             case "send" -> SyntaxType.SendKeyword;
+            case "type" -> SyntaxType.TypeKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -119,6 +120,7 @@ public class SyntaxRules {
             case NullKeyword -> "null";
             case MatchKeyword -> "match";
             case SendKeyword -> "send";
+            case TypeKeyword -> "type";
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";

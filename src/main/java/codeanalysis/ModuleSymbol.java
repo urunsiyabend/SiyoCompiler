@@ -20,6 +20,7 @@ public class ModuleSymbol {
     private Map<String, VariableSymbol> _variables = new java.util.LinkedHashMap<>();
     private java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
     private Map<FunctionSymbol, BoundBlockStatement> _inheritedMethods = new java.util.LinkedHashMap<>();
+    private Map<String, UnionSymbol> _unions = new java.util.LinkedHashMap<>();
 
     public ModuleSymbol(String name, String className, String filePath,
                         List<FunctionSymbol> functions,
@@ -61,6 +62,13 @@ public class ModuleSymbol {
     public Map<FunctionSymbol, BoundBlockStatement> getFunctionBodies() { return _functionBodies; }
     public Map<String, StructSymbol> getStructs() { return _structs; }
     public Map<String, Map<String, Integer>> getEnums() { return _enums; }
+
+    /** The sum types this module declares, keyed by name. */
+    public Map<String, UnionSymbol> getUnions() { return _unions; }
+
+    public void setUnions(Map<String, UnionSymbol> unions) {
+        _unions = unions;
+    }
     public BoundBlockStatement getTopLevelBlock() { return _topLevelBlock; }
 
     /**

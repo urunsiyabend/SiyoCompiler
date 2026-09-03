@@ -36,6 +36,7 @@ public enum BoundNodeType {
     IndexAssignmentExpression,
     MemberAssignmentExpression,
     StructLiteralExpression,
+    UnionLiteralExpression,
     EnumDeclaration,
     TryCatchStatement,
     JavaMethodCallExpression,

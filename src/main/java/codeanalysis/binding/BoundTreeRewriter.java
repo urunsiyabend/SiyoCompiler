@@ -241,6 +241,7 @@ public abstract class BoundTreeRewriter {
             case IndexExpression -> node;
             case MemberAccessExpression -> node;
             case StructLiteralExpression -> node;
+            case UnionLiteralExpression -> node;
             case IndexAssignmentExpression -> node;
             case JavaMethodCallExpression -> node;
             case JavaStaticFieldExpression -> node;

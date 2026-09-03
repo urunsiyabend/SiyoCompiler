@@ -3,6 +3,7 @@ package codeanalysis.binding;
 import codeanalysis.JavaClassInfo;
 import codeanalysis.JavaResolvedType;
 import codeanalysis.StructSymbol;
+import codeanalysis.UnionSymbol;
 
 /**
  * Tracks additional type metadata for variables beyond their Class<?> type.
@@ -10,6 +11,7 @@ import codeanalysis.StructSymbol;
  */
 public class VariableTypeInfo {
     private final Class<?> _arrayElementType;
+    private UnionSymbol _unionType;
     private final StructSymbol _structType;
     private final StructSymbol _arrayElementStructType;
     private final JavaClassInfo _javaClassType;
@@ -47,6 +49,18 @@ public class VariableTypeInfo {
         return new VariableTypeInfo(null, structType, null, null);
     }
 
+    /**
+     * Tracks a variable holding a value of a sum type.
+     *
+     * @param unionType The sum type.
+     * @return The type information.
+     */
+    public static VariableTypeInfo forUnion(UnionSymbol unionType) {
+        VariableTypeInfo info = new VariableTypeInfo(null, null, null, null);
+        info._unionType = unionType;
+        return info;
+    }
+
     public static VariableTypeInfo forJavaClass(JavaClassInfo javaClassInfo) {
         return new VariableTypeInfo(null, null, null, javaClassInfo);
     }
@@ -56,4 +70,5 @@ public class VariableTypeInfo {
     public StructSymbol getArrayElementStructType() { return _arrayElementStructType; }
     public JavaClassInfo getJavaClassType() { return _javaClassType; }
     public JavaResolvedType getJavaResolvedType() { return _javaResolvedType; }
+    public UnionSymbol getUnionType() { return _unionType; }
 }

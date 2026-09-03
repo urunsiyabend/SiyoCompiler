@@ -298,6 +298,15 @@ public enum SyntaxType {
     /* Represents an enum declaration. */
     EnumDeclaration,
 
+    /* Represents a sum type declaration: type Result = Ok(int) | Err(string). */
+    TypeDeclaration,
+
+    /* Represents one alternative of a sum type declaration. */
+    UnionVariant,
+
+    /* Represents the contextual 'type' keyword. */
+    TypeKeyword,
+
     /* Represents a double dot (..) token for ranges. */
     DoubleDotToken,
 

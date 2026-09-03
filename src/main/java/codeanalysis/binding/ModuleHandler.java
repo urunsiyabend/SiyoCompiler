@@ -25,6 +25,7 @@ public class ModuleHandler {
     private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
     private final java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
+    private final Map<String, codeanalysis.UnionSymbol> _unionTypes;
     private ModuleRegistry _registry;
     private String _filePath;
     private String _currentModuleName; // set when compiling a module (e.g., "db")
@@ -37,9 +38,12 @@ public class ModuleHandler {
     private BoundScope _scope;
     private final Map<FunctionSymbol, BoundBlockStatement> _functionBodies;
 
-    public ModuleHandler(Map<String, StructSymbol> structTypes, TypeResolver typeResolver,
+    public ModuleHandler(Map<String, StructSymbol> structTypes,
+                         Map<String, codeanalysis.UnionSymbol> unionTypes,
+                         TypeResolver typeResolver,
                          Map<FunctionSymbol, BoundBlockStatement> functionBodies) {
         _structTypes = structTypes;
+        _unionTypes = unionTypes;
         _typeResolver = typeResolver;
         _functionBodies = functionBodies;
     }
@@ -76,6 +80,10 @@ public class ModuleHandler {
 
     public String getFilePath() {
         return _filePath;
+    }
+
+    public Map<String, codeanalysis.UnionSymbol> getUnionTypes() {
+        return _unionTypes;
     }
 
     public Map<String, Map<String, Integer>> getEnumTypes() {
@@ -161,6 +169,7 @@ public class ModuleHandler {
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
             importedFunc.setReturnStructName(func.getReturnStructName());
+            importedFunc.setReturnUnionName(func.getReturnUnionName());
             importedFunc.setReturnElementType(func.getReturnElementType());
             importedFunc.setReturnElementStructName(func.getReturnElementStructName());
             importedFunc.setJvmMethodName(func.getName().replace('.', '$'));
@@ -184,6 +193,7 @@ public class ModuleHandler {
             FunctionSymbol inherited = new FunctionSymbol(source.getName(), source.getParameters(),
                     source.getReturnType(), source.getModuleName());
             inherited.setReturnStructName(source.getReturnStructName());
+            inherited.setReturnUnionName(source.getReturnUnionName());
             inherited.setReturnElementType(source.getReturnElementType());
             inherited.setReturnElementStructName(source.getReturnElementStructName());
             inherited.setJvmMethodName(source.getJvmMethodName());
@@ -214,6 +224,12 @@ public class ModuleHandler {
             _enumTypes.putIfAbsent(entry.getKey(), new HashMap<>(entry.getValue()));
         }
 
+        // Register imported sum types, so both their name and their variants
+        // remain usable across a module boundary.
+        for (var entry : module.getUnions().entrySet()) {
+            _unionTypes.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+
         // Register imported impl methods (Struct.method)
         for (FunctionSymbol func : module.getFunctions()) {
             if (func.getName().contains(".") && !func.getName().startsWith(moduleName + ".")) {
@@ -221,6 +237,7 @@ public class ModuleHandler {
                 FunctionSymbol importedImpl = new FunctionSymbol(
                         func.getName(), func.getParameters(), func.getReturnType(), className);
                 importedImpl.setReturnStructName(func.getReturnStructName());
+                importedImpl.setReturnUnionName(func.getReturnUnionName());
                 importedImpl.setReturnElementType(func.getReturnElementType());
                 importedImpl.setReturnElementStructName(func.getReturnElementStructName());
                 importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
@@ -452,6 +469,7 @@ public class ModuleHandler {
             }
             ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath,
                     functions, bodies, structs, enums, topLevelBlock);
+            module.setUnions(new java.util.LinkedHashMap<>(moduleBinder.getModuleHandler().getUnionTypes()));
             module.setVariables(collectTopLevelVariables(topLevelBlock, className));
             module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
             module.setImportedClassNames(
@@ -526,6 +544,9 @@ public class ModuleHandler {
 
         FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
         function.setOriginModule(_filePath);
+        if (returnType == codeanalysis.SiyoUnion.class && syntax.getTypeClause() != null) {
+            function.setReturnUnionName(syntax.getTypeClause().getIdentifier().getData());
+        }
         if (returnType == SiyoStruct.class && syntax.getTypeClause() != null) {
             function.setReturnStructName(syntax.getTypeClause().getIdentifier().getData());
         }
@@ -588,6 +609,9 @@ public class ModuleHandler {
 
             FunctionSymbol func = new FunctionSymbol(qualifiedName, parameters, returnType);
             func.setOriginModule(_filePath);
+            if (returnType == codeanalysis.SiyoUnion.class && method.getTypeClause() != null) {
+                func.setReturnUnionName(method.getTypeClause().getIdentifier().getData());
+            }
             if (returnType == SiyoStruct.class && method.getTypeClause() != null) {
                 func.setReturnStructName(method.getTypeClause().getIdentifier().getData());
             }
@@ -637,5 +661,73 @@ public class ModuleHandler {
             registerStructDeclaration(syntax);
         }
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * Registers a sum type declaration, so its name is a usable type and its
+     * variants are usable constructors in the rest of the file.
+     *
+     * @param syntax The declaration to register.
+     */
+    public void registerTypeDeclaration(TypeDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        if (_unionTypes.containsKey(name)) return;
+
+        java.util.LinkedHashMap<String, codeanalysis.UnionSymbol.Variant> variants = new java.util.LinkedHashMap<>();
+        for (UnionVariantSyntax variantSyntax : syntax.getVariants()) {
+            String variantName = variantSyntax.getIdentifier().getData();
+            List<Class<?>> payloadTypes = new ArrayList<>();
+            List<String> payloadTypeNames = new ArrayList<>();
+            for (SyntaxToken payloadType : variantSyntax.getPayloadTypes()) {
+                String typeName = payloadType.getData();
+                Class<?> resolved = typeName.equals(name) ? codeanalysis.SiyoUnion.class : _typeResolver.lookupType(typeName);
+                if (resolved == null) {
+                    _diagnostics.reportUndefinedType(payloadType.getSpan(), typeName);
+                    resolved = Object.class;
+                }
+                payloadTypes.add(resolved);
+                payloadTypeNames.add(typeName);
+            }
+            if (variants.containsKey(variantName)) {
+                _diagnostics.reportDuplicateVariant(variantSyntax.getIdentifier().getSpan(), name, variantName);
+                continue;
+            }
+            variants.put(variantName, new codeanalysis.UnionSymbol.Variant(variantName, payloadTypes, payloadTypeNames));
+        }
+
+        _unionTypes.put(name, new codeanalysis.UnionSymbol(name, variants));
+    }
+
+    /**
+     * Binds a sum type declaration. The type is registered in the first pass,
+     * so this only fills in a declaration the first pass did not see.
+     *
+     * @param syntax The declaration to bind.
+     * @return The bound statement standing in for the declaration.
+     */
+    public BoundStatement bindTypeDeclaration(TypeDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        if (!_unionTypes.containsKey(name)) {
+            registerTypeDeclaration(syntax);
+        }
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * Finds the sum type that declares the named variant.
+     *
+     * <p>A variant name is written on its own — {@code Ok(5)}, not
+     * {@code Result.Ok(5)} — so a variant is looked up across the sum types in
+     * scope. The first declaring type wins, and a name declared by two types
+     * has to be written qualified.</p>
+     *
+     * @param variantName The variant name.
+     * @return The declaring type, or null when no type declares it.
+     */
+    public codeanalysis.UnionSymbol findUnionByVariant(String variantName) {
+        for (codeanalysis.UnionSymbol union : _unionTypes.values()) {
+            if (union.hasVariant(variantName)) return union;
+        }
+        return null;
     }
 }
