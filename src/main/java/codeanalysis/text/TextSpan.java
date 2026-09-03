@@ -63,7 +63,7 @@ public class TextSpan {
     }
 
     /**
-     * Returns if @code{obj} is equal to this text span.
+     * Returns if {@code obj} is equal to this text span.
      *
      * @param obj The object to compare.
      * @return True if the object is equal to this text span, false otherwise.
