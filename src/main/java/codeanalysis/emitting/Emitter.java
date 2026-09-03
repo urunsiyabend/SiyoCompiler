@@ -498,6 +498,21 @@ public class Emitter {
         // the exact global instance is a local (possibly shadowing the global).
         if (!_inIsolatedMethod && _globalFields.contains(node.getVariable())) {
             _mv.visitFieldInsn(PUTSTATIC, _className, node.getVariable().getName(), getTypeDescriptor(varType));
+        } else if (node.getVariable().isCell() && node.getVariable().getOwnerClass() == null) {
+            // A captured-and-written local is stored in a one-element cell, so
+            // a closure that captures the cell shares the storage.
+            emitBoxIfNeeded(varType);
+            int cellValue = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, cellValue);
+            _mv.visitInsn(ICONST_1);
+            _mv.visitTypeInsn(ANEWARRAY, "java/lang/Object");
+            _mv.visitInsn(DUP);
+            _mv.visitInsn(ICONST_0);
+            _mv.visitVarInsn(ALOAD, cellValue);
+            _mv.visitInsn(AASTORE);
+            int slot = _nextLocal++;
+            _locals.put(node.getVariable(), slot);
+            _mv.visitVarInsn(ASTORE, slot);
         } else {
             int slot = declareLocal(node.getVariable());
             emitStore(varType, slot);
@@ -644,6 +659,10 @@ public class Emitter {
     }
 
     private void emitVariableLoad(VariableSymbol var) {
+        if (usesCell(var)) {
+            emitCellLoad(var);
+            return;
+        }
         if (var.getOwnerClass() != null) {
             _mv.visitFieldInsn(GETSTATIC, var.getOwnerClass(), var.getFieldName(),
                     getTypeDescriptor(var.getType()));
@@ -679,9 +698,29 @@ public class Emitter {
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {
+        Class<?> varType = node.getVariable().getType();
+
+        if (usesCell(node.getVariable())) {
+            // cell[0] = value, leaving the value as the expression's own result
+            _mv.visitVarInsn(ALOAD, getLocal(node.getVariable()));
+            _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+            _mv.visitInsn(ICONST_0);
+            emitExpression(node.getExpression());
+            Class<?> valueType = node.getExpression().getClassType();
+            if (valueType == Object.class && varType != Object.class) {
+                emitUnboxIfNeeded(varType);
+                emitBoxIfNeeded(varType);
+            } else {
+                emitBoxIfNeeded(valueType);
+            }
+            _mv.visitInsn(DUP_X2);
+            _mv.visitInsn(AASTORE);
+            emitUnboxIfNeeded(varType);
+            return;
+        }
+
         emitExpression(node.getExpression());
         Class<?> exprType = node.getExpression().getClassType();
-        Class<?> varType = node.getVariable().getType();
         if (exprType == Object.class && varType != Object.class) {
             emitUnboxIfNeeded(varType);
         }
@@ -1293,8 +1332,14 @@ public class Emitter {
         for (VariableSymbol var : node.getCapturedVariables()) {
             _mv.visitInsn(DUP);
             _mv.visitLdcInsn(ci++);
-            emitVariableLoad(var);
-            emitBoxIfNeeded(var.getType());
+            if (usesCell(var)) {
+                // The closure captures the cell, so a write on either side is
+                // seen by the other.
+                _mv.visitVarInsn(ALOAD, getLocal(var));
+            } else {
+                emitVariableLoad(var);
+                emitBoxIfNeeded(var.getType());
+            }
             _mv.visitInsn(AASTORE);
         }
         _mv.visitInsn(AASTORE);
@@ -1457,8 +1502,14 @@ public class Emitter {
         for (VariableSymbol var : node.getCapturedVariables()) {
             _mv.visitInsn(DUP);
             _mv.visitLdcInsn(ci++);
-            emitVariableLoad(var);
-            emitBoxIfNeeded(var.getType());
+            if (usesCell(var)) {
+                // A variable held in a cell is passed as the cell, so the task
+                // reads and writes the same storage as its creator.
+                _mv.visitVarInsn(ALOAD, getLocal(var));
+            } else {
+                emitVariableLoad(var);
+                emitBoxIfNeeded(var.getType());
+            }
             _mv.visitInsn(AASTORE);
         }
         int capturedLocal = _nextLocal++;
@@ -2536,6 +2587,33 @@ public class Emitter {
     }
 
     private boolean _inIsolatedMethod = false; // true in spawn/lambda methods
+
+    /**
+     * Whether a variable's slot holds a one-element cell rather than the value.
+     *
+     * <p>A local that a closure captures and writes lives in a cell so both
+     * sides share the storage. A module-level variable is already a static
+     * field, so it needs none.</p>
+     *
+     * @param var The variable.
+     * @return True when reads and writes go through a cell.
+     */
+    private boolean usesCell(VariableSymbol var) {
+        return var.isCell() && var.getOwnerClass() == null && !isGlobalField(var);
+    }
+
+    /**
+     * Emits a read of a variable held in a cell.
+     *
+     * @param var The variable.
+     */
+    private void emitCellLoad(VariableSymbol var) {
+        _mv.visitVarInsn(ALOAD, getLocal(var));
+        _mv.visitTypeInsn(CHECKCAST, "[Ljava/lang/Object;");
+        _mv.visitInsn(ICONST_0);
+        _mv.visitInsn(AALOAD);
+        emitUnboxIfNeeded(var.getType());
+    }
 
     private boolean isGlobalField(VariableSymbol var) {
         if (var.getOwnerClass() != null) return true;

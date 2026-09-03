@@ -107,16 +107,32 @@ class LanguageSemanticsTest {
     // --- closures ------------------------------------------------------------
 
     @Test
-    void assigningToACapturedVariableIsAnError() {
-        assertTrue(firstDiagnostic("""
+    void aWriteToACapturedVariableIsSharedWithTheEnclosingScope() throws Exception {
+        // 0.5.0 rejected this because a capture was by value and the write was
+        // discarded. The variable now lives in a cell that the closure shares.
+        String source = """
                 fn main() {
                     mut counter = 0
                     imut inc = fn() { counter += 1 }
                     inc()
+                    inc()
                     println(toString(counter))
                 }
-                """).startsWith("Cannot assign to 'counter'"),
-                "a discarded write must be reported, not silently dropped");
+                """;
+        assertEquals("2", run(source, "CapturedWrite"));
+        assertEquals("2", interpret(source, "CapturedWrite"));
+    }
+
+    @Test
+    void writingToACapturedImmutableIsStillAnError() {
+        assertTrue(firstDiagnostic("""
+                fn main() {
+                    imut counter = 0
+                    imut inc = fn() { counter += 1 }
+                    inc()
+                }
+                """).contains("read-only"),
+                "an immutable variable cannot be written, captured or not");
     }
 
     @Test

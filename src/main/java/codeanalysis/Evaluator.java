@@ -152,6 +152,28 @@ public class Evaluator {
      * @param value    The value to assign.
      */
     private void assignVariable(VariableSymbol variable, Object value) {
+        // A variable a closure captures and writes is held in a one-element
+        // cell, so both sides of the capture share the storage.
+        if (variable.isCell()) {
+            Object[] cell = findCell(variable);
+            if (cell != null) {
+                cell[0] = value;
+                return;
+            }
+            storeVariable(variable, new Object[]{value});
+            return;
+        }
+        storeVariable(variable, value);
+    }
+
+    /**
+     * Stores a value under a variable, in the current frame when the variable
+     * is local to it and in the globals otherwise.
+     *
+     * @param variable The variable.
+     * @param value    The value to store.
+     */
+    private void storeVariable(VariableSymbol variable, Object value) {
         if (!_callStack.isEmpty()) {
             StackFrame frame = _callStack.peek();
             // Check if it's a local variable (including parameters)
@@ -161,6 +183,20 @@ public class Evaluator {
             }
         }
         _globals.put(variable, value);
+    }
+
+    /**
+     * Finds the cell holding a variable, if one has been created.
+     *
+     * @param variable The variable.
+     * @return The cell, or null when the variable has no storage yet.
+     */
+    private Object[] findCell(VariableSymbol variable) {
+        if (!_callStack.isEmpty()) {
+            StackFrame frame = _callStack.peek();
+            if (frame.getLocals().get(variable) instanceof Object[] cell) return cell;
+        }
+        return _globals.get(variable) instanceof Object[] cell ? cell : null;
     }
 
     /**
@@ -243,6 +279,19 @@ public class Evaluator {
      * @return The variable value.
      */
     private Object lookupVariable(VariableSymbol variable) {
+        Object stored = lookupStorage(variable);
+        if (variable.isCell() && stored instanceof Object[] cell) return cell[0];
+        return stored;
+    }
+
+    /**
+     * Reads a variable's storage without unwrapping a cell, which is what a
+     * closure captures.
+     *
+     * @param variable The variable.
+     * @return The stored value, which is a cell for a captured-and-written one.
+     */
+    private Object lookupStorage(VariableSymbol variable) {
         if (!_callStack.isEmpty()) {
             StackFrame frame = _callStack.peek();
             if (frame.getLocals().containsKey(variable)) {
@@ -890,9 +939,9 @@ public class Evaluator {
         // Capture current variable values from the active scope
         java.util.Map<VariableSymbol, Object> capturedVars = new java.util.HashMap<>();
         for (VariableSymbol var : node.getCapturedVariables()) {
-            // Look up value in call stack or globals
-            Object value = lookupVariable(var);
-            capturedVars.put(var, value);
+            // A cell is captured as itself, so a write on either side is shared;
+            // everything else is captured by value.
+            capturedVars.put(var, var.isCell() ? lookupStorage(var) : lookupVariable(var));
         }
         return new SiyoClosure(node.getParameters(), node.getBody(), capturedVars, node.getReturnType());
     }

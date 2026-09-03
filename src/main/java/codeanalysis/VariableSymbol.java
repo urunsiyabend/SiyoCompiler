@@ -15,6 +15,7 @@ public class VariableSymbol {
     private String _ownerClass;
     private String _fieldName;
     private String _declaredTypeName;
+    private boolean _isCell;
 
     /**
      * Creates a new instance of the VariableSymbol class with the specified name and type.
@@ -51,6 +52,25 @@ public class VariableSymbol {
      */
     public String getFieldName() {
         return _fieldName != null ? _fieldName : _name;
+    }
+
+    /**
+     * Whether this variable is held in a one-element cell rather than directly
+     * in its slot.
+     *
+     * <p>A closure captures by value, so a write inside one could not be seen
+     * outside it. A local that a closure both captures and writes is stored in
+     * a cell instead, and the closure captures the cell, which is what makes
+     * the write shared.</p>
+     *
+     * @return True when the variable is held in a cell.
+     */
+    public boolean isCell() {
+        return _isCell;
+    }
+
+    public void setCell(boolean isCell) {
+        _isCell = isCell;
     }
 
     /**

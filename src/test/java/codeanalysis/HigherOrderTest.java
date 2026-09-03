@@ -208,6 +208,72 @@ class HigherOrderTest {
                 """, "MapStructs"));
     }
 
+    // --- writes to a captured variable ---------------------------------------
+
+    @Test
+    void aCounterMayBeKeptInACapturedVariable() throws Exception {
+        String source = """
+                fn main() {
+                    mut total = 0
+                    forEach([1, 2, 3, 4], fn(x: int) { total = total + x })
+                    println(toString(total))
+                }
+                """;
+        assertEquals("10", run(source, "CapturedCounter"));
+        assertEquals("10", interpret(source, "CapturedCounter"));
+    }
+
+    @Test
+    void twoClosuresShareTheVariableTheyCapture() throws Exception {
+        String source = """
+                fn main() {
+                    mut n = 0
+                    imut inc = fn() { n = n + 1 }
+                    imut reset = fn() { n = 0 }
+                    inc()
+                    inc()
+                    println(toString(n))
+                    reset()
+                    println(toString(n))
+                }
+                """;
+        assertEquals("2\n0", run(source, "SharedCapture"));
+        assertEquals("2\n0", interpret(source, "SharedCapture"));
+    }
+
+    @Test
+    void aWriteOutsideAClosureIsSeenInsideIt() throws Exception {
+        String source = """
+                fn main() {
+                    mut label = "before"
+                    imut show = fn() { println(label) }
+                    show()
+                    label = "after"
+                    show()
+                }
+                """;
+        assertEquals("before\nafter", run(source, "OutsideWriteSeenInside"));
+        assertEquals("before\nafter", interpret(source, "OutsideWriteSeenInside"));
+    }
+
+    @Test
+    void aCapturedVariableSurvivesTheFunctionThatMadeTheClosure() throws Exception {
+        String source = """
+                fn makeCounter() -> fn() -> int {
+                    mut n = 0
+                    return fn() -> int { n = n + 1  n }
+                }
+                fn main() {
+                    imut next = makeCounter()
+                    println(toString(next()))
+                    println(toString(next()))
+                    println(toString(next()))
+                }
+                """;
+        assertEquals("1\n2\n3", run(source, "CounterFactory"));
+        assertEquals("1\n2\n3", interpret(source, "CounterFactory"));
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private String interpret(String source, String name) throws Exception {

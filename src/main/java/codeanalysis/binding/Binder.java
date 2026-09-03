@@ -2109,13 +2109,19 @@ public class Binder {
         java.util.Set<VariableSymbol> writtenCaptures = new java.util.LinkedHashSet<>();
         collectCapturedVars(blockBody, parameters, captured, writtenCaptures);
 
-        // A closure captures by value, so a write to an enclosing variable
-        // cannot be seen by the enclosing scope. It used to be discarded in
-        // silence; it is an error now.
-        for (VariableSymbol var : writtenCaptures) {
-            _diagnostics.reportAssignmentToCapturedVariable(
-                    syntax.getFnKeyword().getSpan(), var.getName());
+        // A closure shares the mutable locals it captures: the variable moves
+        // into a cell that the closure captures, so a write on either side is
+        // seen by the other. An immutable local is captured by value, and a
+        // module-level variable is already a static field, so neither needs a
+        // cell. Writing to a captured immutable is reported where it is written.
+        for (VariableSymbol var : captured) {
+            if (!var.isReadOnly() && var.getOwnerClass() == null) {
+                var.setCell(true);
+            }
         }
+        // writtenCaptures no longer drives a diagnostic; it stays as the record
+        // of which captures are written, which the cell rule above subsumes.
+        writtenCaptures.clear();
 
         // Restore scope
         _scope = outerScope;
