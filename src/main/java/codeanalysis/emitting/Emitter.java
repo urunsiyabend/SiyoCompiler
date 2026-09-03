@@ -1923,6 +1923,17 @@ public class Emitter {
     private void emitIndexExpression(BoundIndexExpression node) {
         Class<?> targetType = node.getTarget().getClassType();
 
+        if (targetType == SiyoMap.class) {
+            // Map read: m[key] is m.get(key)
+            emitExpression(node.getTarget());
+            emitExpression(node.getIndex());
+            emitBoxIfNeeded(node.getIndex().getClassType());
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoMap", "get",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            emitUnboxIfNeeded(node.getClassType());
+            return;
+        }
+
         if (targetType == String.class) {
             // String indexing: s.charAt(i) -> String.valueOf(char)
             emitExpression(node.getTarget());
@@ -1944,6 +1955,24 @@ public class Emitter {
     }
 
     private void emitIndexAssignmentExpression(BoundIndexAssignmentExpression node) {
+        if (node.getTarget().getClassType() == SiyoMap.class) {
+            // Map write: m[key] = value is m.set(key, value). This used to be
+            // emitted as List.set, so the assignment compiled and then failed
+            // at run time.
+            emitExpression(node.getTarget());
+            emitExpression(node.getIndex());
+            emitBoxIfNeeded(node.getIndex().getClassType());
+            emitExpression(node.getValue());
+            emitBoxIfNeeded(node.getValue().getClassType());
+            // An assignment is an expression, so the value has to survive the
+            // call: [map, key, value] -> [value, map, key, value].
+            _mv.visitInsn(DUP_X2);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoMap", "set",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)V", false);
+            emitUnboxIfNeeded(node.getValue().getClassType());
+            return;
+        }
+
         // list.set(index, value) -> returns old value
         emitExpression(node.getTarget());
         emitExpression(node.getIndex());
@@ -2206,6 +2235,36 @@ public class Emitter {
             _mv.visitInsn(ICONST_1);
             _mv.visitInsn(ISUB);
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "remove", "(I)Ljava/lang/Object;", true);
+            return;
+        }
+        if (function == BuiltinFunctions.MAP_ARRAY) {
+            emitCoerceArg(node.getArguments().get(0), SiyoArray.class);
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "mapList",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Lcodeanalysis/SiyoArray;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.FILTER) {
+            emitCoerceArg(node.getArguments().get(0), SiyoArray.class);
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "filterList",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Lcodeanalysis/SiyoArray;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.REDUCE) {
+            emitCoerceArg(node.getArguments().get(0), SiyoArray.class);
+            emitExpression(node.getArguments().get(1));
+            emitExpression(node.getArguments().get(2));
+            emitBoxIfNeeded(node.getArguments().get(2).getClassType());
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "reduceList",
+                    "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.FOR_EACH) {
+            emitCoerceArg(node.getArguments().get(0), SiyoArray.class);
+            emitExpression(node.getArguments().get(1));
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "forEachList",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)V", false);
             return;
         }
         if (function == BuiltinFunctions.SORT) {

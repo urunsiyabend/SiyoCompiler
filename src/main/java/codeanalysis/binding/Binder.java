@@ -1713,12 +1713,17 @@ public class Binder {
         BoundExpression target = bindExpression(syntax.getTarget());
         BoundExpression index = bindExpression(syntax.getIndex());
 
-        if (index.getClassType() != Integer.class) {
+        // A map is indexed by its key, which is any value; everything else is
+        // indexed by position.
+        boolean indexesAMap = target.getClassType() == SiyoMap.class;
+        if (!indexesAMap && index.getClassType() != Integer.class) {
             _diagnostics.reportCannotConvert(syntax.getIndex().getSpan(), index.getClassType(), Integer.class);
         }
 
         Class<?> resultType;
-        if (target.getClassType() == SiyoArray.class) {
+        if (indexesAMap) {
+            resultType = Object.class;
+        } else if (target.getClassType() == SiyoArray.class) {
             resultType = _typeResolver.resolveArrayElementType(target);
         } else if (target.getClassType() == String.class) {
             resultType = String.class;

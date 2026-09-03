@@ -223,6 +223,35 @@ public class BuiltinFunctions {
             SiyoChannel.class
     );
 
+    /** map(arr, fn) — the array of fn applied to every element. */
+    public static final FunctionSymbol MAP_ARRAY = new FunctionSymbol(
+            "map",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("fn", SiyoClosure.class)),
+            SiyoArray.class
+    );
+
+    /** filter(arr, fn) — the elements fn accepts. */
+    public static final FunctionSymbol FILTER = new FunctionSymbol(
+            "filter",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("fn", SiyoClosure.class)),
+            SiyoArray.class
+    );
+
+    /** reduce(arr, fn, initial) — the elements folded into one value. */
+    public static final FunctionSymbol REDUCE = new FunctionSymbol(
+            "reduce",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("fn", SiyoClosure.class),
+                    new ParameterSymbol("initial", Object.class)),
+            Object.class
+    );
+
+    /** forEach(arr, fn) — fn run on every element, for its effects. */
+    public static final FunctionSymbol FOR_EACH = new FunctionSymbol(
+            "forEach",
+            List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("fn", SiyoClosure.class)),
+            null
+    );
+
     public static final FunctionSymbol SORT = new FunctionSymbol(
             "sort",
             List.of(new ParameterSymbol("arr", SiyoArray.class), new ParameterSymbol("comparator", SiyoClosure.class)),
@@ -268,7 +297,8 @@ public class BuiltinFunctions {
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_LONG, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
                 PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
-                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE);
+                CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE,
+                MAP_ARRAY, FILTER, REDUCE, FOR_EACH);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {

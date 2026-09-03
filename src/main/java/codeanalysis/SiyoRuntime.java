@@ -64,6 +64,95 @@ public class SiyoRuntime {
     }
 
     /**
+     * Calls a closure held in its array representation.
+     *
+     * <p>A closure carries the class that declared it, so a call works from
+     * anywhere: the higher-order builtins are implemented here rather than
+     * emitted inline, and behave the same whichever class holds the lambda.</p>
+     *
+     * @param closureObj The closure representation.
+     * @param args       The call arguments.
+     * @return The closure's result.
+     */
+    public static Object callClosure(Object closureObj, Object... args) {
+        if (!(closureObj instanceof Object[] closure) || closure.length < 2) {
+            throw new RuntimeException("expected a function value");
+        }
+        int lambdaId = (Integer) closure[0];
+        Object[] captured = (Object[]) closure[1];
+        if (closure.length > 2 && closure[2] instanceof String className) {
+            return dispatchClosure(className, lambdaId, captured, args);
+        }
+        throw new RuntimeException("function value carries no origin class");
+    }
+
+    /**
+     * map(arr, fn): the array of fn applied to every element.
+     *
+     * @param listObj The source array.
+     * @param closure The function to apply.
+     * @return A new array.
+     */
+    public static SiyoArray mapList(Object listObj, Object closure) {
+        List<?> list = (List<?>) listObj;
+        SiyoArray result = new SiyoArray(new java.util.ArrayList<>(), Object.class);
+        for (Object element : list) {
+            result.add(callClosure(closure, element));
+        }
+        return result;
+    }
+
+    /**
+     * filter(arr, fn): the elements fn accepts.
+     *
+     * @param listObj The source array.
+     * @param closure The predicate.
+     * @return A new array.
+     */
+    public static SiyoArray filterList(Object listObj, Object closure) {
+        List<?> list = (List<?>) listObj;
+        SiyoArray result = new SiyoArray(new java.util.ArrayList<>(),
+                listObj instanceof SiyoArray source ? source.getElementType() : Object.class);
+        for (Object element : list) {
+            if (callClosure(closure, element) instanceof Boolean keep && keep) {
+                result.add(element);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * reduce(arr, fn, initial): the elements folded into one value, with the
+     * accumulator as the first argument.
+     *
+     * @param listObj The source array.
+     * @param closure The folding function.
+     * @param initial The starting accumulator.
+     * @return The final accumulator.
+     */
+    public static Object reduceList(Object listObj, Object closure, Object initial) {
+        List<?> list = (List<?>) listObj;
+        Object accumulator = initial;
+        for (Object element : list) {
+            accumulator = callClosure(closure, accumulator, element);
+        }
+        return accumulator;
+    }
+
+    /**
+     * forEach(arr, fn): fn run on every element, for its effects.
+     *
+     * @param listObj The source array.
+     * @param closure The function to run.
+     */
+    public static void forEachList(Object listObj, Object closure) {
+        List<?> list = (List<?>) listObj;
+        for (Object element : list) {
+            callClosure(closure, element);
+        }
+    }
+
+    /**
      * Dispatch a closure call across class boundaries.
      * Used when a closure created in class A is invoked by class B (e.g., module functions).
      */

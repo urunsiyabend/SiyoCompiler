@@ -604,6 +604,36 @@ public class Evaluator {
         return result;
     }
 
+    /**
+     * Calls a closure with the given arguments.
+     *
+     * <p>Shared by the higher-order builtins, which each need to run a closure
+     * once per element.</p>
+     *
+     * @param closure The closure to call.
+     * @param args    The arguments.
+     * @return The closure's result.
+     * @throws Exception If the body fails.
+     */
+    private Object invokeClosure(SiyoClosure closure, Object... args) throws Exception {
+        StackFrame frame = new StackFrame(null);
+        for (var entry : closure.getCapturedVars().entrySet()) {
+            frame.getLocals().put(entry.getKey(), entry.getValue());
+        }
+        for (int i = 0; i < closure.getParameters().size() && i < args.length; i++) {
+            frame.getLocals().put(closure.getParameters().get(i), args[i]);
+        }
+
+        _callStack.push(frame);
+        evaluateBlock(closure.getBody());
+        _callStack.pop();
+
+        Object result = _returnTriggered ? _returnValue : _lastValue;
+        _returnTriggered = false;
+        _returnValue = null;
+        return result;
+    }
+
     private Object evaluateScopeExpression(BoundScopeExpression node) throws Exception {
         // Collect spawn tasks during body evaluation
         java.util.List<Thread> threads = new java.util.ArrayList<>();
@@ -887,11 +917,16 @@ public class Evaluator {
 
     private Object evaluateIndexAssignment(BoundIndexAssignmentExpression node) throws Exception {
         Object target = evaluateExpression(node.getTarget());
-        int index = (int) evaluateExpression(node.getIndex());
+        Object indexValue = evaluateExpression(node.getIndex());
         Object value = evaluateExpression(node.getValue());
 
+        if (target instanceof SiyoMap map) {
+            map.set(indexValue, value);
+            return value;
+        }
+
         if (target instanceof SiyoArray arr) {
-            arr.set(index, value);
+            arr.set((int) indexValue, value);
         }
         return value;
     }
@@ -950,6 +985,11 @@ public class Evaluator {
     private Object evaluateIndexExpression(BoundIndexExpression node) throws Exception {
         Object target = evaluateExpression(node.getTarget());
         Object indexValue = evaluateExpression(node.getIndex());
+
+        if (target instanceof SiyoMap map) {
+            return map.get(indexValue);
+        }
+
         int index = (int) indexValue;
 
         if (target instanceof SiyoArray arr) {
@@ -1059,6 +1099,43 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.PRINTLN) {
             System.out.println(arguments[0]);
+            return null;
+        }
+        if (function == BuiltinFunctions.MAP_ARRAY) {
+            SiyoArray source = (SiyoArray) arguments[0];
+            SiyoClosure fn = (SiyoClosure) arguments[1];
+            SiyoArray result = new SiyoArray(new java.util.ArrayList<>(), Object.class);
+            for (Object element : source.getElements()) {
+                result.add(invokeClosure(fn, element));
+            }
+            return result;
+        }
+        if (function == BuiltinFunctions.FILTER) {
+            SiyoArray source = (SiyoArray) arguments[0];
+            SiyoClosure predicate = (SiyoClosure) arguments[1];
+            SiyoArray result = new SiyoArray(new java.util.ArrayList<>(), source.getElementType());
+            for (Object element : source.getElements()) {
+                if (invokeClosure(predicate, element) instanceof Boolean keep && keep) {
+                    result.add(element);
+                }
+            }
+            return result;
+        }
+        if (function == BuiltinFunctions.REDUCE) {
+            SiyoArray source = (SiyoArray) arguments[0];
+            SiyoClosure fn = (SiyoClosure) arguments[1];
+            Object accumulator = arguments[2];
+            for (Object element : source.getElements()) {
+                accumulator = invokeClosure(fn, accumulator, element);
+            }
+            return accumulator;
+        }
+        if (function == BuiltinFunctions.FOR_EACH) {
+            SiyoArray source = (SiyoArray) arguments[0];
+            SiyoClosure fn = (SiyoClosure) arguments[1];
+            for (Object element : source.getElements()) {
+                invokeClosure(fn, element);
+            }
             return null;
         }
         if (function == BuiltinFunctions.SORT) {

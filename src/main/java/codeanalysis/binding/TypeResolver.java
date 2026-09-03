@@ -112,6 +112,11 @@ public class TypeResolver {
         if (target instanceof BoundCallExpression callExpr) {
             if (callExpr.getFunction() == BuiltinFunctions.RANGE) return Integer.class;
             if (callExpr.getFunction() == BuiltinFunctions.SPLIT) return String.class;
+            // filter keeps the element type it was given; map's elements are
+            // whatever the function returned, which is erased.
+            if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
+                return resolveArrayElementType(callExpr.getArguments().get(0));
+            }
             Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
             if (returnElementType != null) return returnElementType;
         }
