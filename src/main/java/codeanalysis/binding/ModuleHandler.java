@@ -734,4 +734,22 @@ public class ModuleHandler {
         }
         return null;
     }
+
+    /**
+     * Finds every sum type that declares the named variant.
+     *
+     * <p>More than one means the bare name is ambiguous and has to be written
+     * qualified, which is what happens when a module imports a type that
+     * declares the same variant as one of its own.</p>
+     *
+     * @param variantName The variant name.
+     * @return The declaring types, in declaration order.
+     */
+    public List<codeanalysis.UnionSymbol> findUnionsByVariant(String variantName) {
+        List<codeanalysis.UnionSymbol> found = new ArrayList<>();
+        for (codeanalysis.UnionSymbol union : _unionTypes.values()) {
+            if (union.hasVariant(variantName)) found.add(union);
+        }
+        return found;
+    }
 }

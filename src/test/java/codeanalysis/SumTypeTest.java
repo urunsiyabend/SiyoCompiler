@@ -479,6 +479,17 @@ class SumTypeTest {
                 "expected an unknown-type diagnostic, got: " + message);
     }
 
+    @Test
+    void aBareVariantNameTwoTypesDeclareIsAmbiguous() {
+        String message = firstDiagnostic("""
+                type Read = Ok(int) | Fail(string)
+                type Write = Ok(int) | Refused(string)
+                fn main() { println(toString(Ok(1))) }
+                """);
+        assertTrue(message.contains("is declared by Read and Write"),
+                "expected an ambiguity diagnostic, got: " + message);
+    }
+
     // --- type is a contextual keyword ----------------------------------------
 
     @Test

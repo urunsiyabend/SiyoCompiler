@@ -848,7 +848,7 @@ public class Binder {
         } else if (targetUnion != null && targetUnion.hasVariant(variantName)) {
             union = targetUnion;
         } else {
-            union = _moduleHandler.findUnionByVariant(variantName);
+            union = resolveVariantOwner(variantName, arm.getVariantName().getSpan());
             if (union == null) {
                 _diagnostics.reportUndefinedName(arm.getVariantName().getSpan(), variantName);
                 return null;
@@ -1067,7 +1067,7 @@ public class Binder {
                 }
             }
             // A payload-less variant is a value on its own: None, not None().
-            codeanalysis.UnionSymbol union = _moduleHandler.findUnionByVariant(name);
+            codeanalysis.UnionSymbol union = resolveVariantOwner(name, syntax.getIdentifierToken().getSpan());
             if (union != null) {
                 return bindUnionConstruction(union, name, List.of(),
                         syntax.getIdentifierToken().getSpan(), List.of());
@@ -1077,6 +1077,25 @@ public class Binder {
         }
         var variable  = _scope.lookupVariable(name);
         return new BoundVariableExpression(variable);
+    }
+
+    /**
+     * Resolves which sum type a bare variant name belongs to.
+     *
+     * @param variantName The variant name as written.
+     * @param span        The span to report an ambiguity against.
+     * @return The declaring type, or null when no type declares the name.
+     */
+    private codeanalysis.UnionSymbol resolveVariantOwner(String variantName, codeanalysis.text.TextSpan span) {
+        List<codeanalysis.UnionSymbol> owners = _moduleHandler.findUnionsByVariant(variantName);
+        if (owners.isEmpty()) return null;
+        if (owners.size() > 1) {
+            List<String> names = new ArrayList<>();
+            for (codeanalysis.UnionSymbol owner : owners) names.add(owner.getName());
+            _diagnostics.reportAmbiguousVariant(span, variantName, names);
+            return null;
+        }
+        return owners.get(0);
     }
 
     /**
@@ -1490,7 +1509,7 @@ public class Binder {
 
         // A variant of a sum type is constructed by writing it: Ok(5).
         if (!_scope.tryLookupFunction(name) && !_scope.tryLookup(name)) {
-            codeanalysis.UnionSymbol union = _moduleHandler.findUnionByVariant(name);
+            codeanalysis.UnionSymbol union = resolveVariantOwner(name, syntax.getIdentifier().getSpan());
             if (union != null) {
                 List<BoundExpression> payload = new ArrayList<>();
                 for (ExpressionSyntax argSyntax : syntax.getArguments()) {

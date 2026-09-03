@@ -347,6 +347,18 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Reports a bare variant name that more than one sum type declares.
+     *
+     * @param span        The span of the use.
+     * @param variantName The variant name.
+     * @param typeNames   The types that declare it.
+     */
+    public void reportAmbiguousVariant(TextSpan span, String variantName, java.util.List<String> typeNames) {
+        report(span, String.format("Variant '%s' is declared by %s%n%n  help: write it qualified, such as %s.%s",
+                variantName, String.join(" and ", typeNames), typeNames.get(0), variantName));
+    }
+
+    /**
      * Reports a match over a sum type that does not cover every variant.
      *
      * @param span     The span of the match.
