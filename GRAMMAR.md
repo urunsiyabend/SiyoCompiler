@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.5.0)
+# Siyo Language Grammar (0.6.0)
 
 ## Lexical Grammar
 
@@ -19,6 +19,8 @@
 | `match` | Pattern matching expression |
 | `struct` | Struct type declaration |
 | `enum` | Enum type declaration |
+| `type` | Sum type declaration (contextual — also usable as a name) |
+| `as` | Type cast: `value as Type` |
 | `import` | Module / Java class import |
 | `scope` / `spawn` | Structured concurrency |
 | `send` | Actor fire-and-forget message (contextual — also usable as a name) |
@@ -64,9 +66,12 @@
 
 ### Literals
 
-- **Integer**: `42`, `-7`
+- **Integer**: `42`, `-7`, hexadecimal `0xFF`
 - **Float**: `3.14`, `0.5`
-- **Long**: returned by Java interop (e.g. `System.currentTimeMillis()`)
+- **Long**: `9000000000L`, `0xFFL`. A decimal or hexadecimal literal too large
+  for an `int` widens to a `long` on its own; one too large for a `long` is
+  reported. A long also comes back from Java interop (e.g.
+  `System.currentTimeMillis()`)
 - **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$`
 - **Triple-quoted string**: `"""multi-line\nliteral"""` — preserves newlines verbatim, no escape interpretation needed for `"` inside the body
 - **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings.
@@ -97,6 +102,7 @@ statement
     | function_declaration
     | struct_declaration
     | enum_declaration
+    | type_declaration
     | return_statement
     | break_statement
     | continue_statement
@@ -137,8 +143,9 @@ field_list
 
 field
     : IDENTIFIER ':' type_annotation
-    // A field may be declared `fn` to hold a function value:
-    //     struct Route { pattern: string, handler: fn }
+    // A field may be declared `fn` to hold a function value, with or without a
+    // signature, and the signature is checked:
+    //     struct Route { pattern: string, handler: fn(string) -> string }
 
 enum_declaration
     : 'enum' IDENTIFIER '{' enum_member (',' enum_member)* '}'
@@ -147,6 +154,15 @@ enum_member
     : IDENTIFIER ('=' '-'? NUMBER)?
     // A member without an explicit value continues from the previous one, so
     // `enum E { A = 10, B }` gives B the value 11.
+
+type_declaration
+    : 'type' IDENTIFIER '=' union_variant ('|' union_variant)*
+
+union_variant
+    : IDENTIFIER ('(' type_annotation (',' type_annotation)* ')')?
+    // A variant without a payload is written with no parentheses. A payload
+    // type may be the type being declared, which is what makes a recursive
+    // type work.
 
 actor_declaration
     : 'actor' 'struct'? IDENTIFIER '{' field_list '}'
@@ -209,6 +225,10 @@ primary_expression
     | if_expression
     | try_expression
     | spawn_expression
+    | cast_expression
+
+cast_expression
+    : expression 'as' IDENTIFIER                     // downcast an erased value: r as Socket
 
 if_expression
     : 'if' expression block 'else' block             // both branches required, value = last expr in block
@@ -222,8 +242,15 @@ match_expression
     : 'match' expression '{' match_arm* '}'
 
 match_arm
-    : expression '=>' expression
-    | '_' '=>' expression
+    : expression '=>' expression                     // compare the value against an expression
+    | variant_pattern '=>' expression                // select a variant and bind its payload
+    | '_' '=>' expression                            // matches anything
+
+variant_pattern
+    : (IDENTIFIER '.')? IDENTIFIER '(' (IDENTIFIER (',' IDENTIFIER)*)? ')'
+    // Every argument must be a plain name, or `_` to discard the slot. A
+    // payload-less variant is written as a bare name, which is an expression
+    // pattern comparing against that variant.
 
 try_expression
     : 'try' block 'catch' IDENTIFIER block
@@ -254,6 +281,48 @@ struct_literal
 | `map` | `SiyoMap` | Key-value map |
 | `set` | `SiyoSet` | Unique value set |
 | `object` / `any` | `Object` | Any type |
+| a declared `type` | `SiyoUnion` | One variant of a sum type |
+
+### Sum types
+
+A `type` declaration names a closed set of variants. A value of the type is
+always exactly one of them, and carries the payload that variant declares:
+
+```siyo
+type Result = Ok(int) | Err(string)
+type Option = Some(int) | None            // a variant may carry nothing
+type List = Cons(int, List) | Nil         // and may be recursive
+```
+
+A variant is constructed by writing it. A payload-less variant is a value on its
+own, and a variant may be written qualified by its type, which is what
+disambiguates a name two types both declare:
+
+```siyo
+imut good = Ok(5)
+imut empty = None
+imut also = Result.Ok(5)
+```
+
+Two values are equal when their type, variant and payload are equal. A value
+prints the way it is written: `Ok(5)`, `None`.
+
+A `match` over a sum type destructures it. An arm selects one variant and binds
+its payload; `_` discards a slot:
+
+```siyo
+fn describe(r: Result) -> string {
+    match r {
+        Ok(value) => "ok " + toString(value),
+        Err(message) => message,
+    }
+}
+```
+
+Such a match is checked for exhaustiveness: leaving a variant uncovered is an
+error unless the match has a `_` arm. An arm whose pattern is not a list of
+plain names — `Ok(1)` — is a value to compare against rather than a
+destructuring, so a literal arm keeps its old meaning.
 
 ### Enums
 
@@ -297,6 +366,14 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 - Function return type checked against declared type
 - Array elements must be homogeneous
 - Channel receive returns `Object`
+- A declared function type is checked. `fn(int) -> int` accepts only a closure
+  of that shape — arity, parameter types and return type — and a call through
+  such a name has the declared return type rather than an erased one. A bare
+  `fn` accepts any closure. `fn()[]` is an array of functions; `fn() -> int[]`
+  is a function returning an array
+- A closure shares the mutable locals it captures, so a write inside one is
+  seen outside it and the other way round. An immutable local is captured by
+  value
 
 ## Built-in Functions
 
@@ -307,7 +384,14 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 `len(string)`, `substring(s, start, end)`, `contains(s, sub)`, `indexOf(s, sub)`, `startsWith(s, prefix)`, `endsWith(s, suffix)`, `replace(s, old, new)`, `trim(s)`, `toUpper(s)`, `toLower(s)`, `split(s, delim)`, `chr(int)`, `ord(string)`
 
 ### Array
-`len(array)`, `push(arr, val)`, `pop(arr)`, `removeAt(arr, idx)`, `sort(arr, comparator)`
+`len(array)`, `push(arr, val)`, `pop(arr)`, `removeAt(arr, idx)`, `sort(arr, comparator)`,
+`map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, initial)`, `forEach(arr, fn)`
+
+`map(arr, fn)` returns the array of `fn` applied to every element, `filter`
+returns the elements the predicate accepts and keeps the element type it was
+given, `reduce` folds with the accumulator as the first argument, and `forEach`
+runs a function for its effects. `map()` with no arguments is still the map
+constructor.
 
 ### I/O
 `print(val)`, `println(val)`, `input(prompt)`, `error(msg)`
@@ -352,7 +436,9 @@ for msg in ch { ... }   // iterate until closed
 ### Maps
 ```siyo
 mut prices = {"apple": 100, "pear": 120}
-prices.set("plum", 90)
+prices["plum"] = 90                     // index form
+println(toString(prices["apple"]))      // a missing key reads as null
+prices.set("plum", 90)                  // method form
 println(toString(prices.get("apple")))
 
 for key in prices {       // iterates keys
@@ -595,9 +681,24 @@ html.escapeAttr(s)  // escape & < > " ' newlines
 ```siyo
 import "std/json"
 
-json.parse(s)       // parse JSON string → map (nested objects/arrays fully decoded)
-json.stringify(v)   // serialize map/array/scalar → JSON string
+type Json = Parsed(map) | Invalid(string)
+
+json.parse(s)         // parse JSON string → Parsed(map) or Invalid(message)
+json.parseOrEmpty(s)  // parse, returning an empty map for input it cannot read
+json.stringify(v)     // serialize map/array/scalar → JSON string
 ```
+
+```siyo
+match json.parse(text) {
+    Parsed(obj) => println(toString(obj["name"])),
+    Invalid(why) => println("bad json: " + why),
+}
+```
+
+The parser validates: a missing colon, an unterminated string or object, a
+trailing comma, a bad escape and trailing input past the document are reported
+with the position they were found at. `\u` escapes and exponent notation are
+decoded.
 
 ### `std/testing`
 

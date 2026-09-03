@@ -155,17 +155,43 @@ real use. It produced 32 reproducible defects; most are fixed here. See
 
 ---
 
-## 0.6.0 — Advanced Types (Next)
+## 0.6.0 — Sum Types & Checked Functions (Released)
 
-### Small and self-contained (first batch)
-- **Long literals** — `Lexer.readNumberToken()` reads only int and float, so a
-  value that overflows `int` is reported as an invalid number instead of
-  becoming a `long`. Wide values come from `toLong()` today
-- **`std/json` cannot report a parse failure** — `json.parse("not json")`
-  returns an empty map, the same value as the valid document `{}`
-- **A declared function type is not checked** — `fn(int) -> int` is parsed and
-  discarded, so a callback with the wrong arity fails at run time
-- **Hex literals** (`0xFF`)
+The release that closed the two gaps 0.5.0 named as the largest: a result that
+is one of several shapes, and a declared function type nobody checked. See
+`RELEASE_NOTES_0.6.0.md`.
+
+- **Sum types.** `type Result = Ok(int) | Err(string)` declares a closed set of
+  variants. A variant is constructed by writing it, may be qualified by its
+  type, may carry a struct or the type being declared, and compares and prints
+  by variant and payload. A type crosses a module boundary intact
+- **Pattern destructuring and exhaustiveness.** A match arm selects a variant
+  and binds its payload, `_` discards a slot, and a match over a sum type
+  without a `_` arm must cover every variant or be reported. A bare variant
+  name two types declare is an ambiguity rather than a silent pick
+- **Declared function types are checked.** `fn(int) -> int` is checked for
+  arity, parameter types and return type wherever it is declared, and a call
+  through such a name has the declared return type instead of an erased one.
+  A nested type — `fn(int) -> fn(int) -> int` — round-trips
+- **map, filter, reduce, forEach**, implemented once in the runtime so both
+  backends agree
+- **A closure shares the mutable locals it captures**, so a write inside one is
+  seen outside it and the other way round
+- **A map is indexed**: `m[key]` reads and `m[key] = value` writes. Reading was
+  rejected and writing compiled into a `List.set` that failed at run time
+- **Long and hexadecimal literals**: `9000000000L`, `0xFF`. A literal too large
+  for an `int` widens instead of being reported as invalid
+- **`std/json` reports a parse failure** as `Invalid(message)` with a position,
+  and the parser validates instead of guessing; `\u` escapes and exponents are
+  read
+- Two backend divergences fixed: a value-producing match that matched no arm
+  pushed a null of the wrong type, and the interpreter bound
+  `InvocationTargetException` where the compiled path bound the real message
+- 1,733 tests pass, up from 1,565
+
+---
+
+## 0.7.0 — Errors, Visibility, Generics (Next)
 
 ### Error Handling
 - `throw` / user-raised errors
@@ -174,27 +200,13 @@ real use. It produced 32 reproducible defects; most are fixed here. See
 - Observable exception type in `catch` (a message-less Java exception prints as
   `null`)
 
-### Closures & Collections
-- Closure variable mutation — a write to a captured variable is a diagnostic as
-  of 0.5.0; making it work is still open
-- `map(arr, fn)`, `filter(arr, fn)`, `reduce(arr, fn, init)`, `forEach(arr, fn)`
-  — note that today's `map` builtin is the map constructor, not a higher-order
-  function
-- Method chaining
-
 ### Module System
 - Public/private visibility (`pub` keyword)
 - Module aliasing (`import "std/math" as m`)
 
-### Algebraic Types
-- `type Result = Ok(value) | Err(msg)`
-- Exhaustive match checking
-- This is the largest remaining expressiveness gap: a function whose result is
-  one of several shapes has to return a record carrying every field of every
-  case plus flags to say which is live
-
 ### Generics
-- `Array<int>`, `Map<string, int>`
+- `Array<int>`, `Map<string, int>`, and a sum type over a type parameter, so
+  `Result` need not be rewritten per payload type
 - Generic functions: `fn identity<T>(x: T) -> T`
 - Reflection over struct fields, so a struct can be serialised without being
   converted to a map by hand
@@ -203,9 +215,11 @@ real use. It produced 32 reproducible defects; most are fixed here. See
 - `interface Printable { fn print() }`
 - Struct implementation
 
-### Already implemented, previously listed here as pending
-- `expr as Type` casts and circular-import detection have both existed since
-  0.1.0. Casts are still undocumented in `GRAMMAR.md`
+### Ergonomics
+- Method chaining on a call result
+- Set literals
+- `do-while`
+- Implicit `int` to `float` promotion in arithmetic
 
 ---
 

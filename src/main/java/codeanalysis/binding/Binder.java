@@ -1439,6 +1439,13 @@ public class Binder {
                 if (structSym != null && parameter.getType() == SiyoStruct.class) {
                     _typeResolver.trackStructType(parameter, structSym);
                 }
+                // Track the sum type a parameter holds, so a match over it is
+                // checked for exhaustiveness the way a local is.
+                codeanalysis.UnionSymbol unionSym = _typeResolver.getUnionTypes().get(baseTypeName);
+                if (unionSym != null && parameter.getType() == codeanalysis.SiyoUnion.class) {
+                    _typeResolver.trackUnionType(parameter, unionSym);
+                }
+                parameter.setDeclaredTypeName(typeName);
                 codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
                 if (javaType != null) _typeResolver.trackJavaClassType(parameter, javaType);
             }
@@ -2102,6 +2109,10 @@ public class Binder {
             StructSymbol structType = _structTypes.get(typeName);
             if (structType != null && paramType == SiyoStruct.class) {
                 _typeResolver.trackStructType(param, structType);
+            }
+            codeanalysis.UnionSymbol unionType = _typeResolver.getUnionTypes().get(typeName);
+            if (unionType != null && paramType == codeanalysis.SiyoUnion.class) {
+                _typeResolver.trackUnionType(param, unionType);
             }
             codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
             if (javaType != null) _typeResolver.trackJavaClassType(param, javaType);

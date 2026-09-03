@@ -371,6 +371,38 @@ class SumTypeTest {
     }
 
     @Test
+    void aMatchOnAParameterIsCheckedForExhaustiveness() {
+        String message = firstDiagnostic("""
+                type Config = Loaded(map) | Missing(string)
+                fn describe(c: Config) -> string {
+                    match c {
+                        Loaded(m) => "loaded",
+                    }
+                }
+                fn main() { println(describe(Missing("x"))) }
+                """);
+        assertTrue(message.contains("does not cover Missing"),
+                "expected a non-exhaustive diagnostic, got: " + message);
+    }
+
+    @Test
+    void aMatchOnALambdaParameterIsCheckedForExhaustiveness() {
+        String message = firstDiagnostic("""
+                type Config = Loaded(map) | Missing(string)
+                fn main() {
+                    imut describe = fn(c: Config) -> string {
+                        match c {
+                            Loaded(m) => "loaded",
+                        }
+                    }
+                    println(describe(Missing("x")))
+                }
+                """);
+        assertTrue(message.contains("does not cover Missing"),
+                "expected a non-exhaustive diagnostic, got: " + message);
+    }
+
+    @Test
     void aDefaultArmSatisfiesExhaustiveness() throws Exception {
         assertEquals("other", run("""
                 type Colour = Red | Green | Blue

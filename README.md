@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.5.0-green" alt="v0.5.0">
+  <img src="https://img.shields.io/badge/version-0.6.0-green" alt="v0.6.0">
   <img src="https://img.shields.io/badge/tests-1565%20passing-brightgreen" alt="Tests">
 </p>
 
@@ -22,6 +22,29 @@ Siyo compiles directly to JVM bytecode. No intermediate language, no transpilati
 It ships with an actor model, Go-style channels, closures, pattern matching, structs, and a growing standard library. The compiler is ~19K lines of Java and includes both a bytecode backend (ASM) and a tree-walking interpreter for debugging.
 
 ## What it looks like
+
+**A result that is one shape or another, and a match that must cover it:**
+
+```rust
+type Config = Loaded(map) | Missing(string)
+
+fn load(path: string) -> Config {
+    if !io.exists(path) { return Missing(path) }
+    match json.parse(io.readFile(path)) {
+        Parsed(settings) => Loaded(settings),
+        Invalid(why) => Missing(path + ": " + why),
+    }
+}
+
+fn main() {
+    match load("app.json") {
+        Loaded(settings) => println("port " + toString(settings["port"])),
+        Missing(why) => println("no config: " + why),
+    }
+}
+```
+
+Leaving out either arm is a compile error, not a surprise at run time.
 
 **Concurrent key-value store with actors:**
 
@@ -181,7 +204,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.5.0"
+version = "0.6.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -194,14 +217,17 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 
 | Feature | Description |
 |---------|-------------|
-| **Types** | `int`, `long`, `bool`, `float`, `string`, arrays, structs, enums, `null` |
+| **Types** | `int`, `long`, `bool`, `float`, `string`, arrays, maps, structs, enums, sum types, `null` |
+| **Literals** | `42`, `0xFF`, `9000000000L`, `3.14`, `"text"`, `[1, 2]`, `{"k": 1}` |
 | **Variables** | `mut x = 10`, `imut y = "constant"`, `x += 1` |
 | **Control flow** | `if`/`else`, `while`, `for`, `for x in collection`, `break`, `continue` |
 | **Functions** | Typed params, return types, implicit return, recursion, forward refs |
-| **Closures** | `fn(x: int) -> int { x * 2 }`, variable capture, factory pattern |
+| **Closures** | `fn(x: int) -> int { x * 2 }`, factory pattern, and a mutable local a closure captures is shared with the enclosing scope |
 | **Structs** | `struct Point { x: int, y: int }`, field access, mutation, pass-by-ref |
 | **Enums** | `enum Direction { N, E, S, W }` |
-| **Pattern matching** | `match expr { 1 => "one", _ => "other" }` |
+| **Sum types** | `type Result = Ok(int) | Err(string)`, recursive types, equality, printing |
+| **Pattern matching** | `match r { Ok(v) => v, Err(m) => 0 }` — destructures a variant, checked for exhaustiveness |
+| **Function types** | `fn(int) -> int` is checked: arity, parameter and return types, and the call's own result type |
 | **Error handling** | `try { ... } catch e { ... }`, `error("msg")`, try-as-expression |
 | **Concurrency** | `scope`/`spawn`, channels (buffered & unbuffered), `for msg in ch` |
 | **Actors** | `actor Store` (`actor struct Store` is accepted for compatibility), `spawn Actor.new(...)`, sync calls, async `send` |
@@ -209,11 +235,11 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Modules** | `import "file"` |
 | **String interpolation** | `"Hello, $name! You are $age years old."` / `"${expr}"` |
 
-### Standard Library — 37 built-in functions
+### Standard Library — 41 built-in functions
 
 **Conversion:** `toString`, `toInt`, `toDouble`, `toFloat`, `toLong`, `parseInt`, `parseFloat`, `parseLong`
 **Strings:** `len`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`
-**Arrays:** `push`, `pop`, `removeAt`, `sort`, `range`
+**Arrays:** `push`, `pop`, `removeAt`, `sort`, `range`, `map`, `filter`, `reduce`, `forEach`
 **Collections:** `map`, `set`, `channel`
 **I/O:** `print`, `println`, `input`, `error`
 **Other:** `random`, `httpGet`, `httpPost`, `canRead`
@@ -283,34 +309,32 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-1565 tests across 15 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, language semantics, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+1733 tests across 21 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, language semantics, sum types, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
-- **[RELEASE_NOTES_0.5.0.md](RELEASE_NOTES_0.5.0.md)** — What changed in 0.5.0, and why
+- **[RELEASE_NOTES_0.6.0.md](RELEASE_NOTES_0.6.0.md)** — What changed in 0.6.0, and why
 - **[FUTURE.md](FUTURE.md)** — Roadmap from 0.6.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.5.0)
+## Known limitations (0.6.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
-- No sum types: a result that is one of several shapes must be a record with
-  flags. This is the largest remaining expressiveness gap.
 - No `throw`, and an error carries only text — `error()` cannot attach a status
-  code or any other payload, and `catch e` cannot match on a type. A
-  message-less Java exception still prints as `null`.
-- A declared function type (`fn(int) -> int`) is parsed but not checked, so a
-  callback with the wrong arity fails at run time.
-- `std/json` cannot report a parse failure: malformed input returns an empty map.
-- No generics, no interfaces, and no reflection over struct fields — a struct
-  must be converted to a map by hand to be serialised.
-- No implicit `int + double` promotion (use `toDouble(n)`)
-- No set literal syntax — use `set()` + `.add()`
-- No hex literals, no long literals, no `do-while`
-- Closure captures are read-only. Writing to one is now a compile error rather
-  than a silently discarded write.
+  code or any other payload, and `catch e` cannot match on a type. Returning a
+  sum type is the way to carry one today.
+- No generics, so a sum type or a container is written per concrete type, and
+  there is no reflection over struct fields — a struct must be converted to a
+  map by hand to be serialised.
+- No interfaces or traits.
+- No visibility control: every top-level declaration in a module is exported.
+- No module aliasing (`import "std/math" as m`).
+- No implicit `int + double` promotion (use `toDouble(n)`).
+- No set literal syntax — use `set()` + `.add()`.
+- No `do-while`.
+- No method chaining on a call result.
 
 ## Contributing
 
