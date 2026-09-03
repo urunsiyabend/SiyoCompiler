@@ -297,10 +297,140 @@ class ModuleScopeTest {
                 .startsWith("This file and the module 'client' it imports would both compile"));
     }
 
+    // --- sum types across modules -------------------------------------------
+
+    @Test
+    void anImportedSumTypeIsConstructedAndMatched() throws Exception {
+        write("result.siyo", """
+                type Result = Ok(int) | Err(string)
+                fn ok(n: int) -> Result { Ok(n) }
+                """);
+
+        String output = compileAndRun("""
+                import "result"
+                fn main() {
+                    println(match result.ok(3) {
+                        Ok(n) => "ok " + toString(n),
+                        Err(m) => m,
+                    })
+                }
+                """, "ImportedUnionMain");
+
+        assertEquals("ok 3", output);
+    }
+
+    @Test
+    void anImportedVariantIsConstructedInTheImportingFile() throws Exception {
+        write("result.siyo", """
+                type Result = Ok(int) | Err(string)
+                fn describe(r: Result) -> string {
+                    match r {
+                        Ok(n) => "ok " + toString(n),
+                        Err(m) => "err " + m,
+                    }
+                }
+                """);
+
+        String output = compileAndRun("""
+                import "result"
+                fn main() {
+                    println(result.describe(Err("bad")))
+                    println(result.describe(Result.Ok(1)))
+                }
+                """, "ImportedVariantMain");
+
+        assertEquals("err bad\nok 1", output);
+    }
+
+    @Test
+    void anImportedSumTypeIsStillCheckedForExhaustiveness() throws Exception {
+        write("result.siyo", """
+                type Result = Ok(int) | Err(string)
+                fn ok(n: int) -> Result { Ok(n) }
+                """);
+
+        String message = firstDiagnosticOf("""
+                import "result"
+                fn main() {
+                    println(match result.ok(1) {
+                        Ok(n) => toString(n),
+                    })
+                }
+                """, "ImportedExhaustive");
+
+        assertTrue(message.contains("does not cover Err"),
+                "expected a non-exhaustive diagnostic, got: " + message);
+    }
+
+    @Test
+    void aSumTypeSurvivesTwoImportHops() throws Exception {
+        write("result.siyo", """
+                type Result = Ok(int) | Err(string)
+                """);
+        write("mid.siyo", """
+                import "result"
+                fn wrap(n: int) -> Result { Ok(n) }
+                """);
+
+        String output = compileAndRun("""
+                import "mid"
+                fn main() {
+                    println(match mid.wrap(9) {
+                        Ok(n) => "ok " + toString(n),
+                        Err(m) => m,
+                    })
+                }
+                """, "TwoHopUnionMain");
+
+        assertEquals("ok 9", output);
+    }
+
+    @Test
+    void aValueOfAnImportedSumTypeIsEqualAcrossTheBoundary() throws Exception {
+        write("result.siyo", """
+                type Result = Ok(int) | Err(string)
+                fn ok(n: int) -> Result { Ok(n) }
+                """);
+
+        String output = compileAndRun("""
+                import "result"
+                fn main() {
+                    println(toString(result.ok(4) == Ok(4)))
+                    println(toString(result.ok(4) == Ok(5)))
+                }
+                """, "ImportedUnionEquality");
+
+        assertEquals("true\nfalse", output);
+    }
+
     // --- helpers ------------------------------------------------------------
 
     private void write(String name, String source) throws Exception {
         Files.writeString(tempDir.resolve(name), source);
+    }
+
+    /**
+     * Compiles a program that imports from the temp directory and returns the
+     * first diagnostic it was rejected with.
+     *
+     * @param source    The program source.
+     * @param className The class name to compile it as.
+     * @return The first diagnostic message.
+     * @throws Exception If writing the source fails.
+     */
+    private String firstDiagnosticOf(String source, String className) throws Exception {
+        Path mainPath = tempDir.resolve("main.siyo");
+        Files.writeString(mainPath, source);
+        Compilation compilation = new Compilation(
+                SyntaxTree.parse(source), new ModuleRegistry(), mainPath.toString());
+        byte[] bytes = compilation.compile(className);
+        if (bytes != null) fail("expected the program to be rejected");
+        DiagnosticBox diagnostics = compilation.getGlobalScope().getDiagnostics();
+        if (!diagnostics.hasNext() && compilation.getEmitDiagnostics() != null) {
+            diagnostics = compilation.getEmitDiagnostics();
+        }
+        if (!diagnostics.hasNext()) fail("expected a diagnostic");
+        return diagnostics.get(0).getMessage();
     }
 
     private String compileAndRun(String source, String className) throws Exception {
