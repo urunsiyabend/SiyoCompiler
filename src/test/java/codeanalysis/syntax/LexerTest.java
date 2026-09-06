@@ -307,6 +307,12 @@ class LexerTest {
         tokens.add(new Token(SyntaxType.SlashToken, "/"));
         tokens.add(new Token(SyntaxType.OpenParenthesisToken, "("));
         tokens.add(new Token(SyntaxType.CloseParenthesisToken, ")"));
+        tokens.add(new Token(SyntaxType.OpenBraceToken, "{"));
+        tokens.add(new Token(SyntaxType.CloseBraceToken, "}"));
+        tokens.add(new Token(SyntaxType.OpenBracketToken, "["));
+        tokens.add(new Token(SyntaxType.CloseBracketToken, "]"));
+        tokens.add(new Token(SyntaxType.ColonToken, ":"));
+        tokens.add(new Token(SyntaxType.CommaToken, ","));
         tokens.add(new Token(SyntaxType.TrueKeyword, "true"));
         tokens.add(new Token(SyntaxType.FalseKeyword, "false"));
         tokens.add(new Token(SyntaxType.BangToken, "!"));
