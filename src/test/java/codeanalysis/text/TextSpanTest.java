@@ -17,4 +17,14 @@ class TextSpanTest {
         assertEquals(first, second);
         assertEquals(first.hashCode(), second.hashCode());
     }
+
+    @Test
+    void TextSpan_FromBounds_ReturnsDerivedValues() {
+        TextSpan span = TextSpan.fromBounds(4, 10);
+
+        assertEquals(4, span.getStart());
+        assertEquals(6, span.getLength());
+        assertEquals(10, span.getEnd());
+        assertEquals("Start: 4, Length: 6", span.toString());
+    }
 }
