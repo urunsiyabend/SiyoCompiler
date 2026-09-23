@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.6.0-green" alt="v0.6.0">
-  <img src="https://img.shields.io/badge/tests-1565%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.7.0-green" alt="v0.7.0">
+  <img src="https://img.shields.io/badge/tests-2184%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -204,7 +204,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.6.0"
+version = "0.7.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -225,10 +225,15 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Closures** | `fn(x: int) -> int { x * 2 }`, factory pattern, and a mutable local a closure captures is shared with the enclosing scope |
 | **Structs** | `struct Point { x: int, y: int }`, field access, mutation, pass-by-ref |
 | **Enums** | `enum Direction { N, E, S, W }` |
-| **Sum types** | `type Result = Ok(int) | Err(string)`, recursive types, equality, printing |
+| **Sum types** | `type Result = Ok(int) \| Err(string)`, recursive types, equality, printing |
 | **Pattern matching** | `match r { Ok(v) => v, Err(m) => 0 }` — destructures a variant, checked for exhaustiveness |
 | **Function types** | `fn(int) -> int` is checked: arity, parameter and return types, and the call's own result type |
-| **Error handling** | `try { ... } catch e { ... }`, `error("msg")`, try-as-expression |
+| **Generics** | `Array<int>`, `Map<string, int>`, `Set<int>`, `type Option<T> = Some(T) \| None`, `fn identity<T>(x: T) -> T` |
+| **Interfaces** | `interface Shape { fn area() -> int }` with `impl Shape for Square`, dispatched on the struct at run time |
+| **Visibility** | `pub` marks what a module exports; a module that marks nothing exports everything |
+| **Module aliasing** | `import "std/math" as m` |
+| **Reflection** | `fields(v)`, `field(v, name)`, `setField(v, name, x)`, `toMap(v)`, `typeName(v)` |
+| **Error handling** | `try { ... } catch e { ... }`, `throw` raises any value, `catch e: Failure` binds it with a declared type, `error("msg")`, try-as-expression |
 | **Concurrency** | `scope`/`spawn`, channels (buffered & unbuffered), `for msg in ch` |
 | **Actors** | `actor Store` (`actor struct Store` is accepted for compatibility), `spawn Actor.new(...)`, sync calls, async `send` |
 | **Java interop** | `import java "java.net.Socket"`, Java types in signatures, constructors, static & instance methods, overload resolution |
@@ -309,32 +314,31 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-1733 tests across 21 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, language semantics, sum types, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2184 tests across 25 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
+- **[RELEASE_NOTES_0.7.0.md](RELEASE_NOTES_0.7.0.md)** — What changed in 0.7.0, and why
 - **[RELEASE_NOTES_0.6.0.md](RELEASE_NOTES_0.6.0.md)** — What changed in 0.6.0, and why
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.6.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.7.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.6.0)
+## Known limitations (0.7.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
-- No `throw`, and an error carries only text — `error()` cannot attach a status
-  code or any other payload, and `catch e` cannot match on a type. Returning a
-  sum type is the way to carry one today.
-- No generics, so a sum type or a container is written per concrete type, and
-  there is no reflection over struct fields — a struct must be converted to a
-  map by hand to be serialised.
-- No interfaces or traits.
-- No visibility control: every top-level declaration in a module is exported.
-- No module aliasing (`import "std/math" as m`).
-- No implicit `int + double` promotion (use `toDouble(n)`).
-- No set literal syntax — use `set()` + `.add()`.
-- No `do-while`.
-- No method chaining on a call result.
+- A struct is not generic: `struct Box<T>` is not accepted, though a sum type,
+  a function and a container all take type arguments.
+- An interface declares methods and nothing else — no default bodies, no
+  interface that requires another, and an interface cannot bound a type
+  parameter.
+- `as` casts a Java object; it does not convert between numeric types. Widening
+  is implicit and narrowing is written with `toInt`.
+- A struct literal with no fields (`Empty { }`) is not recognised, and a map
+  literal written as a function body's tail value (`fn f() -> map { {"a": 1} }`)
+  is read as a block.
+- No package manager, formatter, or LSP server.
 
 ## Contributing
 

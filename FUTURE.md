@@ -191,35 +191,63 @@ is one of several shapes, and a declared function type nobody checked. See
 
 ---
 
-## 0.7.0 — Errors, Visibility, Generics (Next)
+## 0.7.0 — Errors, Visibility, Generics, Interfaces (Released)
 
-### Error Handling
-- `throw` / user-raised errors
-- An error payload: `error(msg)` raises text and `catch e` binds text, so an
-  error cannot carry a status code or be matched on by type
-- Observable exception type in `catch` (a message-less Java exception prints as
-  `null`)
+The release that took the whole of the 0.7.0 list. See
+`RELEASE_NOTES_0.7.0.md`.
 
-### Module System
-- Public/private visibility (`pub` keyword)
-- Module aliasing (`import "std/math" as m`)
+- **An error is a value.** `throw` raises anything — a number, a struct, a sum
+  type variant — and that value is what `catch e` binds. `catch e: Failure`
+  gives the binding a declared type, so a match over a caught sum type is
+  checked for exhaustiveness. A Java exception with no message reports its type
+  instead of binding `null`, and `error(msg)` still raises its message
+- **A module says what it exports.** `pub` marks a declaration as exported; a
+  module that marks nothing exports everything it declares, so no module
+  written before visibility existed changes meaning. A use of a name a module
+  keeps to itself is reported as private rather than as missing
+- **A module may be reached under a name of the importer's choosing.**
+  `import "std/math" as m`. Two modules whose paths end in the same segment no
+  longer collide: a module's JVM class name is derived from its whole path
+- **Generics.** `Array<int>`, `Map<string, int>` and `Set<int>` say what a
+  container holds, and a declared map's values keep their type when indexed.
+  `type Option<T> = Some(T) | None` is declared once and used at every payload
+  type, and `fn identity<T>(x: T) -> T` keeps the type it was given at each
+  call. `fields`, `field`, `setField`, `toMap` and `typeName` read a struct's
+  fields, so one function can serialise any struct
+- **Interfaces.** `interface Shape { fn area() -> int }` with
+  `impl Shape for Square`. A value reached through an interface dispatches on
+  the struct it turns out to be; a struct missing a method, or providing one
+  with the wrong signature, is reported at compile time
+- **Ergonomics.** A narrower number widens to meet a wider one in arithmetic,
+  in comparison, at a parameter and at a return, so `1 + 2.5` and
+  `fn f() -> float { 3 }` mean what they read as. `do { } while c`, set
+  literals (`#{1, 2, 3}`), and a builtin written as a method on its first
+  argument, so `text.trim().toUpper()` and `xs.map(f).len()` chain
+- Two backend divergences fixed: a compiled struct prints the way an
+  interpreted one does, and a value-producing `try` expression no longer leaves
+  a boxed value where its declared type was expected
+- 2,184 tests pass, up from 1,733
+
+---
+
+## 0.8.0 — Tooling & Generic Data (Next)
 
 ### Generics
-- `Array<int>`, `Map<string, int>`, and a sum type over a type parameter, so
-  `Result` need not be rewritten per payload type
-- Generic functions: `fn identity<T>(x: T) -> T`
-- Reflection over struct fields, so a struct can be serialised without being
-  converted to a map by hand
+- Generic structs: `struct Box<T> { value: T }`
+- An interface as a bound on a type parameter: `fn largest<T: Ord>(xs: T[]) -> T`
 
-### Interfaces / Traits
-- `interface Printable { fn print() }`
-- Struct implementation
+### Interfaces
+- Default method bodies
+- An interface that requires another
 
 ### Ergonomics
-- Method chaining on a call result
-- Set literals
-- `do-while`
-- Implicit `int` to `float` promotion in arithmetic
+- A struct literal with no fields: `Empty { }`
+- A map literal as a function body's tail value
+- Numeric conversion with `as`: `n as float`
+
+### Tooling
+- `siyoc fmt` — formatter
+- `siyoc check` — type checker without running
 
 ---
 

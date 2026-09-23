@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.6.0)
+# Siyo Language Grammar (0.7.0)
 
 ## Lexical Grammar
 
@@ -16,6 +16,10 @@
 | `return` | Return statement |
 | `break` / `continue` | Loop control |
 | `try` / `catch` | Error handling |
+| `throw` | Raises a value as an error |
+| `do` | Do-while loop: `do { ... } while cond` |
+| `interface` | Interface declaration |
+| `pub` | Marks a declaration as exported by its module |
 | `match` | Pattern matching expression |
 | `struct` | Struct type declaration |
 | `enum` | Enum type declaration |
@@ -93,20 +97,24 @@
 compilation_unit  : statement* EOF
 
 statement
-    : block_statement
+    : 'pub' declaration      // only at a module's top level
+    | block_statement
     | variable_declaration
     | if_statement
     | while_statement
+    | do_while_statement
     | for_statement
     | for_in_statement
     | function_declaration
     | struct_declaration
     | enum_declaration
     | type_declaration
+    | interface_declaration
     | return_statement
     | break_statement
     | continue_statement
     | try_catch_statement
+    | throw_statement
     | scope_expression
     | import_statement
     | send_statement
@@ -128,12 +136,22 @@ if_statement
 //     fn reason(code: int) -> string { if code == 200 { "OK" } else { "?" } }
 
 while_statement : 'while' expression block
+do_while_statement
+    : 'do' block 'while' expression
+    // The body runs once before the condition is first checked.
 for_statement   : 'for' variable_declaration expression expression block
 for_in_statement: 'for' IDENTIFIER 'in' expression block
                 | 'for' IDENTIFIER 'in' map_expression block   // iterates keys
 
 function_declaration
-    : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause? block
+    : 'fn' IDENTIFIER type_parameters? '(' parameter_list? ')' type_clause? block
+
+type_parameters
+    : '<' IDENTIFIER (',' IDENTIFIER)* '>'
+    // A type parameter stands for a type in the signature and in the body:
+    //     fn identity<T>(x: T) -> T { x }
+    // The function is compiled once with its parameters erased; the call site
+    // is where each one is known, and that is where the result gets its type.
 
 struct_declaration
     : 'struct' IDENTIFIER '{' field_list '}'
@@ -156,7 +174,13 @@ enum_member
     // `enum E { A = 10, B }` gives B the value 11.
 
 type_declaration
-    : 'type' IDENTIFIER '=' union_variant ('|' union_variant)*
+    : 'type' IDENTIFIER type_parameters? '=' union_variant ('|' union_variant)*
+    // A sum type may be declared over a type parameter, and is then written
+    // with a type argument wherever it is used:
+    //     type Option<T> = Some(T) | None
+    //     fn describe(o: Option<int>) -> string { ... }
+    // Option<int> and Option<string> are the same declared type with the
+    // parameter erased; a match over either is still checked for exhaustiveness.
 
 union_variant
     : IDENTIFIER ('(' type_annotation (',' type_annotation)* ')')?
@@ -169,14 +193,35 @@ actor_declaration
     // `actor Name` is the idiomatic form; `actor struct Name` is accepted for
     // backward compatibility with 0.3.x sources.
 
+interface_declaration
+    : 'interface' IDENTIFIER '{' method_signature* '}'
+
+method_signature
+    : 'fn' IDENTIFIER '(' parameter_list? ')' type_clause?
+    // A signature with no body. The receiver is not written: an implementation
+    // takes it as its own `self` first parameter.
+
 impl_declaration
     : 'impl' IDENTIFIER '{' function_declaration* '}'
+    | 'impl' IDENTIFIER 'for' IDENTIFIER '{' function_declaration* '}'
+    // The second form names the interface first and the struct second. Every
+    // method the interface declares must be provided, with a matching arity
+    // and return type, or the struct is reported as not implementing it.
     // Methods take an explicit `self` first parameter; `fn new()` is the
     // constructor used by struct construction and by `spawn Type.new(...)`.
     // There is no `fn Type.method(...)` top-level spelling.
 
 try_catch_statement
-    : 'try' block 'catch' IDENTIFIER block
+    : 'try' block 'catch' IDENTIFIER (':' type_annotation)? block
+    // The catch variable binds whatever was raised. Without an annotation it is
+    // the erased payload; with one it carries that type, which is what makes a
+    // match over a caught sum type checkable for exhaustiveness.
+
+throw_statement
+    : 'throw' expression
+    // Raises the value of the expression. A thrown Java exception is raised as
+    // itself, and a handler then binds its message, or its type name when it
+    // has none.
 
 scope_expression
     : 'scope' block          // spawned threads joined at block end
@@ -185,8 +230,10 @@ send_statement
     : 'send' expression      // fire-and-forget actor message
 
 import_statement
-    : 'import' STRING
+    : 'import' STRING ('as' IDENTIFIER)?
     | 'import' 'java' STRING
+    // An alias replaces the module's own name as the qualifier its members are
+    // reached through, and is local to the importing file.
 
 return_statement : 'return' expression?
 break_statement  : 'break'
@@ -212,6 +259,9 @@ unary_expression
 
 postfix_expression
     : primary_expression ('[' expression ']' | '.' IDENTIFIER | '(' argument_list? ')')*
+    // `x.f(a)` calls `f(x, a)` when a function named `f` takes `x` as its first
+    // parameter, so a builtin chains: `text.trim().toUpper()`. An imported Java
+    // object's own methods win over a Siyo function of the same name.
 
 primary_expression
     : NUMBER | FLOAT | STRING | TRIPLE_QUOTED_STRING | 'true' | 'false' | 'null'
@@ -219,6 +269,7 @@ primary_expression
     | '(' expression ')'
     | '[' expression_list? ']'                       // array literal (empty allowed)
     | '{' (STRING ':' expression (',' ...)*)? '}'    // map literal (empty allowed)
+    | '#' '{' expression_list? '}'                   // set literal (empty allowed)
     | struct_literal
     | lambda_expression
     | match_expression
@@ -253,7 +304,7 @@ variant_pattern
     // pattern comparing against that variant.
 
 try_expression
-    : 'try' block 'catch' IDENTIFIER block
+    : 'try' block 'catch' IDENTIFIER (':' type_annotation)? block
 
 spawn_expression
     : 'spawn' block          // bare `spawn { ... }` is allowed outside `scope { }`
@@ -354,7 +405,13 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 
 ### Type Rules
 
-- Arithmetic operators work on `int`, `long`, `double` (same-type operands)
+- Arithmetic and comparison operators meet mixed numeric operands at the wider
+  of the two types, in the order `int`, `long`, `float`. `1 + 2.5` is `3.5` and
+  `1 < 2.5` is `true`; no conversion is written
+- A narrower number also widens at a parameter and at a return, so `half(5)`
+  reaches `fn half(x: float)` and `fn three() -> float { 3 }` returns `3.0`.
+  Narrowing stays explicit: passing a `float` where an `int` is declared is an
+  error
 - String supports `+` (concatenation), `==`, `!=`, `<`, `>`, `<=`, `>=`
 - `null` supports `==` and `!=` with any reference type, collections included
 - `int` widens to `long` and `float` at a declared type
@@ -374,6 +431,14 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 - A closure shares the mutable locals it captures, so a write inside one is
   seen outside it and the other way round. An immutable local is captured by
   value
+- A type may be written with type arguments: `Array<T>` holds what `T[]` holds,
+  `Map<K, V>` indexes to a `V`, and `Set<T>` holds a `T`. Type arguments nest
+- A generic declaration is erased: `Option<int>` and `Option<string>` are the
+  same declared type, and a generic function is compiled once. The call site is
+  where a type parameter is known, so that is where the result gets its type
+- A value declared as an interface is some struct that implements it. A method
+  call on one dispatches on the struct it turns out to be; every implementor is
+  known when the call is compiled
 
 ## Built-in Functions
 
@@ -398,6 +463,16 @@ constructor.
 
 ### Collections
 `map()`, `set()`, `channel()`, `channel(capacity)`, `range(start, end)`
+
+`len` is defined for a string, an array, a map and a set alike. A set may also
+be written as a literal — `#{1, 2, 3}` — and a map as `{"k": 1}`.
+
+### Reflection
+`fields(v)` — a struct's field names, in declaration order
+`field(v, name)` — one field's value
+`setField(v, name, x)` — writes one field
+`toMap(v)` — a struct's fields as a map, which is what serialising one needs
+`typeName(v)` — the name of the struct a value is, or `""` when it is not one
 
 ### Other
 `random(max)`, `httpGet(url)`, `httpPost(url, body)`, `canRead(reader)`
