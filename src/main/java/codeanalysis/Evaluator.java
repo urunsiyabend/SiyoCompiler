@@ -95,6 +95,9 @@ public class Evaluator {
                     _returnValue = rs.getExpression() == null ? null : evaluateExpression(rs.getExpression());
                     _returnTriggered = true;
                 }
+                case ThrowStatement -> {
+                    throw new SiyoThrow(evaluateExpression(((BoundThrowStatement) s).getExpression()));
+                }
                 case TryCatchStatement -> {
                     evaluateTryCatchStatement((BoundTryCatchStatement) s);
                     index++;
@@ -233,13 +236,18 @@ public class Evaluator {
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
             case CallExpression -> evaluateCallExpression((BoundCallExpression) node);
+            case InterfaceCallExpression -> evaluateInterfaceCall((BoundInterfaceCallExpression) node);
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case MapLiteralExpression -> evaluateMapLiteralExpression((codeanalysis.binding.BoundMapLiteralExpression) node);
+            case SetLiteralExpression -> evaluateSetLiteralExpression((codeanalysis.binding.BoundSetLiteralExpression) node);
             case IndexExpression -> evaluateIndexExpression((BoundIndexExpression) node);
             case MemberAccessExpression -> evaluateMemberAccessExpression((BoundMemberAccessExpression) node);
             case JavaMethodCallExpression -> evaluateJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> evaluateJavaStaticField((BoundJavaStaticFieldExpression) node);
             case CastExpression -> evaluateExpression(((BoundCastExpression) node).getExpression());
+            case ConversionExpression -> widenNumeric(
+                    evaluateExpression(((BoundConversionExpression) node).getExpression()),
+                    node.getClassType());
             case LambdaExpression -> evaluateLambdaExpression((BoundLambdaExpression) node);
             case ClosureCallExpression -> evaluateClosureCall((BoundClosureCallExpression) node);
             case ScopeExpression -> evaluateScopeExpression((BoundScopeExpression) node);
@@ -424,6 +432,47 @@ public class Evaluator {
      * @return The computed result of the expression.
      * @throws Exception if an error occurs during evaluation.
      */
+    /**
+     * Calls a method on a value reached through an interface: the receiver's
+     * struct decides which implementation runs.
+     *
+     * @param node The bound interface call.
+     * @return The method's value.
+     * @throws Exception if evaluation fails.
+     */
+    private Object evaluateInterfaceCall(BoundInterfaceCallExpression node) throws Exception {
+        Object receiver = evaluateExpression(node.getTarget());
+        String structName = structNameOf(receiver);
+        FunctionSymbol implementation = structName == null
+                ? null
+                : node.getImplementations().get(structName);
+        if (implementation == null) {
+            throw new SiyoThrow(String.format("%s does not implement %s",
+                    structName == null ? "value" : structName, node.getInterfaceName()));
+        }
+
+        Object[] arguments = new Object[node.getArguments().size() + 1];
+        arguments[0] = receiver;
+        for (int i = 0; i < node.getArguments().size(); i++) {
+            arguments[i + 1] = evaluateExpression(node.getArguments().get(i));
+        }
+        return invokeFunction(implementation, arguments);
+    }
+
+    /** The name of the struct a runtime value is, or null when it is not one. */
+    private static String structNameOf(Object value) {
+        if (value instanceof SiyoStruct struct) {
+            return struct.getStructType() != null ? struct.getStructType().getName() : null;
+        }
+        if (value instanceof SiyoObject object) {
+            return object.getTypeName();
+        }
+        if (value instanceof SiyoActor actor) {
+            return actor.getActorTypeName();
+        }
+        return null;
+    }
+
     private Object evaluateCallExpression(BoundCallExpression c) throws Exception {
         FunctionSymbol function = c.getFunction();
 
@@ -505,8 +554,8 @@ public class Evaluator {
             BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
             evaluateBlock(tryBlock);
         } catch (Exception e) {
-            // Assign error message to the catch variable
-            assignVariable(node.getErrorVariable(), e.getMessage() != null ? e.getMessage() : e.toString());
+            // Bind whatever was raised: a thrown payload, else the Java message
+            assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
         }
@@ -751,11 +800,27 @@ public class Evaluator {
             evaluateBlock(tryBlock);
             return _lastValue;
         } catch (Exception e) {
-            assignVariable(node.getErrorVariable(), e.getMessage() != null ? e.getMessage() : e.toString());
+            assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
             return _lastValue;
         }
+    }
+
+    /**
+     * Widens a number to the type a conversion asks for, so the interpreter
+     * agrees with the bytecode about the type of a mixed expression.
+     *
+     * @param value  The value to widen.
+     * @param target The numeric type to widen to.
+     * @return The widened value, or the value unchanged when it is not numeric.
+     */
+    private static Object widenNumeric(Object value, Class<?> target) {
+        if (!(value instanceof Number number)) return value;
+        if (target == Double.class) return number.doubleValue();
+        if (target == Long.class) return number.longValue();
+        if (target == Integer.class) return number.intValue();
+        return value;
     }
 
     private static long toLong(Object val) {
@@ -1026,6 +1091,14 @@ public class Evaluator {
         return SiyoUnion.of(node.getUnionType().getName(), node.getVariantName(), payload);
     }
 
+    private Object evaluateSetLiteralExpression(codeanalysis.binding.BoundSetLiteralExpression node) throws Exception {
+        SiyoSet set = new SiyoSet();
+        for (BoundExpression element : node.getElements()) {
+            set.add(evaluateExpression(element));
+        }
+        return set;
+    }
+
     private Object evaluateMapLiteralExpression(codeanalysis.binding.BoundMapLiteralExpression node) throws Exception {
         SiyoMap map = new SiyoMap();
         for (int i = 0; i < node.getKeys().size(); i++) {
@@ -1079,11 +1152,24 @@ public class Evaluator {
      * @throws Exception if the function is not recognized.
      */
     private Object evaluateBuiltinFunction(FunctionSymbol function, Object[] arguments) throws Exception {
+        if (function == BuiltinFunctions.FIELDS) {
+            return SiyoRuntime.structFields(arguments[0]);
+        }
+        if (function == BuiltinFunctions.FIELD) {
+            return SiyoRuntime.structField(arguments[0], (String) arguments[1]);
+        }
+        if (function == BuiltinFunctions.SET_FIELD) {
+            SiyoRuntime.setStructField(arguments[0], (String) arguments[1], arguments[2]);
+            return null;
+        }
+        if (function == BuiltinFunctions.TO_MAP) {
+            return SiyoRuntime.structToMap(arguments[0]);
+        }
+        if (function == BuiltinFunctions.TYPE_NAME) {
+            return SiyoRuntime.typeNameOf(arguments[0]);
+        }
         if (function == BuiltinFunctions.LEN) {
-            if (arguments[0] instanceof SiyoArray arr) {
-                return arr.length();
-            }
-            return ((String) arguments[0]).length();
+            return SiyoRuntime.lengthOf(arguments[0]);
         }
         if (function == BuiltinFunctions.TO_STRING) {
             return String.valueOf(arguments[0]);
@@ -1153,7 +1239,7 @@ public class Evaluator {
             return ((String) arguments[0]).contains((String) arguments[1]);
         }
         if (function == BuiltinFunctions.ERROR) {
-            throw new RuntimeException((String) arguments[0]);
+            throw new SiyoThrow(arguments[0]);
         }
         if (function == BuiltinFunctions.INPUT) {
             System.out.print(arguments[0]);

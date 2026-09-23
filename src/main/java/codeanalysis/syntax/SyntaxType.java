@@ -354,4 +354,31 @@ public enum SyntaxType {
 
     /* Represents a map literal expression ({"key": value}). */
     MapLiteralExpression,
+
+    /* Represents a 'throw' keyword. */
+    ThrowKeyword,
+
+    /* Represents a throw statement. */
+    ThrowStatement,
+
+    /* Represents a 'pub' keyword. */
+    PubKeyword,
+
+    /* Represents a 'do' keyword. */
+    DoKeyword,
+
+    /* Represents a do-while statement. */
+    DoWhileStatement,
+
+    /* Represents a hash (#) token, which opens a set literal. */
+    HashToken,
+
+    /* Represents a set literal expression (#{1, 2, 3}). */
+    SetLiteralExpression,
+
+    /* Represents an 'interface' keyword. */
+    InterfaceKeyword,
+
+    /* Represents a 'for' used to name the type an impl block implements. */
+    InterfaceDeclaration,
     }

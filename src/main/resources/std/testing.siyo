@@ -1,14 +1,14 @@
 mut _beforeHook = fn() {}
 mut _afterHook = fn() {}
 
-fn assert(condition: bool, msg: string) {
+pub fn assert(condition: bool, msg: string) {
     if !condition {
         println("  FAIL: " + msg)
         error("assertion failed: " + msg)
     }
 }
 
-fn assertEqual(actual: string, expected: string, msg: string) {
+pub fn assertEqual(actual: string, expected: string, msg: string) {
     if actual != expected {
         mut detail = msg + " — expected " + expected + ", got " + actual
         println("  FAIL: " + detail)
@@ -16,11 +16,11 @@ fn assertEqual(actual: string, expected: string, msg: string) {
     }
 }
 
-fn assertEq(actual: string, expected: string, msg: string) {
+pub fn assertEq(actual: string, expected: string, msg: string) {
     assertEqual(actual, expected, msg)
 }
 
-fn assertThrows(body: fn(), expectedMsgSubstring: string) {
+pub fn assertThrows(body: fn(), expectedMsgSubstring: string) {
     mut thrown = false
     try {
         body()
@@ -38,15 +38,15 @@ fn assertThrows(body: fn(), expectedMsgSubstring: string) {
     }
 }
 
-fn beforeEach(body: fn()) {
+pub fn beforeEach(body: fn()) {
     _beforeHook = body
 }
 
-fn afterEach(body: fn()) {
+pub fn afterEach(body: fn()) {
     _afterHook = body
 }
 
-fn test(name: string, body: fn() -> bool) {
+pub fn test(name: string, body: fn() -> bool) {
     try {
         mut ok = body()
         if ok {
@@ -59,7 +59,7 @@ fn test(name: string, body: fn() -> bool) {
     }
 }
 
-fn run(name: string, tests: fn()[]) {
+pub fn run(name: string, tests: fn()[]) {
     println("=== " + name + " ===")
     mut passed = 0
     mut failed = 0

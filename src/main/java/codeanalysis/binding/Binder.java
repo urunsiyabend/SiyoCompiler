@@ -153,6 +153,7 @@ public class Binder {
             case VariableDeclaration -> bindVariableDeclaration((VariableDeclarationSyntax)syntax);
             case IfStatement -> bindIfStatement((IfStatementSyntax)syntax);
             case WhileStatement -> bindWhileStatement((WhileStatementSyntax)syntax);
+            case DoWhileStatement -> bindDoWhileStatement((DoWhileStatementSyntax)syntax);
             case ForStatement -> bindForStatement((ForStatementSyntax)syntax);
             case FunctionDeclaration -> bindFunctionDeclaration((FunctionDeclarationSyntax)syntax);
             case ReturnStatement -> bindReturnStatement((ReturnStatementSyntax)syntax);
@@ -163,7 +164,9 @@ public class Binder {
             case EnumDeclaration -> _moduleHandler.bindEnumDeclaration((EnumDeclarationSyntax)syntax);
             case TypeDeclaration -> _moduleHandler.bindTypeDeclaration((TypeDeclarationSyntax)syntax);
             case TryCatchStatement -> bindTryCatchStatement((TryCatchStatementSyntax)syntax);
+            case ThrowStatement -> bindThrowStatement((ThrowStatementSyntax)syntax);
             case ImplDeclaration -> bindImplDeclaration((ImplDeclarationSyntax)syntax);
+            case InterfaceDeclaration -> bindInterfaceDeclaration((InterfaceDeclarationSyntax)syntax);
             case ActorDeclaration -> bindActorDeclaration((ActorDeclarationSyntax)syntax);
             case SendStatement -> bindSendStatement((SendStatementSyntax)syntax);
             case ImportStatement -> bindImportStatement((ImportStatementSyntax)syntax);
@@ -187,7 +190,11 @@ public class Binder {
         _moduleHandler.setScope(_scope);
 
         // First pass: process imports, register function/struct/enum declarations
+        List<ImplDeclarationSyntax> pendingImplementors = new ArrayList<>();
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            if (wasFileTopLevel) {
+                recordDeclarationVisibility(statementSyntax);
+            }
             if (statementSyntax instanceof ImportStatementSyntax importSyntax) {
                 bindImportStatement(importSyntax);
             } else if (statementSyntax instanceof JavaImportStatementSyntax javaImportSyntax) {
@@ -216,8 +223,24 @@ public class Binder {
                 StructSymbol symbol = new StructSymbol(name, fields, fieldTypeNames);
                 symbol.setActor(true);
                 _structTypes.put(name, symbol);
+            } else if (statementSyntax instanceof InterfaceDeclarationSyntax interfaceSyntax) {
+                registerInterfaceDeclaration(interfaceSyntax);
             } else if (statementSyntax instanceof ImplDeclarationSyntax implSyntax) {
                 _moduleHandler.registerImplDeclaration(implSyntax);
+                if (implSyntax.getInterfaceName() != null) {
+                    pendingImplementors.add(implSyntax);
+                }
+            }
+        }
+
+        // Which structs implement which interface is settled before any body is
+        // bound. A function that takes an interface may be written above the
+        // impl block that satisfies it, and it still has to see it.
+        for (ImplDeclarationSyntax implSyntax : pendingImplementors) {
+            codeanalysis.InterfaceSymbol declared =
+                    _typeResolver.getInterfaceTypes().get(implSyntax.getInterfaceName().getData());
+            if (declared != null) {
+                declared.addImplementor(implSyntax.getTypeName().getData());
             }
         }
 
@@ -237,6 +260,70 @@ public class Binder {
         return new BoundBlockStatement(statements);
     }
 
+    /**
+     * Notes whether a top-level declaration is exported by the file being
+     * bound. Only the top level can export: a declaration nested inside a
+     * function is reachable from nowhere else regardless.
+     *
+     * @param statement The top-level statement.
+     */
+    private void recordDeclarationVisibility(StatementSyntax statement) {
+        String name = declaredName(statement);
+        if (name != null) {
+            _moduleHandler.recordVisibility(name, statement.isPublic());
+        }
+    }
+
+    /**
+     * The name a top-level declaration introduces, or null when the statement
+     * declares nothing that a module could export.
+     *
+     * @param statement The top-level statement.
+     * @return The declared name, or null.
+     */
+    private static String declaredName(StatementSyntax statement) {
+        if (statement instanceof FunctionDeclarationSyntax function) {
+            return function.getIdentifier().getData();
+        }
+        if (statement instanceof StructDeclarationSyntax struct) {
+            return struct.getIdentifier().getData();
+        }
+        if (statement instanceof EnumDeclarationSyntax enumeration) {
+            return enumeration.getIdentifier().getData();
+        }
+        if (statement instanceof TypeDeclarationSyntax typeDeclaration) {
+            return typeDeclaration.getIdentifier().getData();
+        }
+        if (statement instanceof ActorDeclarationSyntax actor) {
+            return actor.getIdentifier().getData();
+        }
+        if (statement instanceof InterfaceDeclarationSyntax declaredInterface) {
+            return declaredInterface.getIdentifier().getData();
+        }
+        if (statement instanceof VariableDeclarationSyntax variable) {
+            return variable.getIdentifier().getData();
+        }
+        return null;
+    }
+
+    /**
+     * Reports a type name that resolved to nothing.
+     *
+     * <p>A module that declares the type but does not export it is the more
+     * likely explanation than a typo, so it is said outright.
+     *
+     * @param span     The span of the name.
+     * @param typeName The name as written.
+     */
+    private void reportMissingType(codeanalysis.text.TextSpan span, String typeName) {
+        String owner = _moduleHandler.privateMemberOwner(typeName);
+        if (owner != null) {
+            _diagnostics.reportPrivateMember(span, typeName, owner);
+            return;
+        }
+        _diagnostics.reportUndefinedType(span, typeName);
+    }
+
     private static boolean isAllowedAtTopLevel(StatementSyntax stmt) {
         return switch (stmt.getType()) {
             case FunctionDeclaration,
@@ -245,6 +332,7 @@ public class Binder {
                  TypeDeclaration,
                  ActorDeclaration,
                  ImplDeclaration,
+                 InterfaceDeclaration,
                  ImportStatement,
                  JavaImportStatement,
                  VariableDeclaration -> true;
@@ -416,6 +504,23 @@ public class Binder {
      * @param syntax The while statement syntax to bind.
      * @return The bound while statement.
      */
+    /**
+     * Binds a do-while loop. It is a while loop whose body runs before the
+     * condition is first checked, so it is bound as one and marked as such.
+     *
+     * @param syntax The do-while statement.
+     * @return The bound loop.
+     */
+    private BoundStatement bindDoWhileStatement(DoWhileStatementSyntax syntax) {
+        LabelSymbol breakLabel = generateLabel("break");
+        LabelSymbol continueLabel = generateLabel("continue");
+        _loopStack.push(new LoopLabels(breakLabel, continueLabel));
+        BoundStatement body = bindStatement(syntax.getBody());
+        _loopStack.pop();
+        BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
+        return new BoundWhileStatement(condition, body, breakLabel, continueLabel, true);
+    }
+
     private BoundStatement bindWhileStatement(WhileStatementSyntax syntax) {
         BoundExpression condition = bindExpression(syntax.getCondition(), Boolean.class);
         LabelSymbol breakLabel = generateLabel("break");
@@ -503,6 +608,7 @@ public class Binder {
             case CallExpression -> bindCallExpression((CallExpressionSyntax) syntax);
             case ArrayLiteralExpression -> bindArrayLiteralExpression((ArrayLiteralExpressionSyntax) syntax);
             case MapLiteralExpression -> bindMapLiteralExpression((codeanalysis.syntax.MapLiteralExpressionSyntax) syntax);
+            case SetLiteralExpression -> bindSetLiteralExpression((codeanalysis.syntax.SetLiteralExpressionSyntax) syntax);
             case IndexExpression -> bindIndexExpression((IndexExpressionSyntax) syntax);
             case MemberAccessExpression -> bindMemberAccessExpression((MemberAccessExpressionSyntax) syntax);
             case StructLiteralExpression -> bindStructLiteralExpression((StructLiteralExpressionSyntax) syntax);
@@ -611,11 +717,8 @@ public class Binder {
 
     private BoundExpression bindTryExpression(TryExpressionSyntax syntax) {
         BoundStatement tryBody = bindStatement(syntax.getTryBody());
-        String errorName = syntax.getErrorVariable().getData();
-        VariableSymbol errorVar = new VariableSymbol(errorName, true, String.class);
-        _scope = new BoundScope(_scope);
-        _moduleHandler.setScope(_scope);
-        _scope.tryDeclare(errorVar);
+        VariableSymbol errorVar = declareErrorVariable(
+                syntax.getErrorVariable(), syntax.getErrorTypeToken());
         BoundStatement catchBody = bindStatement(syntax.getCatchBody());
         _scope = _scope.getParent();
         _moduleHandler.setScope(_scope);
@@ -842,7 +945,7 @@ public class Binder {
             String typeName = arm.getVariantTypeName().getData();
             union = _typeResolver.getUnionTypes().get(typeName);
             if (union == null) {
-                _diagnostics.reportUndefinedType(arm.getVariantTypeName().getSpan(), typeName);
+                reportMissingType(arm.getVariantTypeName().getSpan(), typeName);
                 return null;
             }
         } else if (targetUnion != null && targetUnion.hasVariant(variantName)) {
@@ -1028,11 +1131,68 @@ public class Binder {
             boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), leftType, leftType);
         }
 
+        // Mixed numeric operands meet at the wider of the two types. Enumerating
+        // an operator per pair covered int/long partly and int/float not at all,
+        // so `1 + 2.5` was rejected and every mix needed a hand conversion.
+        if (boundOperator == null) {
+            Class<?> common = widerNumericType(leftType, rightType);
+            if (common != null) {
+                boundOperator = BoundBinaryOperator.bind(syntax.getOperator().getType(), common, common);
+                if (boundOperator != null) {
+                    boundLeft = widenTo(boundLeft, common);
+                    boundRight = widenTo(boundRight, common);
+                }
+            }
+        }
+
         if (boundOperator == null) {
             _diagnostics.reportUndefinedBinaryOperator(syntax.getOperator().getSpan(), syntax.getOperator().getData(), leftType, rightType);
             return boundLeft;
         }
         return new BoundBinaryExpression(boundLeft, boundOperator, boundRight);
+    }
+
+    /**
+     * The type two numeric operands of different types meet at, or null when
+     * they are not both numeric or already agree.
+     *
+     * <p>The order is int, then long, then float: every value of the narrower
+     * type is a value of the wider one, so widening never changes what the
+     * program means.</p>
+     *
+     * @param left  The left operand's type.
+     * @param right The right operand's type.
+     * @return The common type, or null.
+     */
+    static Class<?> widerNumericType(Class<?> left, Class<?> right) {
+        int leftRank = numericRank(left);
+        int rightRank = numericRank(right);
+        if (leftRank == 0 || rightRank == 0 || leftRank == rightRank) return null;
+        return leftRank > rightRank ? left : right;
+    }
+
+    /** Where a type sits in the widening order, or 0 when it is not numeric. */
+    private static int numericRank(Class<?> type) {
+        if (type == Integer.class) return 1;
+        if (type == Long.class) return 2;
+        if (type == Double.class) return 3;
+        return 0;
+    }
+
+    /**
+     * Widens an expression to a numeric type, or returns it unchanged when it
+     * already has that type or is not a narrower numeric one.
+     *
+     * @param expression The expression to widen.
+     * @param target     The type to widen to.
+     * @return The expression, wrapped if a widening is needed.
+     */
+    static BoundExpression widenTo(BoundExpression expression, Class<?> target) {
+        Class<?> from = expression.getClassType();
+        if (from == target) return expression;
+        if (numericRank(from) == 0 || numericRank(target) == 0) return expression;
+        if (numericRank(from) >= numericRank(target)) return expression;
+        return new BoundConversionExpression(expression, target);
     }
 
     /**
@@ -1368,6 +1528,9 @@ public class Binder {
      */
     private BoundStatement bindFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
+        // A type parameter stands for a type throughout the declaration, so it
+        // resolves in the signature and in the body alike.
+        _typeResolver.getTypeParameters().addAll(syntax.getTypeParameters());
 
         // Parse parameters
         List<ParameterSymbol> parameters = new ArrayList<>();
@@ -1379,7 +1542,7 @@ public class Binder {
             Class<?> parameterType = _typeResolver.lookupType(typeName);
 
             if (parameterType == null) {
-                _diagnostics.reportUndefinedType(parameterSyntax.getTypeToken().getSpan(), typeName);
+                reportMissingType(parameterSyntax.getTypeToken().getSpan(), typeName);
                 parameterType = Integer.class; // Default to int for error recovery
             }
 
@@ -1397,7 +1560,7 @@ public class Binder {
             String returnTypeName = syntax.getTypeClause().getIdentifier().getData();
             returnType = _typeResolver.lookupType(returnTypeName);
             if (returnType == null) {
-                _diagnostics.reportUndefinedType(syntax.getTypeClause().getIdentifier().getSpan(), returnTypeName);
+                reportMissingType(syntax.getTypeClause().getIdentifier().getSpan(), returnTypeName);
             }
         }
 
@@ -1408,6 +1571,10 @@ public class Binder {
             if (function == null) function = _scope.lookupFunction(name);
         } else {
             function = new FunctionSymbol(name, parameters, returnType);
+            function.setTypeParameters(syntax.getTypeParameters());
+            if (syntax.getTypeClause() != null) {
+                function.setDeclaredReturnTypeName(syntax.getTypeClause().getIdentifier().getData());
+            }
             if (!_scope.tryDeclareFunction(function)) {
                 _diagnostics.reportFunctionAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
             }
@@ -1434,7 +1601,8 @@ public class Binder {
                     else _typeResolver.trackArrayType(parameter, elemType);
                 }
                 // Track struct types from parameter type names
-                String baseTypeName = typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName;
+                String baseTypeName = TypeResolver.erasedTypeName(
+                        typeName.endsWith("[]") ? typeName.substring(0, typeName.length() - 2) : typeName);
                 StructSymbol structSym = _structTypes.get(baseTypeName);
                 if (structSym != null && parameter.getType() == SiyoStruct.class) {
                     _typeResolver.trackStructType(parameter, structSym);
@@ -1444,6 +1612,12 @@ public class Binder {
                 codeanalysis.UnionSymbol unionSym = _typeResolver.getUnionTypes().get(baseTypeName);
                 if (unionSym != null && parameter.getType() == codeanalysis.SiyoUnion.class) {
                     _typeResolver.trackUnionType(parameter, unionSym);
+                }
+                // A parameter declared as an interface holds some struct that
+                // implements it; the call site is what discovers which.
+                codeanalysis.InterfaceSymbol interfaceSym = _typeResolver.getInterfaceTypes().get(baseTypeName);
+                if (interfaceSym != null) {
+                    _typeResolver.trackInterfaceType(parameter, interfaceSym);
                 }
                 parameter.setDeclaredTypeName(typeName);
                 codeanalysis.JavaClassInfo javaType = _typeResolver.getJavaClasses().get(typeName);
@@ -1495,10 +1669,15 @@ public class Binder {
             // Non-void function
             if (expression == null) {
                 _diagnostics.reportMissingReturnValue(syntax.getReturnKeyword().getSpan(), _currentFunction.getReturnType());
-            } else if (expression.getClassType() != _currentFunction.getReturnType()
-                    && _currentFunction.getReturnType() != Object.class
-                    && expression.getClassType() != Object.class) {
-                _diagnostics.reportReturnTypeMismatch(syntax.getExpression().getSpan(), expression.getClassType(), _currentFunction.getReturnType());
+            } else {
+                // A narrower number is a value of the declared wider type, so
+                // `fn f() -> float { return 3 }` widens instead of mismatching.
+                expression = widenTo(expression, _currentFunction.getReturnType());
+                if (expression.getClassType() != _currentFunction.getReturnType()
+                        && _currentFunction.getReturnType() != Object.class
+                        && expression.getClassType() != Object.class) {
+                    _diagnostics.reportReturnTypeMismatch(syntax.getExpression().getSpan(), expression.getClassType(), _currentFunction.getReturnType());
+                }
             }
         }
 
@@ -1572,6 +1751,14 @@ public class Binder {
             BoundExpression argument = boundArguments.get(i);
             ParameterSymbol parameter = function.getParameters().get(i);
 
+            // A narrower number is a value of the wider parameter's type, so it
+            // is widened rather than rejected: half(5) reaches half(x: float).
+            BoundExpression widened = widenTo(argument, parameter.getType());
+            if (widened != argument) {
+                boundArguments.set(i, widened);
+                continue;
+            }
+
             // Object.class accepts any type (used by built-in functions like toString)
             if (parameter.getType() != Object.class && argument.getClassType() != Object.class && argument.getClassType() != parameter.getType()) {
                 _diagnostics.reportWrongArgumentType(syntax.getArguments().get(i).getSpan(), parameter.getName(), parameter.getType(), argument.getClassType());
@@ -1581,7 +1768,55 @@ public class Binder {
             }
         }
 
-        return new BoundCallExpression(function, boundArguments);
+        return new BoundCallExpression(function, boundArguments,
+                inferGenericResultType(function, boundArguments));
+    }
+
+    /**
+     * The type a call to a generic function produces, worked out from the
+     * arguments it was given.
+     *
+     * <p>A generic function is compiled once with its type parameters erased,
+     * so {@code identity(5)} would otherwise have an erased type and need a
+     * conversion at every use. Matching each parameter's written type against
+     * the argument it received says what the parameters stand for here.
+     *
+     * @param function  The function being called.
+     * @param arguments The bound arguments.
+     * @return The call's type, or null when the declared return type stands.
+     */
+    private Class<?> inferGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
+        if (function.getTypeParameters().isEmpty()) return null;
+        String returnTypeName = function.getDeclaredReturnTypeName();
+        if (returnTypeName == null) return null;
+
+        Map<String, Class<?>> bindings = new HashMap<>();
+        for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
+            String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
+            if (parameterTypeName == null) continue;
+            Class<?> argumentType = arguments.get(i).getClassType();
+            if (function.getTypeParameters().contains(parameterTypeName)) {
+                bindings.putIfAbsent(parameterTypeName, argumentType);
+                continue;
+            }
+            // T[] and Array<T>: the parameter names the container, the
+            // argument's element type says what T is.
+            String elementName = TypeResolver.elementTypeNameOf(parameterTypeName);
+            if (elementName != null && function.getTypeParameters().contains(elementName)) {
+                Class<?> elementType = _typeResolver.resolveArrayElementType(arguments.get(i));
+                if (elementType != null) bindings.putIfAbsent(elementName, elementType);
+            }
+        }
+
+        if (function.getTypeParameters().contains(returnTypeName)) {
+            Class<?> bound = bindings.get(returnTypeName);
+            return bound == null || bound == Object.class ? null : bound;
+        }
+        String returnElementName = TypeResolver.elementTypeNameOf(returnTypeName);
+        if (returnElementName != null && function.getTypeParameters().contains(returnElementName)) {
+            return SiyoArray.class;
+        }
+        return null;
     }
 
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
@@ -1642,8 +1877,13 @@ public class Binder {
         _scope = new BoundScope(_scope);
         _moduleHandler.setScope(_scope);
         _scope.tryDeclare(itemVar);
-        // Track struct type if element is a struct
-        if (elementType == SiyoStruct.class && structType != null) {
+        // Elements declared as an interface keep that identity, so a call on
+        // the loop variable dispatches instead of resolving to whichever struct
+        // happened to be written first.
+        codeanalysis.InterfaceSymbol elementInterface = _typeResolver.resolveInterfaceElementType(collection);
+        if (elementInterface != null) {
+            _typeResolver.trackInterfaceType(itemVar, elementInterface);
+        } else if (elementType == SiyoStruct.class && structType != null) {
             _typeResolver.trackStructType(itemVar, structType);
         }
 
@@ -1700,6 +1940,21 @@ public class Binder {
         return new BoundContinueStatement(_loopStack.peek().continueLabel());
     }
 
+    /**
+     * Binds a set literal. Elements may be of any type, as a set holds values
+     * the way a map holds keys.
+     *
+     * @param syntax The set literal.
+     * @return The bound set literal.
+     */
+    private BoundExpression bindSetLiteralExpression(codeanalysis.syntax.SetLiteralExpressionSyntax syntax) {
+        List<BoundExpression> elements = new ArrayList<>();
+        for (ExpressionSyntax element : syntax.getElements()) {
+            elements.add(bindExpression(element));
+        }
+        return new BoundSetLiteralExpression(elements);
+    }
+
     private BoundExpression bindMapLiteralExpression(codeanalysis.syntax.MapLiteralExpressionSyntax syntax) {
         List<BoundExpression> boundKeys = new ArrayList<>();
         List<BoundExpression> boundValues = new ArrayList<>();
@@ -1748,7 +2003,8 @@ public class Binder {
 
         Class<?> resultType;
         if (indexesAMap) {
-            resultType = Object.class;
+            Class<?> declaredValueType = _typeResolver.resolveMapValueType(target);
+            resultType = declaredValueType != null ? declaredValueType : Object.class;
         } else if (target.getClassType() == SiyoArray.class) {
             resultType = _typeResolver.resolveArrayElementType(target);
         } else if (target.getClassType() == String.class) {
@@ -1792,6 +2048,12 @@ public class Binder {
             String qualifiedVariable = typeName + "." + syntax.getMember().getData();
             if (_moduleHandler.isImportedQualifier(typeName) && _scope.tryLookup(qualifiedVariable)) {
                 return new BoundVariableExpression(_scope.lookupVariable(qualifiedVariable));
+            }
+            String privateOwner = _moduleHandler.privateMemberOwner(qualifiedVariable);
+            if (privateOwner != null) {
+                _diagnostics.reportPrivateMember(
+                        syntax.getMember().getSpan(), qualifiedVariable, privateOwner);
+                return new BoundLiteralExpression(0);
             }
 
             // Check for Java static field access: ClassName.FIELD
@@ -1867,7 +2129,7 @@ public class Binder {
         StructSymbol structType = _structTypes.get(typeName);
 
         if (structType == null) {
-            _diagnostics.reportUndefinedType(syntax.getTypeName().getSpan(), typeName);
+            reportMissingType(syntax.getTypeName().getSpan(), typeName);
             return new BoundLiteralExpression(0);
         }
 
@@ -2412,7 +2674,13 @@ public class Binder {
             }
 
             if (_moduleHandler.isImportedQualifier(targetName)) {
-                _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), qualifiedName);
+                String owner = _moduleHandler.privateMemberOwner(qualifiedName);
+                if (owner != null) {
+                    _diagnostics.reportPrivateMember(
+                            memberAccess.getMember().getSpan(), qualifiedName, owner);
+                } else {
+                    _diagnostics.reportUndefinedFunction(memberAccess.getMember().getSpan(), qualifiedName);
+                }
                 return new BoundLiteralExpression(0);
             }
 
@@ -2425,6 +2693,16 @@ public class Binder {
         List<BoundExpression> boundArgs = new ArrayList<>();
         for (ExpressionSyntax argSyntax : syntax.getArguments()) {
             boundArgs.add(bindExpression(argSyntax));
+        }
+
+        // A value reached through an interface dispatches on the struct it
+        // turns out to be, which is not known until the program runs.
+        if (target.getClassType() == SiyoStruct.class) {
+            codeanalysis.InterfaceSymbol declaredInterface = _typeResolver.resolveInterfaceType(target);
+            if (declaredInterface != null && declaredInterface.getMethod(methodName) != null) {
+                return bindInterfaceCall(declaredInterface, target, methodName, boundArgs,
+                        memberAccess.getMember().getSpan());
+            }
         }
 
         // Check for struct instance method: u.greet() → User.greet(u)
@@ -2456,6 +2734,20 @@ public class Binder {
             }
         }
 
+        // A function whose first parameter takes the receiver may be written as
+        // a method on it: text.toUpper() is toUpper(text). Without this a chain
+        // had to be unwound into nested calls the moment a builtin appeared in
+        // it, because only a struct's own impl methods could be written postfix.
+        //
+        // A Siyo value takes this route first, since a builtin over it says
+        // more than the Java method its representation happens to carry. An
+        // imported Java object does not: its own methods are the point, and a
+        // same-named Siyo function must not shadow them.
+        if (isSiyoValueType(target.getClassType())) {
+            BoundExpression asMethod = bindReceiverCall(target, methodName, boundArgs);
+            if (asMethod != null) return asMethod;
+        }
+
         // Resolve Java class info from the target expression (with generic type bindings)
         codeanalysis.JavaResolvedType targetResolvedType = _typeResolver.resolveJavaResolvedType(target);
         codeanalysis.JavaClassInfo targetClassInfo = targetResolvedType != null
@@ -2467,6 +2759,10 @@ public class Binder {
             resolved = targetClassInfo.resolveMethod(methodName, boundArgs.size(),
                     getArgTypes(boundArgs), getArgJvmDescriptors(boundArgs));
             if (resolved == null) {
+                // No Java method of that name; a Siyo function taking the
+                // receiver is the remaining reading of the call.
+                BoundExpression asMethod = bindReceiverCall(target, methodName, boundArgs);
+                if (asMethod != null) return asMethod;
                 if (targetClassInfo.getFullName().equals("java.lang.Object")) {
                     // Object class — method not found, fall through to dynamic dispatch
                     targetClassInfo = null;
@@ -2486,6 +2782,119 @@ public class Binder {
         }
 
         return new BoundJavaMethodCallExpression(targetClassInfo, target, methodName, boundArgs, resolved, resolvedReturnType);
+    }
+
+    /**
+     * Binds {@code receiver.name(args)} as {@code name(receiver, args)} when a
+     * function of that name takes the receiver as its first parameter.
+     *
+     * <p>Only a function whose first parameter actually accepts the receiver's
+     * type qualifies, so this never captures a call that was meant for a Java
+     * method of the same name on an unrelated type.</p>
+     *
+     * @param receiver   The value the method was written on.
+     * @param name       The method name.
+     * @param arguments  The arguments written after it.
+     * @return The bound call, or null when no function matches.
+     */
+    private BoundExpression bindReceiverCall(BoundExpression receiver, String name,
+                                             List<BoundExpression> arguments) {
+        if (!_scope.tryLookupFunction(name)) return null;
+
+        List<Class<?>> argTypes = new ArrayList<>();
+        argTypes.add(receiver.getClassType());
+        for (BoundExpression argument : arguments) argTypes.add(argument.getClassType());
+
+        FunctionSymbol function = _scope.lookupFunction(name, argTypes);
+        if (function == null) function = _scope.lookupFunction(name, arguments.size() + 1);
+        if (function == null) return null;
+        if (function.getParameters().size() != arguments.size() + 1) return null;
+
+        Class<?> firstParameter = function.getParameters().get(0).getType();
+        if (!acceptsReceiver(firstParameter, receiver.getClassType())) return null;
+
+        List<BoundExpression> callArguments = new ArrayList<>();
+        callArguments.add(widenTo(receiver, firstParameter));
+        for (int i = 0; i < arguments.size(); i++) {
+            callArguments.add(widenTo(arguments.get(i), function.getParameters().get(i + 1).getType()));
+        }
+        return new BoundCallExpression(function, callArguments);
+    }
+
+    /**
+     * Whether a parameter of one type can take a receiver of another.
+     *
+     * @param parameterType The declared parameter type.
+     * @param receiverType  The receiver's type.
+     * @return true when the receiver may be passed as that parameter.
+     */
+    private static boolean acceptsReceiver(Class<?> parameterType, Class<?> receiverType) {
+        if (parameterType == receiverType) return true;
+        // An erased receiver is deliberately not accepted: it would let any
+        // same-named function capture a call meant for a Java object's method.
+        if (parameterType == Object.class) return true;
+        return widerNumericType(receiverType, parameterType) == parameterType;
+    }
+
+    /**
+     * Whether a type is one of Siyo's own value types, as opposed to an
+     * imported Java class or an erased value.
+     *
+     * @param type The receiver's type.
+     * @return true for a Siyo value type.
+     */
+    private static boolean isSiyoValueType(Class<?> type) {
+        return type == String.class
+                || type == SiyoArray.class
+                || type == SiyoMap.class
+                || type == codeanalysis.SiyoSet.class
+                || type == codeanalysis.SiyoUnion.class
+                || type == Integer.class
+                || type == Long.class
+                || type == Double.class
+                || type == Boolean.class;
+    }
+
+    /**
+     * Binds a call through an interface, gathering the method each implementing
+     * struct provides so dispatch can compare against the receiver's struct
+     * name rather than look the method up reflectively.
+     *
+     * @param declared   The interface.
+     * @param target     The receiver.
+     * @param methodName The method being called.
+     * @param arguments  The arguments, not counting the receiver.
+     * @param span       The span of the method name, for diagnostics.
+     * @return The bound interface call.
+     */
+    private BoundExpression bindInterfaceCall(codeanalysis.InterfaceSymbol declared, BoundExpression target,
+                                              String methodName, List<BoundExpression> arguments,
+                                              codeanalysis.text.TextSpan span) {
+        FunctionSymbol required = declared.getMethod(methodName);
+        if (arguments.size() != required.getParameters().size()) {
+            _diagnostics.reportWrongArgumentCount(span, declared.getName() + "." + methodName,
+                    required.getParameters().size(), arguments.size());
+            return new BoundLiteralExpression(0);
+        }
+
+        Map<String, FunctionSymbol> implementations = new java.util.LinkedHashMap<>();
+        for (String structName : declared.getImplementors()) {
+            String qualifiedName = structName + "." + methodName;
+            if (_scope.tryLookupFunction(qualifiedName)) {
+                implementations.put(structName, _scope.lookupFunction(qualifiedName));
+            }
+        }
+        if (implementations.isEmpty()) {
+            _diagnostics.reportNoInterfaceImplementors(span, declared.getName(), methodName);
+            return new BoundLiteralExpression(0);
+        }
+
+        List<BoundExpression> widened = new ArrayList<>();
+        for (int i = 0; i < arguments.size(); i++) {
+            widened.add(widenTo(arguments.get(i), required.getParameters().get(i).getType()));
+        }
+        return new BoundInterfaceCallExpression(target, declared.getName(), methodName,
+                widened, implementations, required.getReturnType());
     }
 
     private BoundStatement bindSendStatement(SendStatementSyntax syntax) {
@@ -2519,9 +2928,105 @@ public class Binder {
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
     }
 
+    /**
+     * Registers an interface and the methods it requires, before any body is
+     * bound, so an impl block and a parameter may both name it.
+     *
+     * @param syntax The interface declaration.
+     */
+    private void registerInterfaceDeclaration(InterfaceDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        codeanalysis.InterfaceSymbol previous = _typeResolver.getInterfaceTypes().get(name);
+        codeanalysis.InterfaceSymbol declared = new codeanalysis.InterfaceSymbol(name);
+        // Registering again once every type is known resolves signatures that
+        // named a struct declared below the interface; the structs already
+        // known to implement it are carried over.
+        if (previous != null) {
+            for (String implementor : previous.getImplementors()) declared.addImplementor(implementor);
+        }
+        for (FunctionDeclarationSyntax method : syntax.getMethods()) {
+            List<ParameterSymbol> parameters = new ArrayList<>();
+            for (ParameterSyntax parameterSyntax : method.getParameters()) {
+                Class<?> parameterType = _typeResolver.lookupType(parameterSyntax.getTypeToken().getData());
+                parameters.add(new ParameterSymbol(parameterSyntax.getIdentifier().getData(),
+                        parameterType != null ? parameterType : Object.class));
+            }
+            Class<?> returnType = method.getTypeClause() == null
+                    ? null
+                    : _typeResolver.lookupType(method.getTypeClause().getIdentifier().getData());
+            declared.declareMethod(new FunctionSymbol(
+                    method.getIdentifier().getData(), parameters, returnType));
+        }
+        _typeResolver.getInterfaceTypes().put(name, declared);
+    }
+
+    /**
+     * An interface declares no code of its own, so binding it produces nothing
+     * to run. Its methods were registered before any body was bound.
+     *
+     * @param syntax The interface declaration.
+     * @return An empty statement.
+     */
+    private BoundStatement bindInterfaceDeclaration(InterfaceDeclarationSyntax syntax) {
+        registerInterfaceDeclaration(syntax);
+        return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * Checks that a struct has every method its interface requires, with the
+     * signature the interface declares, and records it as an implementor.
+     *
+     * @param syntax The {@code impl Interface for Struct} block.
+     */
+    private void checkInterfaceConformance(ImplDeclarationSyntax syntax) {
+        String interfaceName = syntax.getInterfaceName().getData();
+        codeanalysis.InterfaceSymbol declared = _typeResolver.getInterfaceTypes().get(interfaceName);
+        if (declared == null) {
+            _diagnostics.reportUndefinedType(syntax.getInterfaceName().getSpan(), interfaceName);
+            return;
+        }
+        String structName = syntax.getTypeName().getData();
+        if (!_structTypes.containsKey(structName)) {
+            reportMissingType(syntax.getTypeName().getSpan(), structName);
+            return;
+        }
+
+        for (FunctionSymbol required : declared.getMethods()) {
+            String qualifiedName = structName + "." + required.getName();
+            FunctionSymbol provided = _scope.tryLookupFunction(qualifiedName)
+                    ? _scope.lookupFunction(qualifiedName)
+                    : null;
+            if (provided == null) {
+                _diagnostics.reportMissingInterfaceMethod(syntax.getTypeName().getSpan(),
+                        structName, interfaceName, required.getName());
+                continue;
+            }
+            // The receiver is the implementation's first parameter and is not
+            // part of what the interface declares.
+            int providedArity = provided.getParameters().size() - 1;
+            if (providedArity != required.getParameters().size()) {
+                _diagnostics.reportInterfaceMethodSignature(syntax.getTypeName().getSpan(),
+                        structName, interfaceName, required.getName(),
+                        "it takes " + providedArity + " argument" + (providedArity == 1 ? "" : "s")
+                        + " where the interface declares " + required.getParameters().size());
+                continue;
+            }
+            if (required.getReturnType() != null && provided.getReturnType() != required.getReturnType()) {
+                _diagnostics.reportInterfaceMethodSignature(syntax.getTypeName().getSpan(),
+                        structName, interfaceName, required.getName(),
+                        "it returns " + siyoTypeName(provided.getReturnType())
+                        + " where the interface declares " + siyoTypeName(required.getReturnType()));
+            }
+        }
+        declared.addImplementor(structName);
+    }
+
     private BoundStatement bindImplDeclaration(ImplDeclarationSyntax syntax) {
         String structName = syntax.getTypeName().getData();
         StructSymbol structType = _structTypes.get(structName);
+        if (syntax.getInterfaceName() != null) {
+            checkInterfaceConformance(syntax);
+        }
 
         for (FunctionDeclarationSyntax method : syntax.getMethods()) {
             String qualifiedName = structName + "." + method.getIdentifier().getData();
@@ -2593,7 +3098,7 @@ public class Binder {
         var statements = new ArrayList<>(body.getStatements());
         if (statements.isEmpty()) return body;
         int last = statements.size() - 1;
-        BoundStatement rewritten = implicitReturnOf(statements.get(last));
+        BoundStatement rewritten = implicitReturnOf(statements.get(last), returnType);
         if (rewritten == null) return body;
         statements.set(last, rewritten);
         return new BoundBlockStatement(statements);
@@ -2603,18 +3108,22 @@ public class Binder {
      * Rewrites one statement so that the value it produces is returned, or
      * returns null when the statement produces no value.
      */
-    private static BoundStatement implicitReturnOf(BoundStatement statement) {
+    private static BoundStatement implicitReturnOf(BoundStatement statement, Class<?> returnType) {
         if (statement instanceof BoundExpressionStatement expressionStatement) {
             BoundExpression value = expressionStatement.getExpression();
             // An assignment used as a statement is a side effect, not a value.
             if (value instanceof BoundAssignmentExpression) return null;
-            return new BoundReturnStatement(value);
+            // The tail of the body is the return value, so it is widened to the
+            // declared type the same way an explicit return is. Without this
+            // `fn f() -> float { 3 }` emitted an int where a double was
+            // expected and the class failed verification.
+            return new BoundReturnStatement(widenTo(value, returnType));
         }
         if (statement instanceof BoundBlockStatement block) {
             var statements = new ArrayList<>(block.getStatements());
             if (statements.isEmpty()) return null;
             int last = statements.size() - 1;
-            BoundStatement rewritten = implicitReturnOf(statements.get(last));
+            BoundStatement rewritten = implicitReturnOf(statements.get(last), returnType);
             if (rewritten == null) return null;
             statements.set(last, rewritten);
             return new BoundBlockStatement(statements);
@@ -2622,14 +3131,14 @@ public class Binder {
         if (statement instanceof BoundIfStatement ifStatement) {
             // Only when both arms produce a value; a one-armed if falls through.
             if (ifStatement.getElseStatement() == null) return null;
-            BoundStatement thenBranch = implicitReturnOf(ifStatement.getThenStatement());
-            BoundStatement elseBranch = implicitReturnOf(ifStatement.getElseStatement());
+            BoundStatement thenBranch = implicitReturnOf(ifStatement.getThenStatement(), returnType);
+            BoundStatement elseBranch = implicitReturnOf(ifStatement.getElseStatement(), returnType);
             if (thenBranch == null || elseBranch == null) return null;
             return new BoundIfStatement(ifStatement.getCondition(), thenBranch, elseBranch);
         }
         if (statement instanceof BoundTryCatchStatement tryCatch) {
-            BoundStatement tryBody = implicitReturnOf(tryCatch.getTryBody());
-            BoundStatement catchBody = implicitReturnOf(tryCatch.getCatchBody());
+            BoundStatement tryBody = implicitReturnOf(tryCatch.getTryBody(), returnType);
+            BoundStatement catchBody = implicitReturnOf(tryCatch.getCatchBody(), returnType);
             if (tryBody == null || catchBody == null) return null;
             return new BoundTryCatchStatement(tryBody, tryCatch.getErrorVariable(), catchBody);
         }
@@ -2638,15 +3147,66 @@ public class Binder {
 
     private BoundStatement bindTryCatchStatement(TryCatchStatementSyntax syntax) {
         BoundStatement tryBody = bindStatement(syntax.getTryBody());
-        String errorName = syntax.getErrorVariable().getData();
-        VariableSymbol errorVar = new VariableSymbol(errorName, true, String.class);
-        _scope = new BoundScope(_scope);
-        _moduleHandler.setScope(_scope);
-        _scope.tryDeclare(errorVar);
+        VariableSymbol errorVar = declareErrorVariable(
+                syntax.getErrorVariable(), syntax.getErrorTypeToken());
         BoundStatement catchBody = bindStatement(syntax.getCatchBody());
         _scope = _scope.getParent();
         _moduleHandler.setScope(_scope);
         return new BoundTryCatchStatement(tryBody, errorVar, catchBody);
+    }
+
+    /**
+     * Raises the value of an expression. Whatever the expression evaluates to is
+     * what the catch block binds, so an error may be a variant, a struct or a
+     * number and not only text.
+     *
+     * @param syntax The throw statement to bind.
+     * @return The bound throw statement.
+     */
+    private BoundStatement bindThrowStatement(ThrowStatementSyntax syntax) {
+        BoundExpression value = bindExpression(syntax.getExpression());
+        return new BoundThrowStatement(value);
+    }
+
+    /**
+     * Declares the catch variable in a fresh scope and returns it. The caller
+     * pops the scope after binding the catch body.
+     *
+     * <p>Without an annotation the variable is the erased payload, because what
+     * reaches a handler is only known at run time. With one it carries the
+     * declared type, which is what makes a match over a caught sum type
+     * checkable.</p>
+     *
+     * @param nameToken The catch variable's name.
+     * @param typeToken The declared type, or null.
+     * @return The declared catch variable.
+     */
+    private VariableSymbol declareErrorVariable(SyntaxToken nameToken, SyntaxToken typeToken) {
+        String errorName = nameToken.getData();
+        Class<?> declared = Object.class;
+        String typeName = typeToken != null ? typeToken.getData() : null;
+        if (typeName != null) {
+            Class<?> resolved = _typeResolver.lookupType(typeName);
+            if (resolved == null) {
+                reportMissingType(nameToken.getSpan(), typeName);
+            } else {
+                declared = resolved;
+            }
+        }
+        VariableSymbol errorVar = new VariableSymbol(errorName, true, declared);
+        _scope = new BoundScope(_scope);
+        _moduleHandler.setScope(_scope);
+        _scope.tryDeclare(errorVar);
+        if (typeName != null) {
+            String declaredName = TypeResolver.erasedTypeName(typeName);
+            codeanalysis.UnionSymbol unionType = _unionTypes.get(declaredName);
+            if (unionType != null) _typeResolver.trackUnionType(errorVar, unionType);
+            StructSymbol structType = _structTypes.get(declaredName);
+            if (structType != null) _typeResolver.trackStructType(errorVar, structType);
+            Class<?> elementType = _typeResolver.lookupElementType(typeName);
+            if (elementType != null) _typeResolver.trackArrayType(errorVar, elementType);
+        }
+        return errorVar;
     }
 
     private Class<?>[] getArgTypes(List<BoundExpression> args) {

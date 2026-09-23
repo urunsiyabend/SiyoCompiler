@@ -15,10 +15,106 @@ public class TypeResolver {
     private final Map<String, JavaClassInfo> _javaClasses = new HashMap<>();
     private final Map<String, StructSymbol> _structTypes;
     private final Map<String, UnionSymbol> _unionTypes;
+    private final Map<String, InterfaceSymbol> _interfaceTypes = new HashMap<>();
+    private final Map<VariableSymbol, InterfaceSymbol> _variableInterfaces = new HashMap<>();
+    private final java.util.Set<String> _typeParameters = new java.util.LinkedHashSet<>();
 
     public TypeResolver(Map<String, StructSymbol> structTypes, Map<String, UnionSymbol> unionTypes) {
         _structTypes = structTypes;
         _unionTypes = unionTypes;
+    }
+
+    /** The interfaces in scope, keyed by name. */
+    public Map<String, InterfaceSymbol> getInterfaceTypes() {
+        return _interfaceTypes;
+    }
+
+    /**
+     * Records that a variable holds a value reached through an interface, so a
+     * method call on it dispatches on the struct it turns out to be.
+     *
+     * @param var           The variable.
+     * @param interfaceType The interface it is declared as.
+     */
+    public void trackInterfaceType(VariableSymbol var, InterfaceSymbol interfaceType) {
+        _variableInterfaces.put(var, interfaceType);
+    }
+
+    /**
+     * The value type of a map declared with type arguments, or null when the
+     * map's values are untyped.
+     *
+     * <p>{@code Map<string, int>} indexes to an int, so {@code m["a"] + 1}
+     * needs no conversion; an undeclared map still indexes to an erased value.
+     *
+     * @param target The map expression.
+     * @return The declared value type, or null.
+     */
+    public Class<?> resolveMapValueType(BoundExpression target) {
+        if (!(target instanceof BoundVariableExpression varExpr)) return null;
+        String declaredName = varExpr.getVariable().getDeclaredTypeName();
+        if (!"Map".equals(genericBaseName(declaredName))) return null;
+        List<String> arguments = typeArgumentsOf(declaredName);
+        return arguments.size() == 2 ? lookupType(arguments.get(1)) : null;
+    }
+
+    /**
+     * The interface a collection's elements are declared as, or null when they
+     * are not declared as one.
+     *
+     * <p>The elements of {@code imut shapes: Shape[]} are Shapes, whatever
+     * structs were written into it. Taking the type from the first element
+     * instead would dispatch every element to that one struct's method.
+     *
+     * @param collection The collection expression.
+     * @return The element interface, or null.
+     */
+    public InterfaceSymbol resolveInterfaceElementType(BoundExpression collection) {
+        if (!(collection instanceof BoundVariableExpression varExpr)) return null;
+        String elementName = elementTypeNameOf(varExpr.getVariable().getDeclaredTypeName());
+        return elementName == null ? null : _interfaceTypes.get(elementName);
+    }
+
+    /**
+     * The element type a container names, however it was written: {@code T[]},
+     * {@code Array<T>}, {@code List<T>} or {@code Set<T>}.
+     *
+     * @param typeName The container type as written, or null.
+     * @return The element type name, or null when the type names no element.
+     */
+    public static String elementTypeNameOf(String typeName) {
+        if (typeName == null) return null;
+        if (typeName.endsWith("[]")) return typeName.substring(0, typeName.length() - 2);
+        String base = genericBaseName(typeName);
+        if (base == null) return null;
+        List<String> arguments = typeArgumentsOf(typeName);
+        boolean holdsOneElementType = "Array".equals(base) || "List".equals(base) || "Set".equals(base);
+        return holdsOneElementType && arguments.size() == 1 ? arguments.get(0) : null;
+    }
+
+    /**
+     * The interface an expression is reached through, or null when its
+     * concrete struct is known or it is not a struct at all.
+     *
+     * @param target The expression.
+     * @return The interface, or null.
+     */
+    public InterfaceSymbol resolveInterfaceType(BoundExpression target) {
+        if (target instanceof BoundVariableExpression varExpr) {
+            return _variableInterfaces.get(varExpr.getVariable());
+        }
+        if (target instanceof BoundCallExpression callExpr) {
+            String returnName = callExpr.getFunction().getReturnStructName();
+            if (returnName != null) return _interfaceTypes.get(returnName);
+        }
+        if (target instanceof BoundMemberAccessExpression memberExpr) {
+            StructSymbol owner = resolveStructType(memberExpr.getTarget());
+            if (owner != null) {
+                String fieldTypeName = owner.getFieldTypeName(memberExpr.getMemberName());
+                if (fieldTypeName != null) return _interfaceTypes.get(fieldTypeName);
+            }
+        }
+        return null;
     }
 
     // --- Type tracking ---
@@ -353,6 +449,20 @@ public class TypeResolver {
         if (name.endsWith("[]")) {
             return SiyoArray.class;
         }
+        // A generic type is erased to the shape it has at run time; the type
+        // arguments are what the call and index sites read back.
+        String generic = genericBaseName(name);
+        if (generic != null) {
+            return switch (generic) {
+                case "Array", "List" -> SiyoArray.class;
+                case "Map" -> SiyoMap.class;
+                case "Set" -> SiyoSet.class;
+                default -> lookupType(generic);
+            };
+        }
+        if (_typeParameters.contains(name)) {
+            return Object.class;
+        }
         Class<?> builtin = switch (name) {
             case "int" -> Integer.class;
             case "long" -> Long.class;
@@ -366,6 +476,9 @@ public class TypeResolver {
             case "object", "any" -> Object.class;
             default -> _structTypes.containsKey(name) ? SiyoStruct.class
                     : _unionTypes.containsKey(name) ? SiyoUnion.class
+                    // A value of an interface type is a struct at run time;
+                    // which struct is what the call site discovers.
+                    : _interfaceTypes.containsKey(name) ? SiyoStruct.class
                     : null;
         };
         if (builtin != null) return builtin;
@@ -379,7 +492,85 @@ public class TypeResolver {
         if (typeName.endsWith("[]")) {
             return lookupType(typeName.substring(0, typeName.length() - 2));
         }
+        // Array<int> holds what int[] holds; Map<string, int> holds its values.
+        List<String> arguments = typeArgumentsOf(typeName);
+        if (arguments.isEmpty()) return null;
+        String base = genericBaseName(typeName);
+        if (("Array".equals(base) || "List".equals(base) || "Set".equals(base)) && arguments.size() == 1) {
+            return lookupType(arguments.get(0));
+        }
+        if ("Map".equals(base) && arguments.size() == 2) {
+            return lookupType(arguments.get(1));
+        }
         return null;
+    }
+
+    /**
+     * The name of a generic type without its type arguments, or null when the
+     * name carries none.
+     *
+     * @param typeName The type name as written.
+     * @return The base name, or null.
+     */
+    public static String genericBaseName(String typeName) {
+        if (typeName == null) return null;
+        int open = typeName.indexOf('<');
+        if (open <= 0 || !typeName.endsWith(">")) return null;
+        return typeName.substring(0, open);
+    }
+
+    /**
+     * A type name with its type arguments dropped, which is the name the
+     * declaration was registered under.
+     *
+     * <p>{@code Option<int>} and {@code Option<string>} are the same declared
+     * type — the parameter is erased — so both have to find it.
+     *
+     * @param typeName The type name as written.
+     * @return The declared name.
+     */
+    public static String erasedTypeName(String typeName) {
+        String base = genericBaseName(typeName);
+        return base != null ? base : typeName;
+    }
+
+    /**
+     * The type arguments of a generic type name, in order.
+     *
+     * <p>Nesting is respected, so {@code Map<string, Array<int>>} reads as two
+     * arguments and not three.
+     *
+     * @param typeName The type name as written.
+     * @return The type arguments, or an empty list when there are none.
+     */
+    public static List<String> typeArgumentsOf(String typeName) {
+        if (genericBaseName(typeName) == null) return List.of();
+        String inner = typeName.substring(typeName.indexOf('<') + 1, typeName.length() - 1);
+        List<String> arguments = new java.util.ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+            if (c == '<') depth++;
+            else if (c == '>') depth--;
+            else if (c == ',' && depth == 0) {
+                arguments.add(inner.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        String last = inner.substring(start).trim();
+        if (!last.isEmpty()) arguments.add(last);
+        return arguments;
+    }
+
+    /**
+     * The names currently standing for a type parameter, so {@code T} inside a
+     * generic function resolves rather than being reported as unknown.
+     *
+     * @return The type parameter names in scope.
+     */
+    public java.util.Set<String> getTypeParameters() {
+        return _typeParameters;
     }
 
     // --- Accessors ---

@@ -34,6 +34,7 @@ public abstract class BoundTreeRewriter {
             case BreakStatement -> rewriteBreakStatement((BoundBreakStatement) node);
             case ContinueStatement -> rewriteContinueStatement((BoundContinueStatement) node);
             case TryCatchStatement -> rewriteTryCatchStatement((BoundTryCatchStatement) node);
+            case ThrowStatement -> rewriteThrowStatement((BoundThrowStatement) node);
             case SendStatement -> node; // send is atomic, no children to rewrite
             default -> throw new IllegalStateException("Unhandled bound statement type: " + node.getType() + ". This is a compiler bug.");
         };
@@ -123,7 +124,8 @@ public abstract class BoundTreeRewriter {
         if (condition == node.getCondition() && body == node.getBody()) {
             return node;
         }
-        return new BoundWhileStatement(condition, body);
+        return new BoundWhileStatement(condition, body, node.getBreakLabel(), node.getContinueLabel(),
+                node.runsBeforeFirstCheck());
     }
 
     /**
@@ -205,6 +207,52 @@ public abstract class BoundTreeRewriter {
         return new BoundTryCatchStatement(tryBody, node.getErrorVariable(), catchBody);
     }
 
+    protected BoundExpression rewriteInterfaceCallExpression(BoundInterfaceCallExpression node) {
+        BoundExpression target = rewriteExpression(node.getTarget());
+        java.util.ArrayList<BoundExpression> arguments = null;
+        for (int i = 0; i < node.getArguments().size(); i++) {
+            BoundExpression oldArgument = node.getArguments().get(i);
+            BoundExpression newArgument = rewriteExpression(oldArgument);
+            if (newArgument != oldArgument && arguments == null) {
+                arguments = new java.util.ArrayList<>(node.getArguments());
+            }
+            if (arguments != null) arguments.set(i, newArgument);
+        }
+        if (target == node.getTarget() && arguments == null) return node;
+        return new BoundInterfaceCallExpression(target, node.getInterfaceName(), node.getMethodName(),
+                arguments == null ? node.getArguments() : arguments,
+                node.getImplementations(), node.getReturnType());
+    }
+
+    protected BoundExpression rewriteSetLiteralExpression(BoundSetLiteralExpression node) {
+        java.util.ArrayList<BoundExpression> elements = null;
+        for (int i = 0; i < node.getElements().size(); i++) {
+            BoundExpression oldElement = node.getElements().get(i);
+            BoundExpression newElement = rewriteExpression(oldElement);
+            if (newElement != oldElement && elements == null) {
+                elements = new java.util.ArrayList<>(node.getElements());
+            }
+            if (elements != null) elements.set(i, newElement);
+        }
+        return elements == null ? node : new BoundSetLiteralExpression(elements);
+    }
+
+    protected BoundExpression rewriteConversionExpression(BoundConversionExpression node) {
+        var expression = rewriteExpression(node.getExpression());
+        if (expression == node.getExpression()) {
+            return node;
+        }
+        return new BoundConversionExpression(expression, node.getClassType());
+    }
+
+    protected BoundStatement rewriteThrowStatement(BoundThrowStatement node) {
+        var expression = rewriteExpression(node.getExpression());
+        if (expression == node.getExpression()) {
+            return node;
+        }
+        return new BoundThrowStatement(expression);
+    }
+
     protected BoundStatement rewriteExpressionStatement(BoundExpressionStatement node) {
         var expression = rewriteExpression(node.getExpression());
         if (expression == node.getExpression()) {
@@ -246,6 +294,9 @@ public abstract class BoundTreeRewriter {
             case JavaMethodCallExpression -> node;
             case JavaStaticFieldExpression -> node;
             case CastExpression -> node;
+            case ConversionExpression -> rewriteConversionExpression((BoundConversionExpression) node);
+            case SetLiteralExpression -> rewriteSetLiteralExpression((BoundSetLiteralExpression) node);
+            case InterfaceCallExpression -> rewriteInterfaceCallExpression((BoundInterfaceCallExpression) node);
             case LambdaExpression -> node;
             case ClosureCallExpression -> node;
             case ScopeExpression -> node;

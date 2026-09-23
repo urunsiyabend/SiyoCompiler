@@ -35,6 +35,23 @@ public class TypeDeclarationSyntax extends StatementSyntax {
      *
      * @return The type name token.
      */
+    private java.util.List<String> _typeParameters = java.util.List.of();
+
+    /**
+     * The type parameters this sum type declares, as in
+     * {@code type Option<T> = Some(T) | None}.
+     *
+     * @return The type parameter names, empty when it declares none.
+     */
+    public java.util.List<String> getTypeParameters() {
+        return _typeParameters;
+    }
+
+    /** Records the type parameters parsed after the type's name. */
+    public void setTypeParameters(java.util.List<String> typeParameters) {
+        _typeParameters = typeParameters == null ? java.util.List.of() : typeParameters;
+    }
+
     public SyntaxToken getIdentifier() {
         return _identifier;
     }

@@ -131,7 +131,11 @@ public class Lowerer extends BoundTreeRewriter {
 
         ArrayList<BoundStatement> resultStatements = new ArrayList<>();
 
-        resultStatements.add(gotoCheck);
+        // A do-while runs its body before the first check, so it simply does
+        // not take the jump that would skip the body.
+        if (!node.runsBeforeFirstCheck()) {
+            resultStatements.add(gotoCheck);
+        }
         resultStatements.add(bodyLabelStatement);
         resultStatements.add(node.getBody());
         if (continueLabel != checkLabel) {

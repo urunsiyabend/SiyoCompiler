@@ -33,6 +33,26 @@ public class FunctionSymbol {
         _moduleName = moduleName;
     }
 
+    private java.util.List<String> _typeParameters = java.util.List.of();
+    private String _returnTypeName;
+
+    /**
+     * The type parameters this function declares, which stand for a type until
+     * a call site says what they are.
+     *
+     * @return The type parameter names, empty for an ordinary function.
+     */
+    public java.util.List<String> getTypeParameters() { return _typeParameters; }
+
+    public void setTypeParameters(java.util.List<String> typeParameters) {
+        _typeParameters = typeParameters == null ? java.util.List.of() : typeParameters;
+    }
+
+    /** The return type as written, which may name a type parameter. */
+    public String getDeclaredReturnTypeName() { return _returnTypeName; }
+
+    public void setDeclaredReturnTypeName(String name) { _returnTypeName = name; }
+
     public String getModuleName() { return _moduleName; }
     public String getReturnStructName() { return _returnStructName; }
     public void setReturnStructName(String name) { _returnStructName = name; }

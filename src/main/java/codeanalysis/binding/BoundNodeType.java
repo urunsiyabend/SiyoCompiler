@@ -49,4 +49,8 @@ public enum BoundNodeType {
     MatchExpression,
     TryExpression,
     SendStatement,
+    ThrowStatement,
+    ConversionExpression,
+    SetLiteralExpression,
+    InterfaceCallExpression,
 }

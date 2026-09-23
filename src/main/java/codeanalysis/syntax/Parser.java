@@ -152,11 +152,15 @@ public class Parser {
      * @return The parsed statement syntax.
      */
     private StatementSyntax parseStatement() {
+        if (current().getType() == SyntaxType.PubKeyword) {
+            return parsePublicDeclaration();
+        }
         return switch (current().getType()) {
             case OpenBraceToken -> parseBlockStatement();
             case ImmutableKeyword, MutableKeyword -> parseVariableDeclaration();
             case IfKeyword -> parseIfStatement();
             case WhileKeyword -> parseWhileStatement();
+            case DoKeyword -> parseDoWhileStatement();
             case ForKeyword -> parseForStatement();
             // `fn name(...)` declares; `fn(...)` is a lambda expression, which
             // is what a block's tail value looks like.
@@ -168,12 +172,14 @@ public class Parser {
             case ContinueKeyword -> parseContinueStatement();
             case StructKeyword -> parseStructDeclaration();
             case ImplKeyword -> parseImplDeclaration();
+            case InterfaceKeyword -> parseInterfaceDeclaration();
             case ActorKeyword -> parseActorDeclaration();
             case EnumKeyword -> parseEnumDeclaration();
             case TypeKeyword -> isTypeDeclarationAhead()
                     ? parseTypeDeclaration()
                     : parseExpressionStatement();
             case TryKeyword -> parseTryCatchStatement();
+            case ThrowKeyword -> parseThrowStatement();
             case SendKeyword -> parseSendStatement();
             case ImportKeyword -> parseImportStatement();
             default -> parseExpressionStatement();
@@ -231,18 +237,7 @@ public class Parser {
         SyntaxToken typeAnnotation = null;
         if (current().getType() == SyntaxType.ColonToken) {
             nextToken(); // consume ':'
-            SyntaxToken typeToken;
-            if (current().getType() == SyntaxType.FnKeyword) {
-                typeToken = parseFunctionTypeName(nextToken());
-            } else {
-                typeToken = match(SyntaxType.IdentifierToken);
-            }
-            if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-                nextToken(); // consume '['
-                nextToken(); // consume ']'
-                typeToken = new SyntaxToken(SyntaxType.IdentifierToken, typeToken.getPosition(), typeToken.getData() + "[]", typeToken.getValue());
-            }
-            typeAnnotation = typeToken;
+            typeAnnotation = parseTypeName();
         }
         SyntaxToken equals = match(SyntaxType.EqualsToken);
         if (current().getType() == SyntaxType.SendKeyword) {
@@ -354,12 +349,44 @@ public class Parser {
         } else {
             identifier = match(SyntaxType.IdentifierToken);
         }
+        java.util.List<String> typeParameters = parseOptionalTypeParameters();
         SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
         SeparatedSyntaxList<ParameterSyntax> parameters = parseParameterList();
         SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);
         TypeClauseSyntax typeClause = parseOptionalTypeClause();
         BlockStatementSyntax body = parseBlockStatement();
-        return new FunctionDeclarationSyntax(fnKeyword, identifier, openParenthesis, parameters, closeParenthesis, typeClause, body);
+        FunctionDeclarationSyntax declaration = new FunctionDeclarationSyntax(
+                fnKeyword, identifier, openParenthesis, parameters, closeParenthesis, typeClause, body);
+        declaration.setTypeParameters(typeParameters);
+        return declaration;
+    }
+
+    /**
+     * Parses the type parameters a generic function declares:
+     * the {@code <T>} of {@code fn identity<T>(x: T) -> T}.
+     *
+     * @return The type parameter names, empty when there are none.
+     */
+    private java.util.List<String> parseOptionalTypeParameters() {
+        if (current().getType() != SyntaxType.LessToken) return java.util.List.of();
+        if (!isTypeArgumentListAhead()) return java.util.List.of();
+
+        nextToken(); // consume '<'
+        java.util.List<String> names = new ArrayList<>();
+        while (current().getType() != SyntaxType.GreaterToken
+                && current().getType() != SyntaxType.DoubleGreaterToken
+                && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            names.add(match(SyntaxType.IdentifierToken).getData());
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+            if (current() == startToken) {
+                nextToken();
+            }
+        }
+        closeTypeArgumentList();
+        return names;
     }
 
     /**
@@ -456,18 +483,7 @@ public class Parser {
         SyntaxToken colon = match(SyntaxType.ColonToken);
         // Allow 'fn' keyword as type name for closure parameters
         // Supports: fn, fn(int) -> int, fn(int, string) -> bool, fn() -> string
-        SyntaxToken type;
-        if (current().getType() == SyntaxType.FnKeyword) {
-            type = parseFunctionTypeName(nextToken());
-        } else {
-            type = match(SyntaxType.IdentifierToken);
-        }
-        // Handle array type syntax: int[]
-        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-            nextToken(); // consume [
-            nextToken(); // consume ]
-            type = new SyntaxToken(SyntaxType.IdentifierToken, type.getPosition(), type.getData() + "[]", type.getValue());
-        }
+        SyntaxToken type = parseTypeName();
         if (mutKeyword != null) {
             return new ParameterSyntax(mutKeyword, identifier, colon, type);
         }
@@ -489,14 +505,7 @@ public class Parser {
         if (current().getType() == SyntaxType.FnKeyword) {
             return new TypeClauseSyntax(arrowToken, parseFunctionTypeName(nextToken()));
         }
-        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
-        // Handle array return type: -> int[]
-        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-            nextToken();
-            nextToken();
-            identifier = new SyntaxToken(SyntaxType.IdentifierToken, identifier.getPosition(), identifier.getData() + "[]", identifier.getValue());
-        }
-        return new TypeClauseSyntax(arrowToken, identifier);
+        return new TypeClauseSyntax(arrowToken, parseTypeName());
     }
 
     /**
@@ -510,8 +519,16 @@ public class Parser {
      * @return true when a declaration starts here.
      */
     private boolean isTypeDeclarationAhead() {
-        return peek(1).getType() == SyntaxType.IdentifierToken
-                && peek(2).getType() == SyntaxType.EqualsToken;
+        if (peek(1).getType() != SyntaxType.IdentifierToken) return false;
+        if (peek(2).getType() == SyntaxType.EqualsToken) return true;
+        // type Option<T> = ... — the equals sign is past the parameter list.
+        if (peek(2).getType() != SyntaxType.LessToken) return false;
+        for (int offset = 3; offset < 32; offset++) {
+            SyntaxType type = peek(offset).getType();
+            if (type == SyntaxType.GreaterToken) return peek(offset + 1).getType() == SyntaxType.EqualsToken;
+            if (type != SyntaxType.IdentifierToken && type != SyntaxType.CommaToken) return false;
+        }
+        return false;
     }
 
     /**
@@ -523,6 +540,9 @@ public class Parser {
     private StatementSyntax parseTypeDeclaration() {
         SyntaxToken typeKeyword = match(SyntaxType.TypeKeyword);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        // type Option<T> = Some(T) | None — the parameters stand for a type in
+        // the payloads below, so they are in scope before the variants parse.
+        java.util.List<String> typeParameters = parseOptionalTypeParameters();
         SyntaxToken equals = match(SyntaxType.EqualsToken);
 
         List<UnionVariantSyntax> variants = new ArrayList<>();
@@ -537,7 +557,10 @@ public class Parser {
             }
         }
 
-        return new TypeDeclarationSyntax(typeKeyword, identifier, equals, variants);
+        TypeDeclarationSyntax declaration =
+                new TypeDeclarationSyntax(typeKeyword, identifier, equals, variants);
+        declaration.setTypeParameters(typeParameters);
+        return declaration;
     }
 
     /**
@@ -620,6 +643,7 @@ public class Parser {
             typeToken = parseFunctionTypeName(nextToken());
         } else {
             typeToken = match(SyntaxType.IdentifierToken);
+            typeToken = parseOptionalTypeArguments(typeToken);
         }
         if (current().getType() == SyntaxType.OpenBracketToken
                 && peek(1).getType() == SyntaxType.CloseBracketToken) {
@@ -629,6 +653,90 @@ public class Parser {
                     typeToken.getData() + "[]", typeToken.getValue());
         }
         return typeToken;
+    }
+
+    /**
+     * Reads the type arguments of a generic type, folding them into the type's
+     * own name: {@code Map<string, int>} becomes one token reading
+     * {@code Map<string,int>}.
+     *
+     * <p>A type is carried as a name everywhere else — the array suffix and the
+     * function type are already spelled into one — so type arguments are
+     * spelled in the same way rather than introducing a second shape for a
+     * type to have.
+     *
+     * @param typeToken The type's bare name.
+     * @return The name with its type arguments, or the name unchanged.
+     */
+    private SyntaxToken parseOptionalTypeArguments(SyntaxToken typeToken) {
+        if (current().getType() != SyntaxType.LessToken) return typeToken;
+        if (!isTypeArgumentListAhead()) return typeToken;
+
+        nextToken(); // consume '<'
+        StringBuilder name = new StringBuilder(typeToken.getData()).append('<');
+        boolean first = true;
+        while (current().getType() != SyntaxType.GreaterToken
+                && current().getType() != SyntaxType.DoubleGreaterToken
+                && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            if (!first) name.append(',');
+            name.append(parseTypeName().getData());
+            first = false;
+            if (current().getType() == SyntaxType.CommaToken) {
+                nextToken();
+            }
+            if (current() == startToken) {
+                nextToken();
+            }
+        }
+        closeTypeArgumentList();
+        name.append('>');
+        return new SyntaxToken(SyntaxType.IdentifierToken, typeToken.getPosition(),
+                name.toString(), typeToken.getValue());
+    }
+
+    /**
+     * Whether the {@code <} at the cursor opens a list of type arguments rather
+     * than being a less-than comparison.
+     *
+     * <p>Only names, commas, brackets and nested angle brackets may appear
+     * between the angle brackets, and the list must close before the line does.
+     * That is enough to keep {@code a < b} from being read as a type.
+     *
+     * @return true when a type argument list starts here.
+     */
+    private void closeTypeArgumentList() {
+        if (current().getType() == SyntaxType.DoubleGreaterToken) {
+            // `>>` closes two nested lists at once. Leaving one `>` behind for
+            // the enclosing list is what lets Map<string, Array<int>> be
+            // written the way anyone would write it.
+            SyntaxToken shift = current();
+            _tokens[_position] = new SyntaxToken(SyntaxType.GreaterToken, shift.getPosition() + 1, ">", null);
+            return;
+        }
+        match(SyntaxType.GreaterToken);
+    }
+
+    private boolean isTypeArgumentListAhead() {
+        int depth = 0;
+        for (int offset = 0; offset < 64; offset++) {
+            SyntaxType type = peek(offset).getType();
+            if (type == SyntaxType.LessToken) {
+                depth++;
+            } else if (type == SyntaxType.DoubleGreaterToken) {
+                depth -= 2;
+                if (depth <= 0) return true;
+            } else if (type == SyntaxType.GreaterToken) {
+                depth--;
+                if (depth == 0) return true;
+            } else if (type != SyntaxType.IdentifierToken
+                    && type != SyntaxType.CommaToken
+                    && type != SyntaxType.OpenBracketToken
+                    && type != SyntaxType.CloseBracketToken) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**
@@ -688,6 +796,110 @@ public class Parser {
         return new ReturnStatementSyntax(returnKeyword, expression);
     }
 
+    /**
+     * Parses a declaration written {@code pub}, marking it as exported.
+     *
+     * <p>{@code pub} is a prefix on a declaration and on nothing else, so
+     * anything that is not one is reported here rather than silently taking the
+     * keyword as part of the statement that follows.
+     *
+     * @return The declaration, marked public.
+     */
+    private StatementSyntax parsePublicDeclaration() {
+        SyntaxToken pubKeyword = match(SyntaxType.PubKeyword);
+        StatementSyntax declaration = parseStatement();
+        if (!isDeclaration(declaration)) {
+            _diagnostics.reportError(pubKeyword.getSpan(),
+                    "pub marks a declaration as exported and cannot be written here"
+                    + "\n\n  help: write pub before a fn, struct, enum, type, actor or module-level variable");
+            return declaration;
+        }
+        declaration.markPublic();
+        return declaration;
+    }
+
+    /** Whether a statement declares something a module can export. */
+    private static boolean isDeclaration(StatementSyntax statement) {
+        return switch (statement.getType()) {
+            case FunctionDeclaration,
+                 StructDeclaration,
+                 EnumDeclaration,
+                 TypeDeclaration,
+                 ActorDeclaration,
+                 InterfaceDeclaration,
+                 VariableDeclaration -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Parses a do-while statement: {@code do { body } while cond}.
+     *
+     * @return The parsed do-while statement.
+     */
+    /**
+     * Parses an interface declaration: a name and the method signatures a
+     * struct must have to be one.
+     *
+     * @return The parsed interface declaration.
+     */
+    private StatementSyntax parseInterfaceDeclaration() {
+        SyntaxToken interfaceKeyword = match(SyntaxType.InterfaceKeyword);
+        SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+        java.util.List<FunctionDeclarationSyntax> methods = new java.util.ArrayList<>();
+        while (current().getType() != SyntaxType.CloseBraceToken
+                && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            methods.add(parseMethodSignature());
+
+            // Prevent an infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
+        }
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new InterfaceDeclarationSyntax(interfaceKeyword, identifier, openBrace, methods, closeBrace);
+    }
+
+    /**
+     * Parses a method signature with no body, which is what an interface
+     * declares: {@code fn describe() -> string}.
+     *
+     * @return The signature, as a function declaration with an empty body.
+     */
+    private FunctionDeclarationSyntax parseMethodSignature() {
+        SyntaxToken fnKeyword = match(SyntaxType.FnKeyword);
+        SyntaxToken identifier = isContextualKeywordName(current().getType())
+                ? asIdentifier(nextToken())
+                : match(SyntaxType.IdentifierToken);
+        SyntaxToken openParenthesis = match(SyntaxType.OpenParenthesisToken);
+        SeparatedSyntaxList<ParameterSyntax> parameters = parseParameterList();
+        SyntaxToken closeParenthesis = match(SyntaxType.CloseParenthesisToken);
+        TypeClauseSyntax typeClause = parseOptionalTypeClause();
+        BlockStatementSyntax body = new BlockStatementSyntax(
+                new SyntaxToken(SyntaxType.OpenBraceToken, closeParenthesis.getPosition(), "{", null),
+                new ArrayList<>(),
+                new SyntaxToken(SyntaxType.CloseBraceToken, closeParenthesis.getPosition(), "}", null));
+        return new FunctionDeclarationSyntax(fnKeyword, identifier, openParenthesis, parameters,
+                closeParenthesis, typeClause, body);
+    }
+
+    private StatementSyntax parseDoWhileStatement() {
+        SyntaxToken doKeyword = match(SyntaxType.DoKeyword);
+        StatementSyntax body = parseBlockStatement();
+        SyntaxToken whileKeyword = match(SyntaxType.WhileKeyword);
+        ExpressionSyntax condition = parseExpression();
+        return new DoWhileStatementSyntax(doKeyword, body, whileKeyword, condition);
+    }
+
+    private StatementSyntax parseThrowStatement() {
+        // throw expr — raises the value of expr, which a catch block binds
+        SyntaxToken keyword = match(SyntaxType.ThrowKeyword);
+        ExpressionSyntax expression = parseExpression();
+        return new ThrowStatementSyntax(keyword, expression);
+    }
+
     private StatementSyntax parseSendStatement() {
         // send actor.method(args) — fire-and-forget actor dispatch
         SyntaxToken keyword = match(SyntaxType.SendKeyword);
@@ -714,7 +926,14 @@ public class Parser {
             return new JavaImportStatementSyntax(importKeyword, javaKeyword, className);
         }
         SyntaxToken moduleName = match(SyntaxType.StringToken);
-        return new ImportStatementSyntax(importKeyword, moduleName);
+        // import "std/math" as m — the alias replaces the module's own name as
+        // the qualifier its members are reached through.
+        SyntaxToken alias = null;
+        if (current().getType() == SyntaxType.AsKeyword) {
+            nextToken();
+            alias = match(SyntaxType.IdentifierToken);
+        }
+        return new ImportStatementSyntax(importKeyword, moduleName, alias);
     }
 
     private StatementSyntax parseTryCatchStatement() {
@@ -722,8 +941,9 @@ public class Parser {
         StatementSyntax tryBody = parseBlockStatement();
         SyntaxToken catchKeyword = match(SyntaxType.CatchKeyword);
         SyntaxToken errorVar = match(SyntaxType.IdentifierToken);
+        SyntaxToken errorType = parseOptionalCatchType();
         StatementSyntax catchBody = parseBlockStatement();
-        return new TryCatchStatementSyntax(tryKeyword, tryBody, catchKeyword, errorVar, catchBody);
+        return new TryCatchStatementSyntax(tryKeyword, tryBody, catchKeyword, errorVar, errorType, catchBody);
     }
 
     private StatementSyntax parseEnumDeclaration() {
@@ -776,8 +996,22 @@ public class Parser {
         StatementSyntax tryBody = parseBlockStatement();
         SyntaxToken catchKeyword = match(SyntaxType.CatchKeyword);
         SyntaxToken errorVar = match(SyntaxType.IdentifierToken);
+        SyntaxToken errorType = parseOptionalCatchType();
         StatementSyntax catchBody = parseBlockStatement();
-        return new TryExpressionSyntax(tryKeyword, tryBody, catchKeyword, errorVar, catchBody);
+        return new TryExpressionSyntax(tryKeyword, tryBody, catchKeyword, errorVar, errorType, catchBody);
+    }
+
+    /**
+     * Parses the optional type annotation on a catch variable: the {@code :
+     * Result} of {@code catch e: Result}. Declaring the type is what lets a
+     * match over the caught payload be checked for exhaustiveness.
+     *
+     * @return The declared type name, or null when the catch has none.
+     */
+    private SyntaxToken parseOptionalCatchType() {
+        if (current().getType() != SyntaxType.ColonToken) return null;
+        nextToken();
+        return parseTypeName();
     }
 
     private ExpressionSyntax parseMatchExpression() {
@@ -874,6 +1108,14 @@ public class Parser {
     private StatementSyntax parseImplDeclaration() {
         SyntaxToken implKeyword = match(SyntaxType.ImplKeyword);
         SyntaxToken typeName = match(SyntaxType.IdentifierToken);
+        // impl Printable for Point — the first name is the interface and the
+        // second the struct; without `for` the block is the struct's own.
+        SyntaxToken interfaceName = null;
+        if (current().getType() == SyntaxType.ForKeyword) {
+            nextToken();
+            interfaceName = typeName;
+            typeName = match(SyntaxType.IdentifierToken);
+        }
         SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
         java.util.List<FunctionDeclarationSyntax> methods = new java.util.ArrayList<>();
         while (current().getType() != SyntaxType.CloseBraceToken && current().getType() != SyntaxType.EOFToken) {
@@ -886,7 +1128,7 @@ public class Parser {
             }
         }
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
-        return new ImplDeclarationSyntax(implKeyword, typeName, openBrace, methods, closeBrace);
+        return new ImplDeclarationSyntax(implKeyword, typeName, interfaceName, openBrace, methods, closeBrace);
     }
 
     /**
@@ -1070,6 +1312,7 @@ public class Parser {
             case InterpolatedStringStartToken -> parseInterpolatedString();
             case OpenBracketToken -> parseArrayLiteral();
             case OpenBraceToken -> parseMapLiteral();
+            case HashToken -> parseSetLiteral();
             case FnKeyword -> {
                 yield parseLambdaExpression();
             }
@@ -1197,6 +1440,35 @@ public class Parser {
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
         return new MapLiteralExpressionSyntax(openBrace, keys, colons, values, closeBrace);
+    }
+
+    /**
+     * Parses a set literal: {@code #{1, 2, 3}} or {@code #{}}.
+     *
+     * @return The parsed set literal.
+     */
+    private ExpressionSyntax parseSetLiteral() {
+        SyntaxToken hash = match(SyntaxType.HashToken);
+        SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
+        List<ExpressionSyntax> elements = new ArrayList<>();
+
+        while (current().getType() != SyntaxType.CloseBraceToken
+                && current().getType() != SyntaxType.EOFToken) {
+            SyntaxToken startToken = current();
+            elements.add(parseExpression());
+
+            if (current().getType() != SyntaxType.CloseBraceToken) {
+                match(SyntaxType.CommaToken);
+            }
+
+            // Prevent an infinite loop on bad input
+            if (current() == startToken) {
+                nextToken();
+            }
+        }
+
+        SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
+        return new SetLiteralExpressionSyntax(hash, openBrace, elements, closeBrace);
     }
 
     private ExpressionSyntax parseArrayLiteral() {

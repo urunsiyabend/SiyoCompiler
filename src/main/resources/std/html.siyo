@@ -1,4 +1,4 @@
-fn escape(s: string) -> string {
+pub fn escape(s: string) -> string {
     mut result = replace(s, "&", "&amp;")
     result = replace(result, "<", "&lt;")
     result = replace(result, ">", "&gt;")
@@ -6,7 +6,7 @@ fn escape(s: string) -> string {
     return result
 }
 
-fn escapeAttr(s: string) -> string {
+pub fn escapeAttr(s: string) -> string {
     mut result = replace(s, "&", "&amp;")
     result = replace(result, "<", "&lt;")
     result = replace(result, ">", "&gt;")

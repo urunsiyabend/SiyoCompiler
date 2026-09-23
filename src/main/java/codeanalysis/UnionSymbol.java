@@ -30,6 +30,20 @@ public class UnionSymbol {
      *
      * @return The type name.
      */
+    private java.util.List<String> _typeParameters = java.util.List.of();
+
+    /**
+     * The type parameters this sum type declares, as in
+     * {@code type Option<T> = Some(T) | None}.
+     *
+     * @return The type parameter names, empty when it declares none.
+     */
+    public java.util.List<String> getTypeParameters() { return _typeParameters; }
+
+    public void setTypeParameters(java.util.List<String> typeParameters) {
+        _typeParameters = typeParameters == null ? java.util.List.of() : typeParameters;
+    }
+
     public String getName() {
         return _name;
     }

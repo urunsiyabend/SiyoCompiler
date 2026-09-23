@@ -141,11 +141,13 @@ class SumTypeTest {
 
     @Test
     void aVariantPayloadMayBeAStruct() throws Exception {
-        assertEquals("Found({x=1, y=2})", run("""
+        String source = """
                 struct Point { x: int, y: int }
                 type Hit = Found(Point) | Missing
                 fn main() { println(toString(Found(Point { x: 1, y: 2 }))) }
-                """, "StructPayload"));
+                """;
+        assertEquals("Found(Point { x: 1, y: 2 })", run(source, "StructPayload"));
+        assertEquals("Found(Point { x: 1, y: 2 })", interpret(source, "StructPayload"));
     }
 
     @Test

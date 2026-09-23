@@ -185,6 +185,175 @@ public class SiyoRuntime {
         }
     }
 
+    /**
+     * The value a catch block binds for a thrown error.
+     *
+     * <p>A Siyo {@code throw} carries a payload, so the payload is what the
+     * catch variable sees and a sum-type variant can be matched on. Anything
+     * else crossing the boundary is a Java exception: its message, or — when it
+     * has none — its type name, because binding null told the reader nothing.
+     *
+     * @param error The throwable caught at the boundary.
+     * @return The value to bind to the catch variable.
+     */
+    public static Object errorPayload(Throwable error) {
+        Throwable cause = error;
+        while (cause instanceof java.lang.reflect.InvocationTargetException wrapper
+                && wrapper.getCause() != null) {
+            cause = wrapper.getCause();
+        }
+        if (cause instanceof SiyoThrow raised) {
+            Object payload = raised.getPayload();
+            // Raising a Java exception raises the exception, not a value that
+            // happens to be one, so it is described the way a Java failure is.
+            if (!(payload instanceof Throwable nested)) return payload;
+            cause = nested;
+        }
+        String message = cause.getMessage();
+        if (message != null && !message.isEmpty()) {
+            return message;
+        }
+        return cause.getClass().getSimpleName();
+    }
+
+    /**
+     * The length of any value {@code len} accepts: the characters of a string,
+     * or the elements of an array, map or set.
+     *
+     * <p>Both backends call this, so they cannot disagree about what a set's
+     * length is — {@code len} used to know only strings and arrays and failed
+     * at run time on the other two.
+     *
+     * @param value The value to measure.
+     * @return The number of characters or elements.
+     */
+    public static int lengthOf(Object value) {
+        if (value == null) return 0;
+        if (value instanceof String text) return text.length();
+        if (value instanceof SiyoMap map) return map.size();
+        if (value instanceof SiyoSet set) return set.size();
+        if (value instanceof java.util.Collection<?> collection) return collection.size();
+        if (value instanceof java.util.Map<?, ?> map) return map.size();
+        if (value.getClass().isArray()) return java.lang.reflect.Array.getLength(value);
+        throw new SiyoThrow("len is not defined for " + value.getClass().getSimpleName());
+    }
+
+    /**
+     * The name of the struct a value is, or null when it is not a struct.
+     *
+     * <p>A call through an interface dispatches on this, so it has to answer
+     * for both a struct built by the interpreter and one built by compiled
+     * code.
+     *
+     * @param value The receiver.
+     * @return The struct's declared name, or null.
+     */
+    public static String structNameOf(Object value) {
+        if (value instanceof SiyoObject object) return object.getTypeName();
+        if (value instanceof SiyoStruct struct) {
+            return struct.getStructType() != null ? struct.getStructType().getName() : null;
+        }
+        if (value instanceof SiyoActor actor) return actor.getActorTypeName();
+        return null;
+    }
+
+    /**
+     * The error raised when a value reaches an interface call without being
+     * one of the structs that implement it.
+     *
+     * @param structName    The struct the value turned out to be, or null.
+     * @param interfaceName The interface it was reached through.
+     * @return The error to raise.
+     */
+    public static SiyoThrow unimplementedInterface(String structName, String interfaceName) {
+        return new SiyoThrow(String.format("%s does not implement %s",
+                structName == null ? "value" : structName, interfaceName));
+    }
+
+    /**
+     * The fields of a struct, in declaration order.
+     *
+     * @param value The struct.
+     * @return Its field names, or an empty array when the value is not a struct.
+     */
+    public static SiyoArray structFields(Object value) {
+        java.util.List<Object> names = new java.util.ArrayList<>(fieldMapOf(value).keySet());
+        return new SiyoArray(names, String.class);
+    }
+
+    /**
+     * Reads one field of a struct by name.
+     *
+     * @param value The struct.
+     * @param name  The field name.
+     * @return The field's value, or null when there is no such field.
+     */
+    public static Object structField(Object value, String name) {
+        return fieldMapOf(value).get(name);
+    }
+
+    /**
+     * Writes one field of a struct by name.
+     *
+     * @param value      The struct.
+     * @param name       The field name.
+     * @param fieldValue The value to store.
+     */
+    public static void setStructField(Object value, String name, Object fieldValue) {
+        if (value instanceof SiyoStruct struct) {
+            struct.setField(name, fieldValue);
+            return;
+        }
+        if (value instanceof java.util.Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> fields = (java.util.Map<String, Object>) map;
+            fields.put(name, fieldValue);
+        }
+    }
+
+    /**
+     * A struct's fields as a map, so it can be serialised without naming each
+     * field by hand.
+     *
+     * @param value The struct.
+     * @return Its fields, keyed by name.
+     */
+    public static SiyoMap structToMap(Object value) {
+        SiyoMap result = new SiyoMap();
+        for (var entry : fieldMapOf(value).entrySet()) {
+            result.set(entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
+    /**
+     * The name of the struct a value is, for a program to read.
+     *
+     * @param value The value.
+     * @return The struct's name, or an empty string when it is not a struct.
+     */
+    public static String typeNameOf(Object value) {
+        String name = structNameOf(value);
+        return name == null ? "" : name;
+    }
+
+    /** The field map behind a struct, whichever backend built it. */
+    private static java.util.Map<String, Object> fieldMapOf(Object value) {
+        if (value instanceof SiyoStruct struct) return struct.getFieldsMap();
+        if (value instanceof SiyoActor actor) return fieldMapOf(actor.getState());
+        if (value instanceof java.util.Map<?, ?> map) {
+            java.util.LinkedHashMap<String, Object> fields = new java.util.LinkedHashMap<>();
+            for (var entry : map.entrySet()) fields.put(String.valueOf(entry.getKey()), entry.getValue());
+            return fields;
+        }
+        return java.util.Map.of();
+    }
+
+    /** Raise a Siyo error carrying an arbitrary payload. */
+    public static SiyoThrow raise(Object payload) {
+        return new SiyoThrow(payload);
+    }
+
     /** parseInt that returns 0 on invalid input (matches interpreter behavior). */
     public static int safeParseInt(String s) {
         try {

@@ -4,15 +4,15 @@ import java "java.io.BufferedReader"
 import java "java.io.InputStreamReader"
 import java "java.io.OutputStreamWriter"
 
-fn get(url: string) -> string {
+pub fn get(url: string) -> string {
     return httpGet(url)
 }
 
-fn post(url: string, body: string) -> string {
+pub fn post(url: string, body: string) -> string {
     return httpPost(url, body)
 }
 
-fn put(url: string, body: string) -> string {
+pub fn put(url: string, body: string) -> string {
     mut u = URL.new(url)
     mut conn = u.openConnection()
     conn.setDoOutput(true)
@@ -35,7 +35,7 @@ fn put(url: string, body: string) -> string {
     return result
 }
 
-fn delete(url: string) -> string {
+pub fn delete(url: string) -> string {
     mut u = URL.new(url)
     mut conn = u.openConnection()
     conn.setRequestProperty("X-HTTP-Method-Override", "DELETE")

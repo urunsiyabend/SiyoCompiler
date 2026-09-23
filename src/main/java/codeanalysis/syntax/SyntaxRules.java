@@ -50,6 +50,10 @@ public class SyntaxRules {
             case "match" -> SyntaxType.MatchKeyword;
             case "send" -> SyntaxType.SendKeyword;
             case "type" -> SyntaxType.TypeKeyword;
+            case "throw" -> SyntaxType.ThrowKeyword;
+            case "pub" -> SyntaxType.PubKeyword;
+            case "do" -> SyntaxType.DoKeyword;
+            case "interface" -> SyntaxType.InterfaceKeyword;
             default -> SyntaxType.IdentifierToken;
         };
     }
@@ -121,6 +125,11 @@ public class SyntaxRules {
             case MatchKeyword -> "match";
             case SendKeyword -> "send";
             case TypeKeyword -> "type";
+            case ThrowKeyword -> "throw";
+            case PubKeyword -> "pub";
+            case DoKeyword -> "do";
+            case InterfaceKeyword -> "interface";
+            case HashToken -> "#";
             case OpenBracketToken -> "[";
             case CloseBracketToken -> "]";
             case DotToken -> ".";

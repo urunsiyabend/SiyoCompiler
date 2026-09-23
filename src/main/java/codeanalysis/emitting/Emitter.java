@@ -442,6 +442,7 @@ public class Emitter {
             case ConditionalGotoStatement -> emitConditionalGotoStatement((BoundConditionalGotoStatement) node);
             case ReturnStatement -> emitReturnStatement((BoundReturnStatement) node);
             case TryCatchStatement -> emitTryCatchStatement((BoundTryCatchStatement) node);
+            case ThrowStatement -> emitThrowStatement((BoundThrowStatement) node);
             case SendStatement -> emitSendStatement((BoundSendStatement) node);
             default -> throw new UnsupportedOperationException("Cannot emit statement: " + node.getType());
         }
@@ -539,6 +540,21 @@ public class Emitter {
         }
     }
 
+    /**
+     * Raises the value of an expression. The value is boxed and wrapped in a
+     * {@link codeanalysis.SiyoThrow}, which is what carries a payload past the
+     * JVM's string-only exception message.
+     *
+     * @param node The bound throw statement.
+     */
+    private void emitThrowStatement(BoundThrowStatement node) {
+        emitExpression(node.getExpression());
+        emitBoxIfNeeded(node.getExpression().getClassType());
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "raise",
+                "(Ljava/lang/Object;)Lcodeanalysis/SiyoThrow;", false);
+        _mv.visitInsn(ATHROW);
+    }
+
     private void emitTryCatchStatement(BoundTryCatchStatement node) {
         Label tryStart = new Label();
         Label tryEnd = new Label();
@@ -567,9 +583,9 @@ public class Emitter {
 
         // Catch body - exception on stack
         _mv.visitLabel(catchStart);
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Throwable", "getMessage", "()Ljava/lang/String;", false);
+        emitErrorPayload(node.getErrorVariable().getType());
         int errorSlot = declareLocal(node.getErrorVariable());
-        _mv.visitVarInsn(ASTORE, errorSlot);
+        emitStore(node.getErrorVariable().getType(), errorSlot);
         if (_tryCatchImplicitReturn && node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
             emitBlockWithImplicitReturn(catchBlock, _tryCatchReturnType);
         } else if (node.getCatchBody() instanceof BoundBlockStatement catchBlock) {
@@ -616,6 +632,8 @@ public class Emitter {
             case CallExpression -> emitCallExpression((BoundCallExpression) node);
             case ArrayLiteralExpression -> emitArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case MapLiteralExpression -> emitMapLiteralExpression((BoundMapLiteralExpression) node);
+            case SetLiteralExpression -> emitSetLiteralExpression((BoundSetLiteralExpression) node);
+            case InterfaceCallExpression -> emitInterfaceCallExpression((BoundInterfaceCallExpression) node);
             case IndexExpression -> emitIndexExpression((BoundIndexExpression) node);
             case IndexAssignmentExpression -> emitIndexAssignmentExpression((BoundIndexAssignmentExpression) node);
             case StructLiteralExpression -> emitStructLiteralExpression((BoundStructLiteralExpression) node);
@@ -625,6 +643,7 @@ public class Emitter {
             case JavaMethodCallExpression -> emitJavaMethodCall((BoundJavaMethodCallExpression) node);
             case JavaStaticFieldExpression -> emitJavaStaticField((BoundJavaStaticFieldExpression) node);
             case CastExpression -> emitCastExpression((BoundCastExpression) node);
+            case ConversionExpression -> emitConversionExpression((BoundConversionExpression) node);
             case LambdaExpression -> emitLambdaCreation((BoundLambdaExpression) node);
             case ClosureCallExpression -> emitClosureCall((BoundClosureCallExpression) node);
             case ScopeExpression -> emitScope((BoundScopeExpression) node);
@@ -1107,6 +1126,39 @@ public class Emitter {
         }
     }
 
+    /**
+     * Replaces the caught throwable on the stack with the value the catch
+     * variable binds, narrowed to the variable's declared type.
+     *
+     * <p>The handler used to call {@code getMessage()} directly, so a thrown
+     * payload was flattened to text and a message-less Java exception bound
+     * null.</p>
+     *
+     * @param declaredType The catch variable's declared type.
+     */
+    /**
+     * Widens a numeric value to the type the conversion asks for.
+     *
+     * @param node The bound conversion.
+     */
+    private void emitConversionExpression(BoundConversionExpression node) {
+        emitExpression(node.getExpression());
+        Class<?> from = node.getExpression().getClassType();
+        if (from == Object.class) {
+            emitUnboxIfNeeded(node.getClassType());
+            return;
+        }
+        emitNumericWidening(from, node.getClassType());
+    }
+
+    private void emitErrorPayload(Class<?> declaredType) {
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "errorPayload",
+                "(Ljava/lang/Throwable;)Ljava/lang/Object;", false);
+        if (declaredType != null && declaredType != Object.class) {
+            emitUnboxIfNeeded(declaredType);
+        }
+    }
+
     private void emitTryExpression(BoundTryExpression node) {
         Label tryStart = new Label();
         Label tryEnd = new Label();
@@ -1125,11 +1177,19 @@ public class Emitter {
 
         // Catch body — exception on stack, store error var
         _mv.visitLabel(catchStart);
-        _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Throwable", "getMessage", "()Ljava/lang/String;", false);
+        emitErrorPayload(node.getErrorVariable().getType());
         int errorSlot = declareLocal(node.getErrorVariable());
-        _mv.visitVarInsn(ASTORE, errorSlot);
+        emitStore(node.getErrorVariable().getType(), errorSlot);
         emitBlockLastAsValue(node.getCatchBody());
         _mv.visitLabel(catchEnd);
+
+        // Both branches leave a boxed value, because that is the only shape the
+        // two incoming edges can agree on. The expression's declared type is
+        // what the consumer expects, so narrow to it once here — otherwise
+        // `imut n = try { 1 } catch e { 2 }` stored an Integer into an int slot.
+        if (node.getClassType() != Object.class) {
+            emitUnboxIfNeeded(node.getClassType());
+        }
     }
 
     /**
@@ -1955,6 +2015,116 @@ public class Emitter {
         // SiyoArray on stack
     }
 
+    /**
+     * Calls a method on a value reached through an interface.
+     *
+     * <p>Every struct that implements the interface is known when this is
+     * emitted, so the call is a comparison against the receiver's struct name
+     * followed by an ordinary static call — no reflection, and the verifier
+     * still sees a concrete method at each branch.
+     *
+     * @param node The bound interface call.
+     */
+    private void emitInterfaceCallExpression(BoundInterfaceCallExpression node) {
+        // Receiver and arguments are evaluated once, in the order written,
+        // before the branch that decides which implementation runs.
+        emitExpression(node.getTarget());
+        emitBoxIfNeeded(node.getTarget().getClassType());
+        int receiverSlot = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, receiverSlot);
+
+        int[] argumentSlots = new int[node.getArguments().size()];
+        for (int i = 0; i < node.getArguments().size(); i++) {
+            BoundExpression argument = node.getArguments().get(i);
+            emitExpression(argument);
+            emitBoxIfNeeded(argument.getClassType());
+            argumentSlots[i] = _nextLocal++;
+            _mv.visitVarInsn(ASTORE, argumentSlots[i]);
+        }
+
+        _mv.visitVarInsn(ALOAD, receiverSlot);
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "structNameOf",
+                "(Ljava/lang/Object;)Ljava/lang/String;", false);
+        int nameSlot = _nextLocal++;
+        _mv.visitVarInsn(ASTORE, nameSlot);
+
+        Label done = new Label();
+        for (var entry : node.getImplementations().entrySet()) {
+            Label next = new Label();
+            _mv.visitVarInsn(ALOAD, nameSlot);
+            _mv.visitLdcInsn(entry.getKey());
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "equals",
+                    "(Ljava/lang/Object;)Z", false);
+            _mv.visitJumpInsn(IFEQ, next);
+            emitImplementationCall(entry.getValue(), receiverSlot, argumentSlots);
+            _mv.visitJumpInsn(GOTO, done);
+            _mv.visitLabel(next);
+        }
+
+        // No implementation matched: the value is not one of the structs that
+        // implement the interface, which is only discoverable here.
+        _mv.visitVarInsn(ALOAD, nameSlot);
+        _mv.visitLdcInsn(node.getInterfaceName());
+        _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "unimplementedInterface",
+                "(Ljava/lang/String;Ljava/lang/String;)Lcodeanalysis/SiyoThrow;", false);
+        _mv.visitInsn(ATHROW);
+        _mv.visitLabel(done);
+
+        // Every branch agrees on what it leaves behind: a boxed value, or
+        // nothing at all for a void method. The call site is given what it
+        // expects only here, once, where the branches have joined.
+        if (node.getReturnType() == null) {
+            _mv.visitInsn(ACONST_NULL);
+        } else {
+            emitUnboxIfNeeded(node.getReturnType());
+        }
+    }
+
+    /**
+     * Emits the call to one struct's implementation of an interface method,
+     * leaving its value on the stack in the shape the call site expects.
+     *
+     * @param implementation The struct's method.
+     * @param receiverSlot   The local holding the receiver.
+     * @param argumentSlots  The locals holding the arguments.
+     */
+    private void emitImplementationCall(FunctionSymbol implementation, int receiverSlot, int[] argumentSlots) {
+        java.util.List<ParameterSymbol> parameters = implementation.getParameters();
+        _mv.visitVarInsn(ALOAD, receiverSlot);
+        emitUnboxIfNeeded(parameters.get(0).getType());
+        for (int i = 0; i < argumentSlots.length; i++) {
+            _mv.visitVarInsn(ALOAD, argumentSlots[i]);
+            emitUnboxIfNeeded(parameters.get(i + 1).getType());
+        }
+
+        String owner = implementation.getModuleName() != null ? implementation.getModuleName() : _className;
+        String methodName = implementation.getJvmMethodName() != null
+                ? implementation.getJvmMethodName()
+                : implementation.getName().replace('.', '$');
+        _mv.visitMethodInsn(INVOKESTATIC, owner, methodName,
+                getFunctionDescriptor(implementation), false);
+
+        // Each branch has to leave the same thing on the stack, so a value is
+        // boxed and a void method contributes nothing.
+        if (implementation.getReturnType() != null) {
+            emitBoxIfNeeded(implementation.getReturnType());
+        }
+    }
+
+    private void emitSetLiteralExpression(BoundSetLiteralExpression node) {
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoSet");
+        _mv.visitInsn(DUP);
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoSet", "<init>", "()V", false);
+
+        for (BoundExpression element : node.getElements()) {
+            _mv.visitInsn(DUP);
+            emitExpression(element);
+            emitBoxIfNeeded(element.getClassType());
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoSet", "add",
+                    "(Ljava/lang/Object;)V", false);
+        }
+    }
+
     private void emitMapLiteralExpression(BoundMapLiteralExpression node) {
         _mv.visitTypeInsn(NEW, "codeanalysis/SiyoMap");
         _mv.visitInsn(DUP);
@@ -2035,10 +2205,13 @@ public class Emitter {
     }
 
     private void emitStructLiteralExpression(BoundStructLiteralExpression node) {
-        // Create LinkedHashMap for struct
-        _mv.visitTypeInsn(NEW, "java/util/LinkedHashMap");
+        // A struct is a field map that knows which struct it is, so a call
+        // through an interface has something to dispatch on at run time.
+        _mv.visitTypeInsn(NEW, "codeanalysis/SiyoObject");
         _mv.visitInsn(DUP);
-        _mv.visitMethodInsn(INVOKESPECIAL, "java/util/LinkedHashMap", "<init>", "()V", false);
+        _mv.visitLdcInsn(node.getStructType() != null ? node.getStructType().getName() : "struct");
+        _mv.visitMethodInsn(INVOKESPECIAL, "codeanalysis/SiyoObject", "<init>",
+                "(Ljava/lang/String;)V", false);
 
         // Put each field
         for (var entry : node.getFieldValues().entrySet()) {
@@ -2104,10 +2277,10 @@ public class Emitter {
 
         // Built-in functions
         if (function == BuiltinFunctions.ERROR) {
-            _mv.visitTypeInsn(NEW, "java/lang/RuntimeException");
-            _mv.visitInsn(DUP);
             emitExpression(node.getArguments().get(0));
-            _mv.visitMethodInsn(INVOKESPECIAL, "java/lang/RuntimeException", "<init>", "(Ljava/lang/String;)V", false);
+            emitBoxIfNeeded(node.getArguments().get(0).getClassType());
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "raise",
+                    "(Ljava/lang/Object;)Lcodeanalysis/SiyoThrow;", false);
             _mv.visitInsn(ATHROW);
             return;
         }
@@ -2142,6 +2315,39 @@ public class Emitter {
             _mv.visitMethodInsn(INVOKESTATIC, "java/lang/String", "valueOf", "(Ljava/lang/Object;)Ljava/lang/String;", false);
             return;
         }
+        if (function == BuiltinFunctions.FIELDS) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "structFields",
+                    "(Ljava/lang/Object;)Lcodeanalysis/SiyoArray;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.FIELD) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "structField",
+                    "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.SET_FIELD) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            emitCoerceArg(node.getArguments().get(1), String.class);
+            emitCoerceArg(node.getArguments().get(2), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "setStructField",
+                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Object;)V", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TO_MAP) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "structToMap",
+                    "(Ljava/lang/Object;)Lcodeanalysis/SiyoMap;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TYPE_NAME) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "typeNameOf",
+                    "(Ljava/lang/Object;)Ljava/lang/String;", false);
+            return;
+        }
         if (function == BuiltinFunctions.LEN) {
             BoundExpression arg = node.getArguments().get(0);
             emitExpression(arg);
@@ -2150,24 +2356,16 @@ public class Emitter {
                 _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
             } else if (argType == SiyoArray.class) {
                 _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
+            } else if (argType == SiyoMap.class || argType == codeanalysis.SiyoSet.class) {
+                emitBoxIfNeeded(argType);
+                _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "lengthOf",
+                        "(Ljava/lang/Object;)I", false);
             } else {
-                // Object type - runtime dispatch: check if String or List
-                int tempSlot = _nextLocal++;
-                _mv.visitVarInsn(ASTORE, tempSlot);
-                _mv.visitVarInsn(ALOAD, tempSlot);
-                _mv.visitTypeInsn(INSTANCEOF, "java/lang/String");
-                Label notString = new Label();
-                Label done = new Label();
-                _mv.visitJumpInsn(IFEQ, notString);
-                _mv.visitVarInsn(ALOAD, tempSlot);
-                _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
-                _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "length", "()I", false);
-                _mv.visitJumpInsn(GOTO, done);
-                _mv.visitLabel(notString);
-                _mv.visitVarInsn(ALOAD, tempSlot);
-                _mv.visitTypeInsn(CHECKCAST, "java/util/List");
-                _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "size", "()I", true);
-                _mv.visitLabel(done);
+                // An erased value is measured by the runtime, which knows every
+                // shape len accepts rather than only strings and lists.
+                emitBoxIfNeeded(argType);
+                _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "lengthOf",
+                        "(Ljava/lang/Object;)I", false);
             }
             return;
         }
@@ -2498,6 +2696,14 @@ public class Emitter {
             methodName = function.getName().replace('.', '$');
         }
         _mv.visitMethodInsn(INVOKESTATIC, owner, methodName, descriptor, false);
+
+        // A generic function is compiled once with its type parameters erased.
+        // The call site knows what they stand for, so the erased result is
+        // narrowed here to the type the rest of the expression was bound with.
+        Class<?> callType = node.getClassType();
+        if (callType != null && callType != function.getReturnType() && function.getReturnType() == Object.class) {
+            emitUnboxIfNeeded(callType);
+        }
     }
 
     // ========== Helpers ==========

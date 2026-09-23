@@ -23,6 +23,10 @@ import java.util.Map;
  */
 public class ModuleHandler {
     private final java.util.Set<String> _importedModules = new java.util.HashSet<>();
+    private final java.util.Set<String> _importedQualifiers = new java.util.LinkedHashSet<>();
+    private final java.util.Set<String> _publicNames = new java.util.LinkedHashSet<>();
+    private boolean _restrictsExports = false;
+    private final Map<String, String> _privateMembers = new HashMap<>();
     private final java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
     private final Map<String, Map<String, Integer>> _enumTypes = new HashMap<>();
     private final Map<String, codeanalysis.UnionSymbol> _unionTypes;
@@ -96,15 +100,48 @@ public class ModuleHandler {
     }
 
     public boolean isImportedQualifier(String qualifier) {
-        for (String moduleName : _importedModules) {
-            String shortName = moduleName;
-            int slash = shortName.lastIndexOf('/');
-            if (slash >= 0) shortName = shortName.substring(slash + 1);
-            int dot = shortName.lastIndexOf('.');
-            if (dot >= 0) shortName = shortName.substring(dot + 1);
-            if (shortName.equals(qualifier)) return true;
-        }
-        return false;
+        return _importedQualifiers.contains(qualifier);
+    }
+
+    // --- Visibility ---
+
+    /**
+     * Records whether a top-level declaration is exported.
+     *
+     * <p>A module that marks nothing {@code pub} exports everything it
+     * declares, which is what every module written before visibility existed
+     * expects. The first {@code pub} in a file switches that module to
+     * exporting only what is marked, so privacy is opted into per module rather
+     * than imposed on code that never asked for it.
+     *
+     * @param name     The declared name.
+     * @param isPublic Whether it was written {@code pub}.
+     */
+    public void recordVisibility(String name, boolean isPublic) {
+        if (!isPublic) return;
+        _restrictsExports = true;
+        _publicNames.add(name);
+    }
+
+    /** Whether this module exports only what it marks {@code pub}. */
+    public boolean restrictsExports() {
+        return _restrictsExports;
+    }
+
+    /** The names this module marks {@code pub}. */
+    public java.util.Set<String> getPublicNames() {
+        return _publicNames;
+    }
+
+    /**
+     * The module a name belongs to when an import found it but could not bring
+     * it in, so a use of it is reported as private rather than as missing.
+     *
+     * @param qualifiedName The name as this file would write it.
+     * @return The module that keeps it private, or null.
+     */
+    public String privateMemberOwner(String qualifiedName) {
+        return _privateMembers.get(qualifiedName);
     }
 
     // --- Import handling ---
@@ -119,10 +156,14 @@ public class ModuleHandler {
             }
         }
 
-        if (moduleName == null || _importedModules.contains(moduleName)) {
+        // An alias is part of the identity of an import: the same module may be
+        // reached under its own name and under an alias in the same file.
+        String alias = syntax.getAlias() != null ? syntax.getAlias().getData() : null;
+        String importKey = alias == null ? moduleName : moduleName + " as " + alias;
+        if (moduleName == null || _importedModules.contains(importKey)) {
             return new BoundExpressionStatement(new BoundLiteralExpression(0));
         }
-        _importedModules.add(moduleName);
+        _importedModules.add(importKey);
 
         // Resolve file path
         String moduleFilePath = resolveModulePath(moduleName);
@@ -156,16 +197,27 @@ public class ModuleHandler {
                 : moduleName.contains(".")
                 ? moduleName.substring(moduleName.lastIndexOf('.') + 1)
                 : moduleName;
-        String className = Character.toUpperCase(shortName.charAt(0)) + shortName.substring(1);
-        if (moduleName.startsWith("std/") || moduleName.startsWith("std.")) {
-            className = "Siyo_" + className;
-        }
+        String className = moduleClassName(moduleName);
+        // The qualifier is what this file writes to reach the module's members.
+        // The JVM class name is not renamed with it: an alias is local to the
+        // importer, and the module's code still lives where it was emitted.
+        String qualifier = alias != null ? alias : shortName;
+        _importedQualifiers.add(qualifier);
         _importedClassNames.add(className);
 
         for (FunctionSymbol func : module.getFunctions()) {
             if (BuiltinFunctions.isBuiltin(func)) continue;
             // Register with qualified name: module.func
-            String qualifiedName = shortName + "." + func.getName();
+            String qualifiedName = qualifier + "." + func.getName();
+            // A method belongs to its struct, so it travels with the struct's
+            // visibility rather than carrying one of its own.
+            String exportName = func.getName().contains(".")
+                    ? func.getName().substring(0, func.getName().indexOf('.'))
+                    : func.getName();
+            if (!module.exports(exportName)) {
+                _privateMembers.put(qualifiedName, moduleName);
+                continue;
+            }
             FunctionSymbol importedFunc = new FunctionSymbol(
                     qualifiedName, func.getParameters(), func.getReturnType(), className);
             importedFunc.setReturnStructName(func.getReturnStructName());
@@ -206,7 +258,11 @@ public class ModuleHandler {
         // Module-level variables are exported as module.name, reading the static
         // field on the module's own class.
         for (var entry : module.getVariables().entrySet()) {
-            String qualifiedName = shortName + "." + entry.getKey();
+            String qualifiedName = qualifier + "." + entry.getKey();
+            if (!module.exports(entry.getKey())) {
+                _privateMembers.put(qualifiedName, moduleName);
+                continue;
+            }
             VariableSymbol source = entry.getValue();
             VariableSymbol imported = new VariableSymbol(
                     qualifiedName, source.isReadOnly(), source.getType());
@@ -216,17 +272,39 @@ public class ModuleHandler {
 
         // Register imported structs
         for (var entry : module.getStructs().entrySet()) {
+            if (!module.exports(entry.getKey())) {
+                _privateMembers.put(entry.getKey(), moduleName);
+                continue;
+            }
             _structTypes.put(entry.getKey(), entry.getValue());
         }
 
         // Register imported enums so EnumName.Member remains usable across modules.
         for (var entry : module.getEnums().entrySet()) {
+            if (!module.exports(entry.getKey())) {
+                _privateMembers.put(entry.getKey(), moduleName);
+                continue;
+            }
             _enumTypes.putIfAbsent(entry.getKey(), new HashMap<>(entry.getValue()));
+        }
+
+        // Register imported interfaces, so a struct from another module can be
+        // reached through the interface it was declared to implement.
+        for (var entry : module.getInterfaces().entrySet()) {
+            if (!module.exports(entry.getKey())) {
+                _privateMembers.put(entry.getKey(), moduleName);
+                continue;
+            }
+            _typeResolver.getInterfaceTypes().putIfAbsent(entry.getKey(), entry.getValue());
         }
 
         // Register imported sum types, so both their name and their variants
         // remain usable across a module boundary.
         for (var entry : module.getUnions().entrySet()) {
+            if (!module.exports(entry.getKey())) {
+                _privateMembers.put(entry.getKey(), moduleName);
+                continue;
+            }
             _unionTypes.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
@@ -234,6 +312,10 @@ public class ModuleHandler {
         for (FunctionSymbol func : module.getFunctions()) {
             if (func.getName().contains(".") && !func.getName().startsWith(moduleName + ".")) {
                 // This is a struct impl method like "Vec2.new"
+                if (!module.exports(func.getName().substring(0, func.getName().indexOf('.')))) {
+                    _privateMembers.put(func.getName(), moduleName);
+                    continue;
+                }
                 FunctionSymbol importedImpl = new FunctionSymbol(
                         func.getName(), func.getParameters(), func.getReturnType(), className);
                 importedImpl.setReturnStructName(func.getReturnStructName());
@@ -251,6 +333,30 @@ public class ModuleHandler {
         }
 
         return new BoundExpressionStatement(new BoundLiteralExpression(0));
+    }
+
+    /**
+     * The JVM class name a module's code is emitted into.
+     *
+     * <p>Every path segment is kept, because the last one alone is not unique:
+     * {@code left/util} and {@code right/util} are different modules and used
+     * to be emitted as the same class, so whichever loaded first answered for
+     * both. A std module keeps its {@code Siyo_} prefix so it cannot collide
+     * with a program's own module of the same name.
+     *
+     * @param moduleName The module path as written in the import.
+     * @return A valid JVM class name for the module.
+     */
+    static String moduleClassName(String moduleName) {
+        boolean isStd = moduleName.startsWith("std/") || moduleName.startsWith("std.");
+        StringBuilder name = new StringBuilder(isStd ? "Siyo" : "");
+        for (String segment : moduleName.split("[/.]")) {
+            if (segment.isEmpty()) continue;
+            if (isStd && segment.equals("std")) continue;
+            if (name.length() > 0) name.append('_');
+            name.append(Character.toUpperCase(segment.charAt(0))).append(segment.substring(1));
+        }
+        return name.toString();
     }
 
     /** The name a module's symbols are qualified with. */
@@ -436,12 +542,7 @@ public class ModuleHandler {
                 return null;
             }
 
-            // Generate a valid JVM class name — prefix std modules to avoid collisions (e.g., Math → Siyo_Math)
-            String classBase = shortName;
-            String className = Character.toUpperCase(classBase.charAt(0)) + classBase.substring(1);
-            if (moduleName.startsWith("std/") || moduleName.startsWith("std.")) {
-                className = "Siyo_" + className;
-            }
+            String className = moduleClassName(moduleName);
 
             // A module exports only functions declared in that source file.
             // Imported symbols also live in the binder's body map so local calls
@@ -470,10 +571,16 @@ public class ModuleHandler {
             ModuleSymbol module = new ModuleSymbol(moduleName, className, filePath,
                     functions, bodies, structs, enums, topLevelBlock);
             module.setUnions(new java.util.LinkedHashMap<>(moduleBinder.getModuleHandler().getUnionTypes()));
+            module.setInterfaces(new java.util.LinkedHashMap<>(
+                    moduleBinder.getTypeResolver().getInterfaceTypes()));
             module.setVariables(collectTopLevelVariables(topLevelBlock, className));
             module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
             module.setImportedClassNames(
                     new java.util.LinkedHashSet<>(moduleBinder.getModuleHandler().getImportedClassNames()));
+            if (moduleBinder.getModuleHandler().restrictsExports()) {
+                module.setExportedNames(
+                        new java.util.LinkedHashSet<>(moduleBinder.getModuleHandler().getPublicNames()));
+            }
             if (_registry != null) {
                 _registry.register(filePath, module);
                 _registry.markComplete(filePath);
@@ -528,6 +635,10 @@ public class ModuleHandler {
     public void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
 
+        // A type parameter stands for a type while the signature is read, so
+        // `T` resolves here rather than being reported as an unknown type.
+        _typeResolver.getTypeParameters().addAll(syntax.getTypeParameters());
+
         List<ParameterSymbol> parameters = new ArrayList<>();
         for (ParameterSyntax parameterSyntax : syntax.getParameters()) {
             String parameterName = parameterSyntax.getIdentifier().getData();
@@ -546,6 +657,10 @@ public class ModuleHandler {
 
         FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
         function.setOriginModule(_filePath);
+        function.setTypeParameters(syntax.getTypeParameters());
+        if (syntax.getTypeClause() != null) {
+            function.setDeclaredReturnTypeName(syntax.getTypeClause().getIdentifier().getData());
+        }
         if (returnType == codeanalysis.SiyoUnion.class && syntax.getTypeClause() != null) {
             function.setReturnUnionName(syntax.getTypeClause().getIdentifier().getData());
         }
@@ -677,6 +792,11 @@ public class ModuleHandler {
         String name = syntax.getIdentifier().getData();
         if (_unionTypes.containsKey(name)) return;
 
+        // A payload written as a type parameter is erased: one declaration
+        // serves every type it is used at, rather than being rewritten per
+        // payload type.
+        _typeResolver.getTypeParameters().addAll(syntax.getTypeParameters());
+
         java.util.LinkedHashMap<String, codeanalysis.UnionSymbol.Variant> variants = new java.util.LinkedHashMap<>();
         for (UnionVariantSyntax variantSyntax : syntax.getVariants()) {
             String variantName = variantSyntax.getIdentifier().getData();
@@ -699,7 +819,9 @@ public class ModuleHandler {
             variants.put(variantName, new codeanalysis.UnionSymbol.Variant(variantName, payloadTypes, payloadTypeNames));
         }
 
-        _unionTypes.put(name, new codeanalysis.UnionSymbol(name, variants));
+        codeanalysis.UnionSymbol union = new codeanalysis.UnionSymbol(name, variants);
+        union.setTypeParameters(syntax.getTypeParameters());
+        _unionTypes.put(name, union);
     }
 
     /**

@@ -61,6 +61,23 @@ public class FunctionDeclarationSyntax extends StatementSyntax {
      *
      * @return The identifier token.
      */
+    private java.util.List<String> _typeParameters = java.util.List.of();
+
+    /**
+     * The type parameters this function declares, as in
+     * {@code fn identity<T>(x: T) -> T}.
+     *
+     * @return The type parameter names, empty when the function declares none.
+     */
+    public java.util.List<String> getTypeParameters() {
+        return _typeParameters;
+    }
+
+    /** Records the type parameters parsed after the function's name. */
+    public void setTypeParameters(java.util.List<String> typeParameters) {
+        _typeParameters = typeParameters == null ? java.util.List.of() : typeParameters;
+    }
+
     public SyntaxToken getIdentifier() {
         return _identifier;
     }

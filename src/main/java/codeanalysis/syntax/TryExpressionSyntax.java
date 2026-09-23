@@ -10,17 +10,28 @@ public class TryExpressionSyntax extends ExpressionSyntax {
     private final StatementSyntax _tryBody;
     private final SyntaxToken _catchKeyword;
     private final SyntaxToken _errorVariable;
+    private final SyntaxToken _errorTypeToken;
     private final StatementSyntax _catchBody;
 
     public TryExpressionSyntax(SyntaxToken tryKeyword, StatementSyntax tryBody,
                                 SyntaxToken catchKeyword, SyntaxToken errorVariable,
                                 StatementSyntax catchBody) {
+        this(tryKeyword, tryBody, catchKeyword, errorVariable, null, catchBody);
+    }
+
+    public TryExpressionSyntax(SyntaxToken tryKeyword, StatementSyntax tryBody,
+                                SyntaxToken catchKeyword, SyntaxToken errorVariable,
+                                SyntaxToken errorTypeToken, StatementSyntax catchBody) {
         _tryKeyword = tryKeyword;
         _tryBody = tryBody;
         _catchKeyword = catchKeyword;
         _errorVariable = errorVariable;
+        _errorTypeToken = errorTypeToken;
         _catchBody = catchBody;
     }
+
+    /** The declared type of the error variable, or null when it has none. */
+    public SyntaxToken getErrorTypeToken() { return _errorTypeToken; }
 
     public SyntaxToken getTryKeyword() { return _tryKeyword; }
     public StatementSyntax getTryBody() { return _tryBody; }

@@ -183,6 +183,10 @@ public class Lexer {
                 next();
                 _type = SyntaxType.PercentToken;
             }
+            case '#' -> {
+                next();
+                _type = SyntaxType.HashToken;
+            }
             case '(' -> {
                 next();
                 _type = SyntaxType.OpenParenthesisToken;

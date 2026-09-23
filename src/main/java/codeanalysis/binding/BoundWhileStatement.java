@@ -18,16 +18,33 @@ public class BoundWhileStatement extends BoundStatement {
     private final BoundStatement _body;
     private final LabelSymbol _breakLabel;
     private final LabelSymbol _continueLabel;
+    private final boolean _runsBeforeFirstCheck;
 
     public BoundWhileStatement(BoundExpression condition, BoundStatement body) {
         this(condition, body, null, null);
     }
 
     public BoundWhileStatement(BoundExpression condition, BoundStatement body, LabelSymbol breakLabel, LabelSymbol continueLabel) {
+        this(condition, body, breakLabel, continueLabel, false);
+    }
+
+    public BoundWhileStatement(BoundExpression condition, BoundStatement body, LabelSymbol breakLabel,
+                               LabelSymbol continueLabel, boolean runsBeforeFirstCheck) {
         _condition = condition;
         _body = body;
         _breakLabel = breakLabel;
         _continueLabel = continueLabel;
+        _runsBeforeFirstCheck = runsBeforeFirstCheck;
+    }
+
+    /**
+     * Whether the body runs once before the condition is first checked, which
+     * is what distinguishes {@code do { } while c} from {@code while c { }}.
+     *
+     * @return true for a do-while loop.
+     */
+    public boolean runsBeforeFirstCheck() {
+        return _runsBeforeFirstCheck;
     }
 
     public LabelSymbol getBreakLabel() { return _breakLabel; }

@@ -18,6 +18,7 @@ import java.util.NoSuchElementException;
 public class BoundCallExpression extends BoundExpression {
     private final FunctionSymbol _function;
     private final List<BoundExpression> _arguments;
+    private final Class<?> _resultType;
 
     /**
      * Constructs a new instance of the BoundCallExpression class.
@@ -26,8 +27,25 @@ public class BoundCallExpression extends BoundExpression {
      * @param arguments The list of bound argument expressions.
      */
     public BoundCallExpression(FunctionSymbol function, List<BoundExpression> arguments) {
+        this(function, arguments, null);
+    }
+
+    /**
+     * Constructs a call whose value has a more precise type than the function's
+     * declared one.
+     *
+     * <p>A generic function is declared over a type parameter and compiled once
+     * with it erased. The call site is where the parameter is known, so that is
+     * where the result gets its real type.
+     *
+     * @param function   The function symbol being called.
+     * @param arguments  The list of bound argument expressions.
+     * @param resultType The call's type, or null to use the function's own.
+     */
+    public BoundCallExpression(FunctionSymbol function, List<BoundExpression> arguments, Class<?> resultType) {
         _function = function;
         _arguments = arguments;
+        _resultType = resultType;
     }
 
     /**
@@ -65,7 +83,7 @@ public class BoundCallExpression extends BoundExpression {
      */
     @Override
     public Class<?> getClassType() {
-        return _function.getReturnType();
+        return _resultType != null ? _resultType : _function.getReturnType();
     }
 
     /**

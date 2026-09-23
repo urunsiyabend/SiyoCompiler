@@ -294,11 +294,55 @@ public class BuiltinFunctions {
             String.class
     );
 
+    /**
+     * The names of a struct's fields, in the order it declares them.
+     *
+     * <p>A struct could only be turned into data by naming every field by hand,
+     * which meant a serialiser had to be rewritten for each struct.
+     */
+    public static final FunctionSymbol FIELDS = new FunctionSymbol(
+            "fields",
+            List.of(new ParameterSymbol("value", Object.class)),
+            SiyoArray.class
+    );
+
+    /** The value of one field of a struct, by name. */
+    public static final FunctionSymbol FIELD = new FunctionSymbol(
+            "field",
+            List.of(new ParameterSymbol("value", Object.class),
+                    new ParameterSymbol("name", String.class)),
+            Object.class
+    );
+
+    /** Writes one field of a struct, by name. */
+    public static final FunctionSymbol SET_FIELD = new FunctionSymbol(
+            "setField",
+            List.of(new ParameterSymbol("value", Object.class),
+                    new ParameterSymbol("name", String.class),
+                    new ParameterSymbol("fieldValue", Object.class)),
+            null
+    );
+
+    /** A struct's fields as a map, which is what serialising one needs. */
+    public static final FunctionSymbol TO_MAP = new FunctionSymbol(
+            "toMap",
+            List.of(new ParameterSymbol("value", Object.class)),
+            SiyoMap.class
+    );
+
+    /** The name of the struct a value is, or an empty string when it is not one. */
+    public static final FunctionSymbol TYPE_NAME = new FunctionSymbol(
+            "typeName",
+            List.of(new ParameterSymbol("value", Object.class)),
+            String.class
+    );
+
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_LONG, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
                 PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE,
-                MAP_ARRAY, FILTER, REDUCE, FOR_EACH);
+                MAP_ARRAY, FILTER, REDUCE, FOR_EACH,
+                FIELDS, FIELD, SET_FIELD, TO_MAP, TYPE_NAME);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {

@@ -1,14 +1,14 @@
 import java "java.lang.StringBuilder"
 
-fn builder() -> object {
+pub fn builder() -> object {
     return StringBuilder.new()
 }
 
-fn lines(s: string) -> string[] {
+pub fn lines(s: string) -> string[] {
     return split(s, "\n")
 }
 
-fn join(arr: string[], sep: string) -> string {
+pub fn join(arr: string[], sep: string) -> string {
     mut result = ""
     for mut i = 0 i < len(arr) i = i + 1 {
         if i > 0 {
@@ -19,7 +19,7 @@ fn join(arr: string[], sep: string) -> string {
     return result
 }
 
-fn repeat(s: string, n: int) -> string {
+pub fn repeat(s: string, n: int) -> string {
     mut result = ""
     for mut i = 0 i < n i = i + 1 {
         result = result + s
@@ -27,7 +27,7 @@ fn repeat(s: string, n: int) -> string {
     return result
 }
 
-fn padLeft(s: string, width: int, ch: string) -> string {
+pub fn padLeft(s: string, width: int, ch: string) -> string {
     mut result = s
     while len(result) < width {
         result = ch + result
@@ -35,7 +35,7 @@ fn padLeft(s: string, width: int, ch: string) -> string {
     return result
 }
 
-fn padRight(s: string, width: int, ch: string) -> string {
+pub fn padRight(s: string, width: int, ch: string) -> string {
     mut result = s
     while len(result) < width {
         result = result + ch
@@ -43,7 +43,7 @@ fn padRight(s: string, width: int, ch: string) -> string {
     return result
 }
 
-fn chars(s: string) -> string[] {
+pub fn chars(s: string) -> string[] {
     mut result = [""]
     mut actual = [""]
     for mut i = 0 i < len(s) i = i + 1 {
@@ -53,7 +53,7 @@ fn chars(s: string) -> string[] {
     return actual
 }
 
-fn trimStart(s: string) -> string {
+pub fn trimStart(s: string) -> string {
     mut i = 0
     while i < len(s) && (substring(s, i, i + 1) == " " || substring(s, i, i + 1) == "\t" || substring(s, i, i + 1) == "\n" || substring(s, i, i + 1) == "\r") {
         i = i + 1
@@ -61,7 +61,7 @@ fn trimStart(s: string) -> string {
     return substring(s, i, len(s))
 }
 
-fn trimEnd(s: string) -> string {
+pub fn trimEnd(s: string) -> string {
     mut i = len(s) - 1
     while i >= 0 && (substring(s, i, i + 1) == " " || substring(s, i, i + 1) == "\t" || substring(s, i, i + 1) == "\n" || substring(s, i, i + 1) == "\r") {
         i = i - 1
@@ -70,7 +70,7 @@ fn trimEnd(s: string) -> string {
 }
 
 // Returns the index of the last occurrence of needle in s, or -1 if not found.
-fn lastIndexOf(s: string, needle: string) -> int {
+pub fn lastIndexOf(s: string, needle: string) -> int {
     mut result = -1
     mut nlen = len(needle)
     for mut i = 0 i <= len(s) - nlen i = i + 1 {

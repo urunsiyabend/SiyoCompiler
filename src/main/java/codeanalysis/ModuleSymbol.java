@@ -21,6 +21,8 @@ public class ModuleSymbol {
     private java.util.Set<String> _importedClassNames = new java.util.LinkedHashSet<>();
     private Map<FunctionSymbol, BoundBlockStatement> _inheritedMethods = new java.util.LinkedHashMap<>();
     private Map<String, UnionSymbol> _unions = new java.util.LinkedHashMap<>();
+    private java.util.Set<String> _exportedNames = null;
+    private Map<String, InterfaceSymbol> _interfaces = new java.util.LinkedHashMap<>();
 
     public ModuleSymbol(String name, String className, String filePath,
                         List<FunctionSymbol> functions,
@@ -66,10 +68,37 @@ public class ModuleSymbol {
     /** The sum types this module declares, keyed by name. */
     public Map<String, UnionSymbol> getUnions() { return _unions; }
 
+    /** The interfaces this module declares, keyed by name. */
+    public Map<String, InterfaceSymbol> getInterfaces() { return _interfaces; }
+
+    public void setInterfaces(Map<String, InterfaceSymbol> interfaces) {
+        _interfaces = interfaces != null ? interfaces : new java.util.LinkedHashMap<>();
+    }
+
     public void setUnions(Map<String, UnionSymbol> unions) {
         _unions = unions;
     }
     public BoundBlockStatement getTopLevelBlock() { return _topLevelBlock; }
+
+    /**
+     * The names this module marks {@code pub}, or null when it marks nothing
+     * and so exports everything it declares.
+     */
+    public java.util.Set<String> getExportedNames() { return _exportedNames; }
+
+    public void setExportedNames(java.util.Set<String> names) {
+        _exportedNames = names;
+    }
+
+    /**
+     * Whether an importer may see a name this module declares.
+     *
+     * @param name The declared name.
+     * @return true when the name is exported.
+     */
+    public boolean exports(String name) {
+        return _exportedNames == null || _exportedNames.contains(name);
+    }
 
     /**
      * Top-level variables this module declares, by name. These become static

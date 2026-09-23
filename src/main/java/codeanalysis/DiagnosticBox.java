@@ -290,6 +290,65 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
     }
 
     /**
+     * Reports a call through an interface no struct implements, which could
+     * only fail at run time.
+     *
+     * @param span          The span of the method name.
+     * @param interfaceName The interface.
+     * @param methodName    The method being called.
+     */
+    public void reportNoInterfaceImplementors(TextSpan span, String interfaceName, String methodName) {
+        report(span, String.format("No struct implements '%s', so '%s' can never be called%n%n  help: write impl %s for a struct",
+                interfaceName, methodName, interfaceName));
+    }
+
+    /**
+     * Reports a struct that is declared to implement an interface but is
+     * missing one of the methods the interface requires.
+     *
+     * @param span          The span of the impl block's struct name.
+     * @param structName    The struct.
+     * @param interfaceName The interface.
+     * @param methodName    The method that is missing.
+     */
+    public void reportMissingInterfaceMethod(TextSpan span, String structName,
+                                             String interfaceName, String methodName) {
+        report(span, String.format("'%s' does not implement '%s': it has no method '%s'%n%n  help: add fn %s to the impl block",
+                structName, interfaceName, methodName, methodName));
+    }
+
+    /**
+     * Reports a method whose signature does not match the one its interface
+     * declares.
+     *
+     * @param span          The span of the impl block's struct name.
+     * @param structName    The struct.
+     * @param interfaceName The interface.
+     * @param methodName    The method.
+     * @param detail        How the signature differs.
+     */
+    public void reportInterfaceMethodSignature(TextSpan span, String structName, String interfaceName,
+                                               String methodName, String detail) {
+        report(span, String.format("'%s.%s' does not match '%s': %s",
+                structName, methodName, interfaceName, detail));
+    }
+
+    /**
+     * Reports a use of a name a module declares but does not export.
+     *
+     * <p>Reporting it as missing would send the reader looking for a typo, when
+     * the declaration is there and only unmarked.
+     *
+     * @param span       The text span of the use.
+     * @param name       The name as it was written.
+     * @param moduleName The module that declares it.
+     */
+    public void reportPrivateMember(TextSpan span, String name, String moduleName) {
+        report(span, String.format("'%s' is private to module '%s'%n%n  help: write pub before its declaration to export it",
+                name, moduleName));
+    }
+
+    /**
      * Reports a duplicate parameter diagnostic with the specified span and name.
      *
      * @param span The text span where the duplicate parameter is declared.
