@@ -1,11 +1,11 @@
 package codeanalysis.project;
 
-import codeanalysis.JavaClasspath;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import codeanalysis.JavaClasspath;
 
 /**
  * Represents a Siyo project defined by siyo.toml.
@@ -24,7 +24,7 @@ public class SiyoProject {
         _projectRoot = projectRoot;
         _config = config;
         _name = config.getString("project", "name", "untitled");
-        _version = config.getString("project", "version", "0.6.0");
+        _version = config.getString("project", "version", "0.7.0");
         _main = config.getString("project", "main", "src/main.siyo");
     }
 
@@ -107,7 +107,7 @@ public class SiyoProject {
             // siyo.toml
             String toml = "[project]\n" +
                     "name = \"" + name + "\"\n" +
-                    "version = \"0.6.0\"\n" +
+                    "version = \"0.7.0\"\n" +
                     "main = \"src/main.siyo\"\n" +
                     "\n" +
                     "[dependencies]\n";
