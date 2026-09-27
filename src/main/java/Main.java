@@ -1,8 +1,14 @@
-import codeanalysis.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Scanner;
+
+import codeanalysis.Compilation;
+import codeanalysis.Diagnostic;
+import codeanalysis.DiagnosticBox;
+import codeanalysis.EvaluationResult;
+import codeanalysis.VariableSymbol;
 import codeanalysis.project.SiyoProject;
 import codeanalysis.syntax.SyntaxTree;
-
-import java.util.*;
 
 /**
  * The Main class is the entry point of the program.
@@ -14,7 +20,7 @@ import java.util.*;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.6.0";
+    private static final String VERSION = "0.7.0";
 
     public static void main(String[] args) {
         if (System.getenv("SIYO_DEBUG") != null) {
