@@ -1,0 +1,9 @@
+import "std/path"
+
+fn main() {
+    mut p = "docs/guide.md"
+    println("path:      $p")
+    println("basename:  " + path.basename(p))
+    println("stem:      " + path.stem(p))
+    println("extension: " + path.extension(p))
+}
