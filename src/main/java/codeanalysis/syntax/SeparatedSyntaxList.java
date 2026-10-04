@@ -3,6 +3,7 @@ package codeanalysis.syntax;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * Represents a separated syntax list, which is a list of syntax nodes separated by tokens.
@@ -88,6 +89,9 @@ public class SeparatedSyntaxList<T extends SyntaxNode> implements Iterable<T> {
 
         @Override
         public T next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
             return get(index++);
         }
     }
