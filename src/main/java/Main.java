@@ -457,6 +457,7 @@ public class Main {
         System.out.println("  run                 Run the project defined in siyo.toml");
         System.out.println("  test [file]         Run tests (default: src/test.siyo)");
         System.out.println("  compile <file.siyo> Compile to .class without running");
+        System.out.println("  interpret <file.siyo> Interpret a file without generating JVM bytecode");
         System.out.println("  new <name>          Create a new project skeleton");
         System.out.println("  repl                Start the interactive REPL");
         System.out.println();
