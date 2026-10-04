@@ -1,0 +1,9 @@
+import "std/html"
+
+fn main() {
+    mut text = "<h1>Siyo & JVM</h1>"
+    println(html.escape(text))
+
+    mut attr = "Siyo's \"quoted\" title"
+    println(html.escapeAttr(attr))
+}
