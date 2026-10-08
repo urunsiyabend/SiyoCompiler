@@ -10,7 +10,7 @@ language's fault are fixed here rather than worked around in the app.
 Most of them were the same defect this project cares most about: a program
 that means one thing compiled and another interpreted. Several were silent.
 
-2,230 tests pass, up from 2,184. LogScope itself is now part of `mvn test`:
+2,243 tests pass, up from 2,184. LogScope itself is now part of `mvn test`:
 its whole CLI runs through both backends, under a C locale, against golden
 outputs.
 
@@ -50,6 +50,40 @@ into a module it imported failed with "Function body not found".
 failed with "Unexpected node: BlockStatement".
 
 **`siyoc interpret file.siyo a b` passes `a b`.** `os.args()` was empty.
+
+---
+
+## JSON that is JSON
+
+**`json.stringify` writes a value by its runtime type.** A string was written
+bare whenever it parsed as a number, so `{"msg": "123"}` came back as the number
+`123`, and `"01"` or `" 42"` produced output that was not JSON at all. A string
+is now always a string; an `int`, `long` or `float` is a number, and a
+non-finite float, which JSON cannot represent, is `null`.
+
+**Every control character is escaped.** Only newline, tab and carriage return
+were, so a log message holding U+0001, a backspace or a form feed produced
+invalid JSON. Every character below U+0020 is now written as an escape.
+
+Both are checked on both backends with an independent strict RFC 8259 parser,
+and round-tripped through `json.parse`.
+
+If a program relied on `json.stringify("42")` producing `42`, it now produces
+`"42"`; convert with `parseInt` first.
+
+## A field a struct does not declare is an error
+
+```siyo
+struct Box { items: Array<Item> }
+imut b = Box { items: [] }
+println(toString(len(b.itmes)))   // Struct 'Box' has no field 'itmes'
+```
+
+Reading such a field gave `null`, writing one added it, and a struct literal
+accepted extra fields, on both backends — a misspelt name became a wrong value
+at run time. Where the struct is known at compile time each is now reported. A
+value reached through an interface, whose struct is decided at run time, is
+unaffected.
 
 ---
 
@@ -158,6 +192,8 @@ Found by LogScope and deliberately left for later (see PAIN_POINTS.md):
   error; imported types are written unqualified.
 - A mixed array literal is rejected even when annotated `object[]`.
 - `error(msg)` is not treated as diverging the way `throw` is.
+- There is no date/time module; LogScope orders RFC 3339 UTC timestamps with a
+  small Siyo module of its own (`projects/logscope/src/timestamp.siyo`).
 
 And from 0.7.0, still open: generic structs, interface default methods and
 bounds, `Empty { }`, a map literal as a tail value, and numeric `as`.

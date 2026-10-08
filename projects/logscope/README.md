@@ -48,13 +48,21 @@ All filters combine; a record must pass every one given.
 | `--until TS` | before `TS` |
 | `--grep TEXT` | whose message contains `TEXT` (case-insensitive) |
 
-Timestamps are compared as ISO-8601 UTC strings (`2026-03-01T10:00:00Z`). A
-record with no `ts` fails any time filter.
+A flag's value may not be another LogScope flag: `report x --json --html` is a
+usage error rather than a JSON report written to a file named `--html`.
+
+Timestamps are RFC 3339 / ISO-8601 in UTC: `2026-03-01T10:00:00Z`, with an
+optional fraction of up to nine digits (`10:00:00.5Z`) and the zone written
+`Z`, `z`, `+00:00` or `-00:00`; a filter may also be a date (`2026-03-01`,
+midnight UTC). They are ordered by time, not as text, so `10:00:00Z` comes
+before `10:00:00.5Z`. A record with no `ts` fails any time filter; a record
+whose `ts` is not a UTC timestamp is listed as invalid; an invalid
+`--since/--until` is a usage error.
 
 ### Records
 
 Each line must be a JSON object with a string `level` and a string `msg`.
-`ts` and `service` are optional strings (`service` defaults to `-`); any other
+`ts` (a UTC timestamp, see above) and `service` are optional strings (`service` defaults to `-`); any other
 fields are kept and printed back by `filter`. Levels are lowercased. Blank
 lines are skipped. Any other line is counted as invalid and listed with its
 line number and the reason — it never stops the run.
@@ -78,6 +86,7 @@ info, debug, trace, then any other), services alphabetically.
 src/main.siyo      entry point: dispatch, exit codes
 src/cli.siyo       argv -> Options, or a usage error
 src/record.siyo    one JSONL line -> LogRecord, or why it is not one
+src/timestamp.siyo UTC timestamps -> keys that order by time
 src/query.siyo     Filter and matches()
 src/summary.siyo   totals, counts, error groups
 src/render.siyo    text, JSON and HTML output

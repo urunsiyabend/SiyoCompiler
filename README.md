@@ -12,7 +12,7 @@
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
   <img src="https://img.shields.io/badge/version-0.8.0-green" alt="v0.8.0">
-  <img src="https://img.shields.io/badge/tests-2230%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2243%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -318,7 +318,7 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2230 tests across 28 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope end-to-end run, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2243 tests across 38 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope end-to-end run, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 

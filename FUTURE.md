@@ -246,7 +246,9 @@ with JSON and HTML reports — and fixing what it hit. See
   differ in type, an arm that only throws.
 - **Tooling.** `siyoc test` fails when a test fails, a syntax error in an
   imported module is reported, and output is UTF-8 whatever the locale.
-- 2,230 tests pass, up from 2,184
+- **Correctness.** `json.stringify` writes by runtime type and escapes every
+  control character; a field a struct does not declare is an error.
+- 2,243 tests pass, up from 2,184
 
 ---
 

@@ -166,6 +166,8 @@ field
     //     struct Route { pattern: string, handler: fn(string) -> string }
     // and may have any type a parameter may, including a generic one:
     //     struct Box { items: Array<Item>, counts: Map<string, int> }
+    // Reading, writing or initialising a field the struct does not declare is
+    // an error: "Struct 'Box' has no field 'itmes'".
 
 enum_declaration
     : 'enum' IDENTIFIER '{' enum_member (',' enum_member)* '}'
@@ -789,6 +791,12 @@ The parser validates: a missing colon, an unterminated string or object, a
 trailing comma, a bad escape and trailing input past the document are reported
 with the position they were found at. `\u` escapes and exponent notation are
 decoded.
+
+`json.stringify` writes each value by its runtime type: an `int`, `long` or
+`float` as a number (a non-finite float as `null`), a `bool` as `true`/`false`,
+and a `string` always as a string — `"123"` stays `"123"`. Every character
+below U+0020 in a string is escaped, so the output is valid JSON whatever the
+text holds.
 
 ### `std/testing`
 
