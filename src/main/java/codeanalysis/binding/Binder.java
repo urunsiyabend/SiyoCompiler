@@ -388,6 +388,10 @@ public class Binder {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
             variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
+        } else if (initializer instanceof BoundIndexExpression) {
+            // imut recs = groups["e"] is whatever groups declares its values to be.
+            String inherited = _typeResolver.declaredTypeNameOf(initializer);
+            if (inherited != null) variableSymbol.setDeclaredTypeName(inherited);
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
@@ -413,8 +417,14 @@ public class Binder {
             }
         } else if (initializer instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
             // Track struct type from array index: mut todo = todos[i]
-            StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(indexExpr.getTarget());
+            StructSymbol elemStruct = _typeResolver.resolveStructType(indexExpr);
             if (elemStruct != null) _typeResolver.trackStructType(variableSymbol, elemStruct);
+        } else if (initializer instanceof BoundIndexExpression arrayIndex && arrayIndex.getClassType() == SiyoArray.class) {
+            // An array held in a container: imut recs = groups["e"]
+            Class<?> elemType = _typeResolver.resolveArrayElementType(arrayIndex);
+            StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(arrayIndex);
+            if (elemStruct != null) _typeResolver.trackArrayType(variableSymbol, elemType, elemStruct);
+            else _typeResolver.trackArrayType(variableSymbol, elemType);
         } else if (initializer instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
             // Track struct type from function return
             StructSymbol st = _typeResolver.resolveStructType(initializer);

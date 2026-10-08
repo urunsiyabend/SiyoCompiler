@@ -51,11 +51,51 @@ public class TypeResolver {
      * @return The declared value type, or null.
      */
     public Class<?> resolveMapValueType(BoundExpression target) {
-        if (!(target instanceof BoundVariableExpression varExpr)) return null;
-        String declaredName = varExpr.getVariable().getDeclaredTypeName();
+        String declaredName = declaredTypeNameOf(target);
         if (!"Map".equals(genericBaseName(declaredName))) return null;
         List<String> arguments = typeArgumentsOf(declaredName);
         return arguments.size() == 2 ? lookupType(arguments.get(1)) : null;
+    }
+
+    /**
+     * The type an expression was declared as, written out, or null when no
+     * declaration names it.
+     *
+     * <p>A variable carries the name it was annotated with; indexing follows
+     * that name inward, so in {@code groups: Map<string, Array<Rec>>} the
+     * expression {@code groups["e"]} is an {@code Array<Rec>} and
+     * {@code groups["e"][0]} a {@code Rec}. Without following it the inner
+     * value was erased and {@code groups["e"][0].n} was rejected.
+     *
+     * @param expr The expression.
+     * @return The declared type name, or null.
+     */
+    public String declaredTypeNameOf(BoundExpression expr) {
+        if (expr instanceof BoundVariableExpression varExpr) {
+            return varExpr.getVariable().getDeclaredTypeName();
+        }
+        if (expr instanceof BoundIndexExpression indexExpr) {
+            return containedTypeNameOf(declaredTypeNameOf(indexExpr.getTarget()));
+        }
+        if (expr instanceof BoundMemberAccessExpression memberExpr) {
+            StructSymbol owner = resolveStructType(memberExpr.getTarget());
+            return owner != null ? owner.getFieldTypeName(memberExpr.getMemberName()) : null;
+        }
+        return null;
+    }
+
+    /**
+     * What indexing a container of the named type produces: an array's
+     * element, a map's value. Null when the name declares neither.
+     */
+    private static String containedTypeNameOf(String typeName) {
+        String element = elementTypeNameOf(typeName);
+        if (element != null) return element;
+        if ("Map".equals(genericBaseName(typeName))) {
+            List<String> arguments = typeArgumentsOf(typeName);
+            if (arguments.size() == 2) return arguments.get(1);
+        }
+        return null;
     }
 
     /**
@@ -226,6 +266,12 @@ public class TypeResolver {
                 }
             }
         }
+        if (target instanceof BoundIndexExpression) {
+            // groups["e"] where groups: Map<string, Array<Rec>>
+            String elementName = elementTypeNameOf(declaredTypeNameOf(target));
+            Class<?> elemType = elementName != null ? lookupType(elementName) : null;
+            if (elemType != null) return elemType;
+        }
         return Object.class;
     }
 
@@ -250,6 +296,9 @@ public class TypeResolver {
         }
         // Index expression on struct array: todos[i] → resolve element struct type
         if (target instanceof BoundIndexExpression indexExpr && indexExpr.getClassType() == SiyoStruct.class) {
+            String declaredName = declaredTypeNameOf(indexExpr);
+            StructSymbol declared = declaredName != null ? _structTypes.get(erasedTypeName(declaredName)) : null;
+            if (declared != null) return declared;
             return resolveStructTypeFromCollection(indexExpr.getTarget());
         }
         // Call expression returning struct
@@ -286,6 +335,14 @@ public class TypeResolver {
             if (structName != null) {
                 StructSymbol structType = _structTypes.get(structName);
                 if (structType != null) return structType;
+            }
+        }
+        // An indexed container: groups["e"] where groups: Map<string, Array<Rec>>
+        if (collection instanceof BoundIndexExpression) {
+            String elementName = elementTypeNameOf(declaredTypeNameOf(collection));
+            if (elementName != null) {
+                StructSymbol elemStruct = _structTypes.get(elementName);
+                if (elemStruct != null) return elemStruct;
             }
         }
         // Struct field array: self.todos where todos: Todo[]

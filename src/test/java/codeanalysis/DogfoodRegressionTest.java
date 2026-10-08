@@ -59,6 +59,56 @@ class DogfoodRegressionTest {
         assertEquals("3.0", interpret(source, "LambdaWidenTail"));
     }
 
+    // --- P3: a container's value type survives indexing ------------------------
+
+    @Test
+    void aMapOfArraysKeepsTheElementStruct() throws Exception {
+        String source = """
+                struct Rec { n: int }
+                fn main() {
+                    mut groups: Map<string, Array<Rec>> = {}
+                    groups["e"] = [Rec { n: 1 }, Rec { n: 2 }]
+                    push(groups["e"], Rec { n: 3 })
+                    println(toString(groups["e"][1].n))
+                    println(toString(len(groups["e"])))
+                }
+                """;
+        assertEquals("2\n3", run(source, "MapOfArrays"));
+        assertEquals("2\n3", interpret(source, "MapOfArrays"));
+    }
+
+    @Test
+    void aValueTakenFromAMapOfArraysKeepsItsType() throws Exception {
+        String source = """
+                struct Rec { n: int }
+                fn main() {
+                    mut groups: Map<string, Array<Rec>> = {}
+                    groups["e"] = [Rec { n: 4 }, Rec { n: 5 }]
+                    imut recs = groups["e"]
+                    println(toString(recs[1].n + 1))
+                    mut total = 0
+                    for r in groups["e"] { total = total + r.n }
+                    println(toString(total))
+                }
+                """;
+        assertEquals("6\n9", run(source, "MapOfArraysLocal"));
+        assertEquals("6\n9", interpret(source, "MapOfArraysLocal"));
+    }
+
+    @Test
+    void aNestedMapKeepsItsInnerValueType() throws Exception {
+        String source = """
+                struct Rec { n: int }
+                fn main() {
+                    mut m: Map<string, Map<string, Rec>> = {}
+                    m["a"] = {"x": Rec { n: 1 }}
+                    println(toString(m["a"]["x"].n + 1))
+                }
+                """;
+        assertEquals("2", run(source, "NestedMap"));
+        assertEquals("2", interpret(source, "NestedMap"));
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private String interpret(String source, String name) throws Exception {
