@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.7.0)
+# Siyo Language Grammar (0.8.0)
 
 ## Lexical Grammar
 
@@ -77,7 +77,7 @@
   reported. A long also comes back from Java interop (e.g.
   `System.currentTimeMillis()`)
 - **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$`
-- **Triple-quoted string**: `"""multi-line\nliteral"""` — preserves newlines verbatim, no escape interpretation needed for `"` inside the body
+- **Triple-quoted string**: `"""multi-line\nliteral"""` — preserves newlines verbatim, no escape interpretation needed for `"` inside the body. The text may start on the opening line or on the next one; a newline directly after the opening `"""` and the newline directly before the closing `"""` are dropped
 - **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings.
 - **Boolean**: `true`, `false`
 - **Null**: `null`
@@ -164,6 +164,8 @@ field
     // A field may be declared `fn` to hold a function value, with or without a
     // signature, and the signature is checked:
     //     struct Route { pattern: string, handler: fn(string) -> string }
+    // and may have any type a parameter may, including a generic one:
+    //     struct Box { items: Array<Item>, counts: Map<string, int> }
 
 enum_declaration
     : 'enum' IDENTIFIER '{' enum_member (',' enum_member)* '}'
@@ -371,7 +373,14 @@ fn describe(r: Result) -> string {
 ```
 
 Such a match is checked for exhaustiveness: leaving a variant uncovered is an
-error unless the match has a `_` arm. An arm whose pattern is not a list of
+error unless the match has a `_` arm.
+
+The arms of a match whose value is used must agree on a type. An arm that only
+`throw`s (or `return`s) has no value and takes no part in that, so
+`Bad(why) => { throw why }` may sit beside value arms; the same holds for the
+two branches of an `if` expression. A match written as a statement is run for
+its effects, and its arms need not agree: `Blank => {}` may sit beside
+`Rec(r) => { push(records, r) }`. An arm whose pattern is not a list of
 plain names — `Ok(1)` — is a value to compare against rather than a
 destructuring, so a literal arm keeps its old meaning.
 
@@ -473,6 +482,11 @@ be written as a literal — `#{1, 2, 3}` — and a map as `{"k": 1}`.
 `setField(v, name, x)` — writes one field
 `toMap(v)` — a struct's fields as a map, which is what serialising one needs
 `typeName(v)` — the name of the struct a value is, or `""` when it is not one
+`typeOf(v)` — the kind of any value, named as a program writes its type: `int`,
+`long`, `float`, `bool`, `string`, `array`, `map`, `set`, `fn`, `channel`,
+`null`, a struct's or a sum type's name, or a Java object's simple class name.
+It is how an erased value — a parsed JSON field, an `object[]` element — is
+told apart: `typeOf(m["level"]) == "string"`
 
 ### Other
 `random(max)`, `httpGet(url)`, `httpPost(url, body)`, `canRead(reader)`
@@ -707,6 +721,7 @@ io.writeBytes(path, bytes)  // writes int[] as binary
 io.copyFile(src, dst)       // binary-safe file copy
 io.mkdir(path)
 io.delete(path)
+io.eprintln(msg)            // writes a line to standard error
 ```
 
 ### `std/path`
@@ -805,13 +820,20 @@ siyoc test                  auto-discover and run tests:
                               2. tests/*_test.siyo (alphabetical order)
 siyoc test <file>           run a specific test file
 siyoc new <name>            scaffold a new project
+siyoc interpret <file> [args]  run a .siyo file on the interpreter, same args as run
 siyoc --version / -v        print version string
 siyoc --help / -h           print usage
 ```
 
+A program's standard output and error are written as UTF-8 whatever the
+locale.
+
 ### Test auto-discovery
 
 Place test files in a `tests/` directory with names ending in `_test.siyo`. Each file is compiled and run independently.
+When a `std/testing` case fails, `siyoc test` still runs every file and then
+exits with status 1; running a single test file with `run` or `interpret` does
+the same, so a CI job sees the failure.
 
 ```
 project/

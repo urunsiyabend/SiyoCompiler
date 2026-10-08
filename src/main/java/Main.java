@@ -20,7 +20,7 @@ import codeanalysis.syntax.SyntaxTree;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.7.0";
+    private static final String VERSION = "0.8.0";
 
     public static void main(String[] args) {
         useUtf8Output();

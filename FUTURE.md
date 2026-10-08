@@ -230,7 +230,27 @@ The release that took the whole of the 0.7.0 list. See
 
 ---
 
-## 0.8.0 — Tooling & Generic Data (Next)
+## 0.8.0 — Dogfooding: LogScope (Released)
+
+Writing a real multi-module CLI — `projects/logscope`, a JSONL log summariser
+with JSON and HTML reports — and fixing what it hit. See
+`RELEASE_NOTES_0.8.0.md` and `projects/logscope/PAIN_POINTS.md`.
+
+- **Backend parity.** A lambda's tail `if/else` value was returned compiled;
+  interpreted, imported module state, transitive calls, loops inside `match`
+  arms, program arguments and the frames an exception unwinds through all now
+  behave as compiled. Module initialisation follows the documented
+  depth-first order on both backends.
+- **Additions.** `typeOf(v)`, `io.eprintln`, generic struct field types, a
+  `"""` string that starts on its opening line, a `match` statement whose arms
+  differ in type, an arm that only throws.
+- **Tooling.** `siyoc test` fails when a test fails, a syntax error in an
+  imported module is reported, and output is UTF-8 whatever the locale.
+- 2,229 tests pass, up from 2,184
+
+---
+
+## 0.9.0 — Tooling & Generic Data (Next)
 
 ### Generics
 - Generic structs: `struct Box<T> { value: T }`

@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.7.0-green" alt="v0.7.0">
-  <img src="https://img.shields.io/badge/tests-2184%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.8.0-green" alt="v0.8.0">
+  <img src="https://img.shields.io/badge/tests-2229%20passing-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -204,7 +204,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.7.0"
+version = "0.8.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -232,7 +232,7 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Interfaces** | `interface Shape { fn area() -> int }` with `impl Shape for Square`, dispatched on the struct at run time |
 | **Visibility** | `pub` marks what a module exports; a module that marks nothing exports everything |
 | **Module aliasing** | `import "std/math" as m` |
-| **Reflection** | `fields(v)`, `field(v, name)`, `setField(v, name, x)`, `toMap(v)`, `typeName(v)` |
+| **Reflection** | `fields(v)`, `field(v, name)`, `setField(v, name, x)`, `toMap(v)`, `typeName(v)`, `typeOf(v)` |
 | **Error handling** | `try { ... } catch e { ... }`, `throw` raises any value, `catch e: Failure` binds it with a declared type, `error("msg")`, try-as-expression |
 | **Concurrency** | `scope`/`spawn`, channels (buffered & unbuffered), `for msg in ch` |
 | **Actors** | `actor Store` (`actor struct Store` is accepted for compatibility), `spawn Actor.new(...)`, sync calls, async `send` |
@@ -240,18 +240,22 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Modules** | `import "file"` |
 | **String interpolation** | `"Hello, $name! You are $age years old."` / `"${expr}"` |
 
-### Standard Library — 41 built-in functions
+### Standard Library — 42 built-in functions
 
 **Conversion:** `toString`, `toInt`, `toDouble`, `toFloat`, `toLong`, `parseInt`, `parseFloat`, `parseLong`
 **Strings:** `len`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`
 **Arrays:** `push`, `pop`, `removeAt`, `sort`, `range`, `map`, `filter`, `reduce`, `forEach`
 **Collections:** `map`, `set`, `channel`
 **I/O:** `print`, `println`, `input`, `error`
+**Reflection:** `fields`, `field`, `setField`, `toMap`, `typeName`, `typeOf`
 **Other:** `random`, `httpGet`, `httpPost`, `canRead`
 
 ## Examples
 
-The repository includes 29 example programs and 2 multi-file projects:
+The repository includes 29 example programs and several multi-file projects
+under `projects/`, among them [LogScope](projects/logscope/README.md), a JSONL
+log summariser with JSON and HTML reports that is tested end to end on both
+backends:
 
 | Category | Examples |
 |----------|---------|
@@ -314,17 +318,18 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2184 tests across 25 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2229 tests across 28 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope end-to-end run, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
+- **[RELEASE_NOTES_0.8.0.md](RELEASE_NOTES_0.8.0.md)** — What changed in 0.8.0, and why
 - **[RELEASE_NOTES_0.7.0.md](RELEASE_NOTES_0.7.0.md)** — What changed in 0.7.0, and why
 - **[RELEASE_NOTES_0.6.0.md](RELEASE_NOTES_0.6.0.md)** — What changed in 0.6.0, and why
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.7.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.8.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.7.0)
+## Known limitations (0.8.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
@@ -338,6 +343,10 @@ These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 - A struct literal with no fields (`Empty { }`) is not recognised, and a map
   literal written as a function body's tail value (`fn f() -> map { {"a": 1} }`)
   is read as a block.
+- A type annotation cannot be module-qualified (`-> cli.Options`); imported
+  types are written unqualified.
+- A mixed array literal is rejected even when annotated `object[]`, and
+  `error(msg)` is not treated as diverging the way `throw` is.
 - No package manager, formatter, or LSP server.
 
 ## Contributing
