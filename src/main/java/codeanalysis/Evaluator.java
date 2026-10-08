@@ -127,6 +127,27 @@ public class Evaluator {
     }
 
     /**
+     * Module-level variables keyed by {@code OwnerClass.field}.
+     *
+     * <p>An importer reaches a module's variable through its own symbol that
+     * names the owning class and field, which is all the bytecode backend
+     * needs. The interpreter stores globals by symbol, so that copy is mapped
+     * back to the module's own symbol; otherwise every imported module
+     * variable read as null.
+     */
+    private Map<String, VariableSymbol> _moduleVariables = java.util.Collections.emptyMap();
+
+    public void setModuleVariables(Map<String, VariableSymbol> moduleVariables) {
+        _moduleVariables = moduleVariables;
+    }
+
+    private VariableSymbol canonical(VariableSymbol variable) {
+        if (variable.getOwnerClass() == null) return variable;
+        VariableSymbol own = _moduleVariables.get(variable.getOwnerClass() + "." + variable.getFieldName());
+        return own != null ? own : variable;
+    }
+
+    /**
      * Evaluates the specified expression statement syntax node and computes the result.
      *
      * @param statement The bound statement node to evaluate.
@@ -185,7 +206,7 @@ public class Evaluator {
                 return;
             }
         }
-        _globals.put(variable, value);
+        _globals.put(canonical(variable), value);
     }
 
     /**
@@ -199,7 +220,7 @@ public class Evaluator {
             StackFrame frame = _callStack.peek();
             if (frame.getLocals().get(variable) instanceof Object[] cell) return cell;
         }
-        return _globals.get(variable) instanceof Object[] cell ? cell : null;
+        return _globals.get(canonical(variable)) instanceof Object[] cell ? cell : null;
     }
 
     /**
@@ -306,7 +327,7 @@ public class Evaluator {
                 return frame.getLocals().get(variable);
             }
         }
-        return _globals.get(variable);
+        return _globals.get(canonical(variable));
     }
 
     /**
@@ -911,6 +932,7 @@ public class Evaluator {
                 java.util.Map<VariableSymbol, Object> isolatedGlobals =
                         java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                 Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
+                taskEval.setModuleVariables(_moduleVariables);
 
                 // Inject captured variables (immutable values + channels)
                 StackFrame frame = new StackFrame(null);
@@ -971,6 +993,7 @@ public class Evaluator {
                     java.util.Map<VariableSymbol, Object> isolatedGlobals =
                             java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                     Evaluator actorEval = new Evaluator(body, isolatedGlobals, _functions);
+                    actorEval.setModuleVariables(_moduleVariables);
                     StackFrame frame = new StackFrame(func);
 
                     // Bind self (first param) to actor state

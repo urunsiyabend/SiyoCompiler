@@ -51,6 +51,41 @@ class CliParityTest {
         assertEquals("2\none\ntwo", interpreted.stdout, interpreted.stderr);
     }
 
+    @Test
+    void anImportedModulesStateIsInitialisedWhenInterpreted() throws Exception {
+        Files.writeString(tempDir.resolve("base.siyo"), """
+                pub mut greeting = "hello"
+                fn init() { println("init base") }
+                """);
+        Files.writeString(tempDir.resolve("hooks.siyo"), """
+                import "base"
+                mut hook = fn() { println("default hook") }
+                mut count = 7
+                pub fn callHook() { hook() }
+                pub fn getCount() -> int { count }
+                pub fn setHook(f: fn()) { hook = f }
+                pub fn greet() -> string { base.greeting + " " + toString(count) }
+                fn init() { count = count + 1
+                    println("init hooks") }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "hooks"
+                fn main() {
+                    println(toString(hooks.getCount()))
+                    hooks.callHook()
+                    hooks.setHook(fn() { println("custom hook") })
+                    hooks.callHook()
+                    println(hooks.greet())
+                }
+                """);
+        String expected = "init base\ninit hooks\n8\ndefault hook\ncustom hook\nhello 8";
+        Result compiled = siyoc("run", main.toString());
+        assertEquals(expected, compiled.stdout, compiled.stderr);
+        Result interpreted = siyoc("interpret", main.toString());
+        assertEquals(expected, interpreted.stdout, interpreted.stderr);
+    }
+
     record Result(int exitCode, String stdout, String stderr) {}
 
     /** Runs {@code Main} in a fresh JVM, so {@code System.exit} ends only that process. */

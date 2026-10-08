@@ -103,11 +103,34 @@ public class Compilation {
 
         BoundBlockStatement statement = getStatement();
         Map<FunctionSymbol, BoundBlockStatement> functions = getFunctions();
+        // The entry points are this file's own, found before module bodies join.
+        FunctionSymbol init = _filePath != null ? findEntryPoint(functions, "init") : null;
+        FunctionSymbol main = _filePath != null ? findEntryPoint(functions, "main") : null;
+        // Every module's functions are callable, including a transitive
+        // import's init() that this file never names.
+        for (ModuleSymbol module : getRegistry().getAllModules()) {
+            for (var entry : module.getFunctionBodies().entrySet()) {
+                functions.computeIfAbsent(entry.getKey(), k -> Lowerer.lower(entry.getValue()));
+            }
+        }
+        Map<String, VariableSymbol> moduleVariables = new HashMap<>();
+        for (ModuleSymbol module : getRegistry().getAllModules()) {
+            for (var entry : module.getVariables().entrySet()) {
+                moduleVariables.put(module.getClassName() + "." + entry.getKey(), entry.getValue());
+            }
+        }
         Evaluator evaluator = new Evaluator(statement, variables, functions);
+        evaluator.setModuleVariables(moduleVariables);
         for (var entry : getGlobalScope().getStructTypes().entrySet()) {
             if (entry.getValue().isActor()) {
                 evaluator.registerActorType(entry.getKey());
             }
+        }
+        // Imported modules are initialised first, dependencies before their
+        // importers — the order the bytecode backend's class initialisers run
+        // in. Without this every module-level variable read as null.
+        for (ModuleSymbol module : getRegistry().getAllModules()) {
+            initialiseModule(module, variables, functions, moduleVariables);
         }
         Object value = evaluator.evaluate();
 
@@ -115,15 +138,55 @@ public class Compilation {
         // interpreter follows the same protocol as the bytecode backend, so
         // both agree on what a module-style program does.
         if (_filePath != null) {
-            FunctionSymbol init = findEntryPoint(functions, "init");
             if (init != null) evaluator.invokeFunction(init, new Object[0]);
-            FunctionSymbol main = findEntryPoint(functions, "main");
             if (main != null) {
                 value = evaluator.invokeFunction(main, new Object[0]);
                 if (main.getReturnType() == null) value = null;
             }
         }
         return new EvaluationResult(new DiagnosticBox(), value);
+    }
+
+    /**
+     * Runs a module's top-level variable initialisers and then its init(), as
+     * the module class's static initialiser does when compiled.
+     */
+    private static void initialiseModule(ModuleSymbol module, Map<VariableSymbol, Object> variables,
+                                         Map<FunctionSymbol, BoundBlockStatement> functions,
+                                         Map<String, VariableSymbol> moduleVariables) throws Exception {
+        Evaluator evaluator = module.getTopLevelBlock() != null
+                ? new Evaluator(Lowerer.lower(module.getTopLevelBlock()), variables, functions)
+                : new Evaluator(new BoundBlockStatement(new java.util.ArrayList<>()), variables, functions);
+        evaluator.setModuleVariables(moduleVariables);
+        evaluator.evaluate();
+        FunctionSymbol init = module.initFunction();
+        if (init != null) evaluator.invokeFunction(init, new Object[0]);
+    }
+
+    /**
+     * Emits an imported module as its own class.
+     *
+     * <p>Its static initialiser force-loads the modules it imports, so a
+     * module's dependencies are initialised before it is, however it uses
+     * them. Without the import list a module that only read another module's
+     * variable initialised that module lazily, after its own init().
+     *
+     * @param module The module.
+     * @return The class file bytes.
+     */
+    public static byte[] emitModule(ModuleSymbol module) {
+        Map<FunctionSymbol, BoundBlockStatement> loweredBodies = new HashMap<>();
+        for (var entry : module.getFunctionBodies().entrySet()) {
+            loweredBodies.put(entry.getKey(), Lowerer.lower(entry.getValue()));
+        }
+        // Use module's top-level block so module-level variables become static fields
+        BoundBlockStatement topLevel = module.getTopLevelBlock() != null
+                ? module.getTopLevelBlock()
+                : new BoundBlockStatement(new java.util.ArrayList<>());
+        codeanalysis.emitting.Emitter emitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
+        emitter.setModuleClass(true);
+        emitter.setImportedModuleClasses(module.getImportedClassNames());
+        return emitter.emit(module.getClassName());
     }
 
     /**

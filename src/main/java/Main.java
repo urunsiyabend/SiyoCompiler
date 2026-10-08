@@ -249,17 +249,7 @@ public class Main {
                     // Load dependency modules
                     for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
                         if (name.equals(module.getClassName())) {
-                            java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
-                            for (var entry : module.getFunctionBodies().entrySet()) {
-                                loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
-                            }
-                            // Use module's top-level block so module-level variables become static fields
-                            codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
-                                    ? module.getTopLevelBlock()
-                                    : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
-                            codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
-                            depEmitter.setModuleClass(true);
-                            byte[] depBytes = depEmitter.emit(module.getClassName());
+                            byte[] depBytes = Compilation.emitModule(module);
                             return defineClass(name, depBytes, 0, depBytes.length);
                         }
                     }
@@ -348,17 +338,7 @@ public class Main {
 
             // Write dependency .class files
             for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
-                // Lower function bodies before emitting
-                java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
-                for (var entry : module.getFunctionBodies().entrySet()) {
-                    loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
-                }
-                codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
-                        ? module.getTopLevelBlock()
-                        : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
-                codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
-                depEmitter.setModuleClass(true);
-                byte[] depBytes = depEmitter.emit(module.getClassName());
+                byte[] depBytes = Compilation.emitModule(module);
                 String depPath = module.getClassName() + ".class";
                 java.nio.file.Files.write(java.nio.file.Paths.get(depPath), depBytes);
                 System.out.println("Compiled to " + depPath);
