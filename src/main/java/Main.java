@@ -90,6 +90,10 @@ public class Main {
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("interpret")) {
+            // siyoc interpret file.siyo [args...] — same arguments as run
+            if (cargs.length > 2) {
+                _programArgs = java.util.Arrays.copyOfRange(cargs, 2, cargs.length);
+            }
             runFile(cargs[1]); // interpreter path (for debugging)
             return;
         }
@@ -375,6 +379,8 @@ public class Main {
             codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
             Compilation compilation = new Compilation(tree, registry, absPath);
             Map<VariableSymbol, Object> variables = new HashMap<>();
+            // A compiled main stores its String[] here; the interpreter has no main(String[]).
+            codeanalysis.SiyoRuntime.programArgs = _programArgs;
             EvaluationResult result = compilation.evaluate(variables);
 
             if (result.diagnostics().hasNext()) {
