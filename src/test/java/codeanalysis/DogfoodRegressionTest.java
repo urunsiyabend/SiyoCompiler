@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -327,6 +330,81 @@ class DogfoodRegressionTest {
                 """;
         assertEquals("4\n2\n4\n7", run(source, "GenericFields"));
         assertEquals("4\n2\n4\n7", interpret(source, "GenericFields"));
+    }
+
+    // --- P17/P18: json.stringify writes values by their runtime type ---------
+
+    private static final String STRINGIFY_SOURCE = """
+            import "std/json"
+            fn main() {
+                mut m: map = {}
+                m["msg"] = "123"
+                m["service"] = "01"
+                m["fraction"] = "1.5"
+                m["negZero"] = "-0"
+                m["exponent"] = "1e3"
+                m["word"] = "true"
+                m["padded"] = " 42"
+                m["int"] = 7
+                m["long"] = 9000000000L
+                m["float"] = 2.5
+                m["bool"] = false
+                mut list: object[] = []
+                push(list, "5")
+                push(list, 5)
+                m["list"] = list
+                mut ctrl = ""
+                for i in range(0, 32) { ctrl = ctrl + chr(i) }
+                m["ctrl"] = ctrl + chr(127) + "\\"\\\\/"
+                imut text = json.stringify(m)
+                println(text)
+                match json.parse(text) {
+                    Parsed(back) => {
+                        mut same = true
+                        for k in m { if toString(back[k]) != toString(m[k]) || typeOf(back[k]) != typeOf(m[k]) { same = false } }
+                        println("roundtrip " + toString(same))
+                    },
+                    Invalid(why) => println("roundtrip invalid: " + why)
+                }
+            }
+            """;
+
+    @Test
+    void stringifyKeepsNumericLookingStringsAsStrings() throws Exception {
+        for (String output : List.of(run(STRINGIFY_SOURCE, "StringifyTypes"), interpret(STRINGIFY_SOURCE, "StringifyTypes"))) {
+            String json = output.lines().findFirst().orElseThrow();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> m = (Map<String, Object>) StrictJson.parse(json);
+            assertEquals("123", m.get("msg"));
+            assertEquals("01", m.get("service"));
+            assertEquals("1.5", m.get("fraction"));
+            assertEquals("-0", m.get("negZero"));
+            assertEquals("1e3", m.get("exponent"));
+            assertEquals("true", m.get("word"));
+            assertEquals(" 42", m.get("padded"));
+            assertEquals(new BigDecimal("7"), m.get("int"));
+            assertEquals(new BigDecimal("9000000000"), m.get("long"));
+            assertEquals(new BigDecimal("2.5"), m.get("float"));
+            assertEquals(Boolean.FALSE, m.get("bool"));
+            assertEquals(List.of("5", new BigDecimal("5")), m.get("list"));
+            assertEquals("roundtrip true", output.lines().skip(1).findFirst().orElseThrow());
+        }
+    }
+
+    @Test
+    void stringifyEscapesEveryControlCharacter() throws Exception {
+        StringBuilder expected = new StringBuilder();
+        for (int i = 0; i < 32; i++) expected.append((char) i);
+        expected.append((char) 127).append("\"\\/");
+        for (String output : List.of(run(STRINGIFY_SOURCE, "StringifyCtrl"), interpret(STRINGIFY_SOURCE, "StringifyCtrl"))) {
+            String json = output.lines().findFirst().orElseThrow();
+            for (char c : json.toCharArray()) {
+                assertEquals(false, c < 0x20, "raw control character U+" + (int) c + " in " + json);
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> m = (Map<String, Object>) StrictJson.parse(json);
+            assertEquals(expected.toString(), m.get("ctrl"));
+        }
     }
 
     // --- P8: asking what kind of value an erased value is ---------------------

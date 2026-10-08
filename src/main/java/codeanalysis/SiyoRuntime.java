@@ -648,11 +648,21 @@ public class SiyoRuntime {
         }
     }
 
-    /** Stringify any Siyo value to JSON. Handles nested SiyoMap and SiyoArray. */
+    /**
+     * Stringify any Siyo value to JSON, by its runtime type: a number is
+     * written as a number, a string always as a string. Handles nested
+     * SiyoMap and SiyoArray.
+     *
+     * <p>A string used to be written bare whenever it parsed as a number, so
+     * {@code "123"} came back as the number 123 and {@code "01"} produced
+     * invalid JSON.
+     */
     public static String jsonStringify(Object obj) {
         if (obj == null) return "null";
         if (obj instanceof Boolean b) return b.toString();
-        if (obj instanceof Integer || obj instanceof Long || obj instanceof Double) return obj.toString();
+        if (obj instanceof Integer || obj instanceof Long) return obj.toString();
+        // JSON has no NaN or infinity; null is the conventional stand-in.
+        if (obj instanceof Double d) return Double.isFinite(d) ? d.toString() : "null";
         if (obj instanceof SiyoMap m) {
             StringBuilder sb = new StringBuilder("{");
             SiyoArray keys = m.keys();
@@ -675,16 +685,17 @@ public class SiyoRuntime {
             sb.append(']');
             return sb.toString();
         }
-        // String or other
-        String s = obj.toString();
-        // Try to detect numbers to avoid quoting them
-        try { Integer.parseInt(s); return s; } catch (NumberFormatException ignored) {}
-        try { Double.parseDouble(s); return s; } catch (NumberFormatException ignored) {}
-        return '"' + jsonEscapeStr(s) + '"';
+        // A string, or any other value written as its text.
+        return '"' + jsonEscapeStr(obj.toString()) + '"';
     }
 
+    /**
+     * Escapes a string's content for JSON. Every character below U+0020 must
+     * be escaped (RFC 8259 section 7); only newline, tab and carriage return
+     * used to be, so a U+0001 or a form feed produced invalid JSON.
+     */
     private static String jsonEscapeStr(String s) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(s.length() + 8);
         for (char c : s.toCharArray()) {
             switch (c) {
                 case '"' -> sb.append("\\\"");
@@ -692,7 +703,12 @@ public class SiyoRuntime {
                 case '\n' -> sb.append("\\n");
                 case '\t' -> sb.append("\\t");
                 case '\r' -> sb.append("\\r");
-                default -> sb.append(c);
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
             }
         }
         return sb.toString();
