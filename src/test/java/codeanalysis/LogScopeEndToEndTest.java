@@ -74,6 +74,85 @@ class LogScopeEndToEndTest {
     }
 
     @Test
+    void summaryOfAnAdversarialLog() throws Exception {
+        assertGolden("summary_adversarial.txt", "summary", "fixtures/adversarial.jsonl");
+    }
+
+    @Test
+    void aTimeWindowOrdersFractionalSeconds() throws Exception {
+        assertGolden("summary_adversarial_window.txt", "summary", "fixtures/adversarial.jsonl",
+                "--since", "2026-03-01T10:00:00.3Z", "--until", "2026-03-01T10:00:01Z");
+    }
+
+    @Test
+    void filterEchoesAdversarialRecordsAsTheSameValidJson() throws Exception {
+        assertGolden("filter_adversarial.jsonl", "filter", "fixtures/adversarial.jsonl");
+        List<String> input = Files.readAllLines(PROJECT.resolve("fixtures/adversarial.jsonl"), StandardCharsets.UTF_8);
+        input.remove(5); // line 6 has a non-UTC timestamp and is reported, not echoed
+        for (String mode : List.of("run", "interpret")) {
+            List<String> output = logscope(mode, "filter", "fixtures/adversarial.jsonl").stdout().lines().toList();
+            assertEquals(input.size(), output.size(), mode);
+            for (int i = 0; i < input.size(); i++) {
+                assertEquals(StrictJson.parse(input.get(i)), StrictJson.parse(output.get(i)), mode + " line " + (i + 1));
+            }
+        }
+    }
+
+    @Test
+    void aJsonReportIsStrictlyValidAndKeepsStringsAsStrings() throws Exception {
+        for (String mode : List.of("run", "interpret")) {
+            Path json = tempDir.resolve(mode + ".json");
+            Path html = tempDir.resolve(mode + ".html");
+            CliParityTest.Result result = logscope(mode, "report", "fixtures/adversarial.jsonl",
+                    "--json", json.toString(), "--html", html.toString());
+            assertEquals(0, result.exitCode(), mode + ": " + result.stderr());
+            assertEquals(read(EXPECTED.resolve("report_adversarial.json")), read(json), mode + " json");
+            assertEquals(read(EXPECTED.resolve("report_adversarial.html")), read(html), mode + " html");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> report = (Map<String, Object>) StrictJson.parse(read(json).trim());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> first = (Map<String, Object>) ((List<Object>) report.get("errorGroups")).get(0);
+            assertEquals("123", first.get("message"), mode);
+            assertEquals(List.of("01", "api"), first.get("services"), mode);
+            assertEquals("2026-03-01T10:00:00Z", first.get("first"), mode);
+            assertEquals("2026-03-01T10:00:00.500Z", first.get("last"), mode);
+        }
+    }
+
+    @Test
+    void aFlagIsNeverTakenAsAnOutputPath() throws Exception {
+        String main = PROJECT.resolve("src/main.siyo").toString();
+        String log = PROJECT.resolve("fixtures/app.jsonl").toString();
+        List<List<String>> attempts = List.of(
+                List.of("report", log, "--json", "--html"),
+                List.of("report", log, "--json", "--html", "out.html"),
+                List.of("report", log, "--html", "--json", "out.json"));
+        for (String mode : List.of("run", "interpret")) {
+            for (List<String> attempt : attempts) {
+                List<String> command = new ArrayList<>(List.of(mode, main));
+                command.addAll(attempt);
+                CliParityTest.Result result = CliParityTest.siyoc(tempDir, C_LOCALE, command.toArray(new String[0]));
+                assertEquals(1, result.exitCode(), mode + " " + attempt);
+                assertTrue(result.stderr().startsWith("logscope: flag '" + attempt.get(2) + "' needs a value"),
+                        mode + " " + attempt + ": " + result.stderr());
+                try (Stream<Path> created = Files.list(tempDir)) {
+                    assertEquals(List.of(), created.toList(), mode + " " + attempt + " created a file");
+                }
+            }
+        }
+    }
+
+    @Test
+    void anInvalidTimeFilterIsAUsageError() throws Exception {
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = logscope(mode, "summary", "fixtures/app.jsonl", "--since", "2026-03-01T10:00:00+02:00");
+            assertEquals(1, result.exitCode(), mode);
+            assertTrue(result.stderr().startsWith(
+                    "logscope: --since needs an ISO-8601 UTC timestamp, got '2026-03-01T10:00:00+02:00'"), mode);
+        }
+    }
+
+    @Test
     void reportWritesJsonAndHtml() throws Exception {
         for (String mode : List.of("run", "interpret")) {
             Path json = tempDir.resolve(mode + ".json");

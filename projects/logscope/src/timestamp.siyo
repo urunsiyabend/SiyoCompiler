@@ -1,0 +1,83 @@
+// ISO-8601 / RFC 3339 UTC timestamps, turned into keys that order correctly.
+//
+// Comparing timestamps as written misorders them: "10:00:00.500Z" sorts before
+// "10:00:00Z" because '.' < 'Z'. A key is the same instant written one fixed
+// way — YYYY-MM-DDTHH:MM:SS.fffffffffZ — so plain string comparison orders keys
+// by time.
+
+// The value of the count digits at s[from..], or -1 when any of them is not a digit.
+fn digits(s: string, from: int, count: int) -> int {
+    if from + count > len(s) { return -1 }
+    mut value = 0
+    for mut i = from i < from + count i = i + 1 {
+        imut d = ord(substring(s, i, i + 1)) - ord("0")
+        if d < 0 || d > 9 { return -1 }
+        value = value * 10 + d
+    }
+    value
+}
+
+fn isLeapYear(y: int) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn daysIn(year: int, month: int) -> int {
+    if month == 2 { return if isLeapYear(year) { 29 } else { 28 } }
+    if month == 4 || month == 6 || month == 9 || month == 11 { return 30 }
+    31
+}
+
+fn charAt(s: string, i: int) -> string {
+    if i < len(s) { substring(s, i, i + 1) } else { "" }
+}
+
+// "YYYY-MM-DD", or "" when the first ten characters are not a real date.
+fn datePart(s: string) -> string {
+    imut y = digits(s, 0, 4)
+    imut m = digits(s, 5, 2)
+    imut d = digits(s, 8, 2)
+    if y < 0 || m < 0 || d < 0 || charAt(s, 4) != "-" || charAt(s, 7) != "-" { return "" }
+    if m < 1 || m > 12 || d < 1 || d > daysIn(y, m) { return "" }
+    substring(s, 0, 10)
+}
+
+fn padFraction(f: string) -> string {
+    mut out = f
+    while len(out) < 9 { out = out + "0" }
+    out
+}
+
+// The sort key of a UTC timestamp, or "" when ts is not one.
+//
+// Accepted: a date ("2026-03-01", midnight UTC), or a date-time with seconds,
+// an optional fraction of 1-9 digits, and a UTC zone written Z, z, +00:00 or
+// -00:00. A timestamp in any other zone, or without one, is not accepted:
+// it cannot be ordered against UTC ones without a calendar conversion.
+pub fn sortKey(ts: string) -> string {
+    imut date = datePart(ts)
+    if date == "" { return "" }
+    if len(ts) == 10 { return date + "T00:00:00.000000000Z" }
+
+    imut t = charAt(ts, 10)
+    if t != "T" && t != "t" { return "" }
+    imut hh = digits(ts, 11, 2)
+    imut mm = digits(ts, 14, 2)
+    imut ss = digits(ts, 17, 2)
+    if hh < 0 || mm < 0 || ss < 0 || charAt(ts, 13) != ":" || charAt(ts, 16) != ":" { return "" }
+    // 60 is a leap second.
+    if hh > 23 || mm > 59 || ss > 60 { return "" }
+
+    mut i = 19
+    mut fraction = ""
+    if charAt(ts, i) == "." {
+        i = i + 1
+        imut start = i
+        while i < len(ts) && digits(ts, i, 1) >= 0 { i = i + 1 }
+        if i == start || i - start > 9 { return "" }
+        fraction = substring(ts, start, i)
+    }
+
+    imut zone = substring(ts, i, len(ts))
+    if zone != "Z" && zone != "z" && zone != "+00:00" && zone != "-00:00" { return "" }
+    date + "T" + substring(ts, 11, 19) + "." + padFraction(fraction) + "Z"
+}

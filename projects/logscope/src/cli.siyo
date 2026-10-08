@@ -1,5 +1,7 @@
 // Command-line parsing: argv in, Options or a usage error out.
 
+import "timestamp"
+
 pub struct Options {
     command: string,
     file: string,
@@ -25,8 +27,10 @@ commands:
 filters:
   --level L[,L]   only these levels (case-insensitive)
   --service S     only this service
-  --since TS      records at or after TS (ISO-8601, inclusive)
+  --since TS      records at or after TS (inclusive)
   --until TS      records before TS (exclusive)
+                  TS is an ISO-8601 UTC timestamp, 2026-03-01T10:00:00.5Z,
+                  or a date, 2026-03-01 (midnight UTC)
   --grep TEXT     message contains TEXT (case-insensitive)
 
 report outputs:
@@ -73,6 +77,11 @@ pub fn parseArgs(args: string[]) -> Parsed {
         if !isFlag(flag) { return Usage("unknown flag '" + flag + "'") }
         if i + 1 >= len(args) { return Usage("flag '" + flag + "' needs a value") }
         imut value = args[i + 1]
+        // "report x --json --html" must not write a file called --html.
+        if isFlag(value) { return Usage("flag '" + flag + "' needs a value") }
+        if (flag == "--since" || flag == "--until") && timestamp.sortKey(value) == "" {
+            return Usage(flag + " needs an ISO-8601 UTC timestamp, got '" + value + "'")
+        }
         if flag == "--level" {
             o.levels = splitLevels(value)
         } else if flag == "--service" {

@@ -7,12 +7,15 @@ pub struct Count { name: string, count: int }
 
 pub struct BadLine { line: int, reason: string }
 
-// Every error or fatal record with the same message.
+// Every error or fatal record with the same message. first and last are the
+// timestamps as written; firstKey and lastKey are what they are ordered by.
 pub struct ErrorGroup {
     msg: string,
     count: int,
     first: string,
     last: string,
+    firstKey: string,
+    lastKey: string,
     services: string[]
 }
 
@@ -69,13 +72,19 @@ fn toCounts(counts: Map<string, int>) -> Array<Count> {
 
 fn addToGroup(groups: Map<string, ErrorGroup>, r: LogRecord) {
     if !groups.has(r.msg) {
-        groups[r.msg] = ErrorGroup { msg: r.msg, count: 0, first: r.ts, last: r.ts, services: [] }
+        groups[r.msg] = ErrorGroup { msg: r.msg, count: 0, first: "", last: "", firstKey: "", lastKey: "", services: [] }
     }
     mut g = groups[r.msg]
     g.count = g.count + 1
-    if r.ts != "" {
-        if g.first == "" || r.ts < g.first { g.first = r.ts }
-        if r.ts > g.last { g.last = r.ts }
+    if r.tsKey != "" {
+        if g.firstKey == "" || r.tsKey < g.firstKey {
+            g.firstKey = r.tsKey
+            g.first = r.ts
+        }
+        if r.tsKey > g.lastKey {
+            g.lastKey = r.tsKey
+            g.last = r.ts
+        }
     }
     mut known = false
     for s in g.services { if s == r.service { known = true } }

@@ -1,0 +1,62 @@
+import "std/testing"
+import "timestamp"
+
+fn key(ts: string) -> string { timestamp.sortKey(ts) }
+
+fn wholeSecondsGetAFraction() {
+    testing.assertEq(key("2026-03-01T10:00:00Z"), "2026-03-01T10:00:00.000000000Z", "whole")
+}
+
+fn fractionsArePaddedToNanoseconds() {
+    testing.assertEq(key("2026-03-01T10:00:00.5Z"), "2026-03-01T10:00:00.500000000Z", "one digit")
+    testing.assertEq(key("2026-03-01T10:00:00.123456789Z"), "2026-03-01T10:00:00.123456789Z", "nine digits")
+}
+
+fn fractionalSecondsOrderAfterTheWholeSecond() {
+    imut whole = key("2026-03-01T10:00:00Z")
+    imut half = key("2026-03-01T10:00:00.500Z")
+    imut next = key("2026-03-01T10:00:01Z")
+    testing.assert(whole < half, "10:00:00 < 10:00:00.500")
+    testing.assert(half < next, "10:00:00.500 < 10:00:01")
+    testing.assert(key("2026-03-01T10:00:00.5Z") == key("2026-03-01T10:00:00.500Z"), ".5 == .500")
+    testing.assert(key("2026-03-01T10:00:00.09Z") < key("2026-03-01T10:00:00.1Z"), ".09 < .1")
+}
+
+fn utcSpellingsAgree() {
+    imut canonical = key("2026-03-01T10:00:00Z")
+    testing.assertEq(key("2026-03-01t10:00:00z"), canonical, "lowercase")
+    testing.assertEq(key("2026-03-01T10:00:00+00:00"), canonical, "+00:00")
+    testing.assertEq(key("2026-03-01T10:00:00-00:00"), canonical, "-00:00")
+}
+
+fn aDateIsMidnight() {
+    testing.assertEq(key("2026-03-01"), "2026-03-01T00:00:00.000000000Z", "date")
+}
+
+fn leapDaysAreChecked() {
+    testing.assertEq(key("2024-02-29T00:00:00Z"), "2024-02-29T00:00:00.000000000Z", "2024 is a leap year")
+    testing.assertEq(key("2000-02-29"), "2000-02-29T00:00:00.000000000Z", "2000 is a leap year")
+    testing.assertEq(key("2026-02-29T00:00:00Z"), "", "2026 is not")
+    testing.assertEq(key("1900-02-29"), "", "1900 is not")
+}
+
+fn invalidTimestampsHaveNoKey() {
+    for bad in ["", "yesterday", "2026-13-01T00:00:00Z", "2026-04-31T00:00:00Z", "2026-03-01T24:00:00Z",
+                "2026-03-01T10:60:00Z", "2026-03-01T10:00:61Z", "2026-03-01T10:00:00", "2026-03-01T10:00Z",
+                "2026-03-01T10:00:00.Z", "2026-03-01T10:00:00.1234567890Z", "2026-03-01T10:00:00+02:00",
+                "2026-3-01T10:00:00Z", "2026-03-01 10:00:00Z", "2026-03-01T10:00:00Zjunk", "+2026-03-01"] {
+        testing.assertEq(key(bad), "", "rejects '" + bad + "'")
+    }
+}
+
+fn main() {
+    testing.run("timestamp", [
+        wholeSecondsGetAFraction,
+        fractionsArePaddedToNanoseconds,
+        fractionalSecondsOrderAfterTheWholeSecond,
+        utcSpellingsAgree,
+        aDateIsMidnight,
+        leapDaysAreChecked,
+        invalidTimestampsHaveNoKey
+    ])
+}

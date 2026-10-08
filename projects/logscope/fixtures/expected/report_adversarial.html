@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>logscope: fixtures/adversarial.jsonl</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1f2328; }
+table { border-collapse: collapse; margin-bottom: 1.5rem; }
+th, td { border: 1px solid #d0d7de; padding: 0.3rem 0.6rem; text-align: left; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.error { color: #b42318; }
+</style>
+</head>
+<body>
+<h1>logscope: fixtures/adversarial.jsonl</h1>
+<p>7 records read, 6 matched, 1 invalid.</p>
+<h2>By level</h2>
+<table>
+<tr><th>level</th><th>count</th></tr>
+<tr><td>fatal</td><td class="n">1</td></tr>
+<tr><td>error</td><td class="n">3</td></tr>
+<tr><td>warn</td><td class="n">1</td></tr>
+<tr><td>info</td><td class="n">1</td></tr>
+</table>
+<h2>By service</h2>
+<table>
+<tr><th>service</th><th>count</th></tr>
+<tr><td>-0</td><td class="n">1</td></tr>
+<tr><td>01</td><td class="n">2</td></tr>
+<tr><td>api</td><td class="n">3</td></tr>
+</table>
+<h2>Error groups</h2>
+<table>
+<tr><th>count</th><th>message</th><th>services</th><th>first</th><th>last</th></tr>
+<tr><td class="n">3</td><td class="error">123</td><td>01, api</td><td>2026-03-01T10:00:00Z</td><td>2026-03-01T10:00:00.500Z</td></tr>
+<tr><td class="n">1</td><td class="error">true</td><td>api</td><td>2026-03-01T10:00:02.000000001z</td><td>2026-03-01T10:00:02.000000001z</td></tr>
+</table>
+<h2>Invalid lines</h2>
+<table>
+<tr><th>line</th><th>reason</th></tr>
+<tr><td class="n">6</td><td>&quot;ts&quot; is not an ISO-8601 UTC timestamp</td></tr>
+</table>
+</body>
+</html>

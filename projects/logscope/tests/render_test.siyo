@@ -7,8 +7,8 @@ import "render"
 
 fn sample() -> Summary {
     imut lines: Array<Line> = [
-        Rec(LogRecord { line: 1, ts: "2026-03-01T10:00:00Z", level: "error", service: "api", msg: "bad <b>\"x\"</b> & co", raw: {} }),
-        Rec(LogRecord { line: 2, ts: "2026-03-01T10:01:00Z", level: "info", service: "web", msg: "ok", raw: {} }),
+        Rec(LogRecord { line: 1, ts: "2026-03-01T10:00:00Z", tsKey: "2026-03-01T10:00:00.000000000Z", level: "error", service: "api", msg: "bad <b>\"x\"</b> & co", raw: {} }),
+        Rec(LogRecord { line: 2, ts: "2026-03-01T10:01:00Z", tsKey: "2026-03-01T10:01:00.000000000Z", level: "info", service: "web", msg: "ok", raw: {} }),
         Bad(3, "json: expected an object at position 0 ('[')")
     ]
     summary.summarize(lines, Filter { levels: [], service: "", since: "", until: "", grep: "" })

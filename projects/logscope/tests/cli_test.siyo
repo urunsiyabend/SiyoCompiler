@@ -60,6 +60,22 @@ fn missingFileIsUsageError() {
     testing.assertEq(usageOf([]), "missing command", "missing command")
 }
 
+fn aTimeFilterMustBeAUtcTimestamp() {
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--since", "last tuesday"]),
+        "--since needs an ISO-8601 UTC timestamp, got 'last tuesday'", "since")
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--until", "2026-03-01T10:00:00+02:00"]),
+        "--until needs an ISO-8601 UTC timestamp, got '2026-03-01T10:00:00+02:00'", "until")
+    testing.assertEq(opts(["summary", "a.jsonl", "--since", "2026-03-01T10:00:00.5Z"]).since,
+        "2026-03-01T10:00:00.5Z", "a fraction is accepted")
+}
+
+fn aFlagIsNotTakenAsAValue() {
+    testing.assertEq(usageOf(["report", "a.jsonl", "--json", "--html"]), "flag '--json' needs a value", "--json --html")
+    testing.assertEq(usageOf(["report", "a.jsonl", "--json", "--html", "out.html"]), "flag '--json' needs a value", "--json --html x")
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--level", "--service", "api"]), "flag '--level' needs a value", "--level --service")
+    testing.assertEq(opts(["summary", "a.jsonl", "--grep", "--verbose"]).grep, "--verbose", "an unknown --word is still a value")
+}
+
 fn helpIsNotAnError() {
     testing.assertEq(usageOf(["help"]), "help", "help")
     testing.assertEq(usageOf(["--help"]), "help", "--help")
@@ -76,6 +92,8 @@ fn main() {
         unknownFlagIsUsageError,
         flagWithoutValueIsUsageError,
         missingFileIsUsageError,
-        helpIsNotAnError
+        helpIsNotAnError,
+        aTimeFilterMustBeAUtcTimestamp,
+        aFlagIsNotTakenAsAValue
     ])
 }

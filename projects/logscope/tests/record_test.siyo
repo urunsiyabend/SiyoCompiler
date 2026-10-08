@@ -54,6 +54,20 @@ fn nonStringLevelIsBad() {
     testing.assertEq(badReason("{\"level\":3,\"msg\":\"m\"}"), "3: \"level\" is not a string", "numeric level")
 }
 
+fn timestampGetsASortKey() {
+    imut r = rec("{\"ts\":\"2026-03-01T10:00:00.5Z\",\"level\":\"info\",\"msg\":\"m\"}")
+    testing.assertEq(r.ts, "2026-03-01T10:00:00.5Z", "ts is kept as written")
+    testing.assertEq(r.tsKey, "2026-03-01T10:00:00.500000000Z", "sort key")
+    testing.assertEq(rec("{\"level\":\"info\",\"msg\":\"m\"}").tsKey, "", "no ts, no key")
+}
+
+fn nonUtcOrInvalidTimestampIsBad() {
+    imut why = "3: \"ts\" is not an ISO-8601 UTC timestamp"
+    testing.assertEq(badReason("{\"ts\":\"2026-03-01T10:00:00+02:00\",\"level\":\"info\",\"msg\":\"m\"}"), why, "offset")
+    testing.assertEq(badReason("{\"ts\":\"yesterday\",\"level\":\"info\",\"msg\":\"m\"}"), why, "word")
+    testing.assertEq(badReason("{\"ts\":\"\",\"level\":\"info\",\"msg\":\"m\"}"), why, "empty")
+}
+
 fn blankLineIsSkipped() {
     testing.assertEq(badReason(""), "blank", "empty")
     testing.assertEq(badReason("   \t"), "blank", "whitespace")
@@ -73,6 +87,8 @@ fn main() {
         missingLevelIsBad,
         missingMsgIsBad,
         nonStringLevelIsBad,
+        timestampGetsASortKey,
+        nonUtcOrInvalidTimestampIsBad,
         blankLineIsSkipped,
         readsAFileLineByLine
     ])

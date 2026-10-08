@@ -2,10 +2,12 @@
 
 import "std/io"
 import "std/json"
+import "timestamp"
 
 pub struct LogRecord {
     line: int,
-    ts: string,
+    ts: string,        // as written
+    tsKey: string,     // timestamp.sortKey(ts), "" when there is no ts
     level: string,
     service: string,
     msg: string,
@@ -34,9 +36,15 @@ fn fromMap(lineNo: int, m: map) -> Line {
                   fieldProblem(m, "ts", false), fieldProblem(m, "service", false)] {
         if check != "" { return Bad(lineNo, check) }
     }
+    imut ts = text(m, "ts", "")
+    imut tsKey = if typeOf(m["ts"]) == "null" { "" } else { timestamp.sortKey(ts) }
+    // A timestamp that cannot be ordered would silently fall out of every time
+    // filter and skew first/last, so the line is reported instead.
+    if typeOf(m["ts"]) != "null" && tsKey == "" { return Bad(lineNo, "\"ts\" is not an ISO-8601 UTC timestamp") }
     Rec(LogRecord {
         line: lineNo,
-        ts: text(m, "ts", ""),
+        ts: ts,
+        tsKey: tsKey,
         level: toLower(text(m, "level", "")),
         service: text(m, "service", "-"),
         msg: text(m, "msg", ""),

@@ -2,9 +2,10 @@ import "std/testing"
 import "record"
 import "query"
 import "summary"
+import "timestamp"
 
 fn r(line: int, ts: string, level: string, service: string, msg: string) -> LogRecord {
-    LogRecord { line: line, ts: ts, level: level, service: service, msg: msg, raw: {} }
+    LogRecord { line: line, ts: ts, tsKey: timestamp.sortKey(ts), level: level, service: service, msg: msg, raw: {} }
 }
 
 fn noFilter() -> Filter {
@@ -28,12 +29,34 @@ fn serviceFilter() {
 
 fn sinceInclusiveUntilExclusive() {
     mut f = noFilter()
-    f.since = "2026-03-01T10:00:00Z"
-    f.until = "2026-03-01T11:00:00Z"
+    f.since = timestamp.sortKey("2026-03-01T10:00:00Z")
+    f.until = timestamp.sortKey("2026-03-01T11:00:00Z")
     testing.assert(query.matches(f, r(1, "2026-03-01T10:00:00Z", "info", "a", "x")), "since is inclusive")
     testing.assert(!query.matches(f, r(1, "2026-03-01T11:00:00Z", "info", "a", "x")), "until is exclusive")
     testing.assert(!query.matches(f, r(1, "2026-03-01T09:59:59Z", "info", "a", "x")), "before since")
     testing.assert(!query.matches(f, r(1, "", "info", "a", "x")), "no timestamp fails a time filter")
+}
+
+fn fractionalSecondsAreOrderedInTheWindow() {
+    mut f = noFilter()
+    f.since = timestamp.sortKey("2026-03-01T10:00:00.250Z")
+    f.until = timestamp.sortKey("2026-03-01T10:00:01Z")
+    testing.assert(!query.matches(f, r(1, "2026-03-01T10:00:00Z", "info", "a", "x")), "10:00:00 is before .250")
+    testing.assert(query.matches(f, r(1, "2026-03-01T10:00:00.500Z", "info", "a", "x")), ".500 is inside")
+    testing.assert(query.matches(f, r(1, "2026-03-01T10:00:00.999999999Z", "info", "a", "x")), ".999999999 is inside")
+    testing.assert(!query.matches(f, r(1, "2026-03-01T10:00:01Z", "info", "a", "x")), "until is exclusive")
+}
+
+fn firstAndLastFollowTimeNotText() {
+    imut lines: Array<Line> = [
+        Rec(r(1, "2026-03-01T10:00:00.500Z", "error", "a", "boom")),
+        Rec(r(2, "2026-03-01T10:00:00Z", "error", "a", "boom")),
+        Rec(r(3, "2026-03-01T10:00:00.5001Z", "error", "a", "boom")),
+        Rec(r(4, "2026-03-01T09:59:59.9Z", "info", "a", "not an error"))
+    ]
+    imut g = summary.summarize(lines, noFilter()).groups[0]
+    testing.assertEq(g.first, "2026-03-01T10:00:00Z", "first is the whole second")
+    testing.assertEq(g.last, "2026-03-01T10:00:00.5001Z", "last is the latest fraction")
 }
 
 fn grepIsCaseInsensitive() {
@@ -104,6 +127,8 @@ fn main() {
         levelFilter,
         serviceFilter,
         sinceInclusiveUntilExclusive,
+        fractionalSecondsAreOrderedInTheWindow,
+        firstAndLastFollowTimeNotText,
         grepIsCaseInsensitive,
         countsTotalsAndInvalidLines,
         levelCountsInSeverityOrder,
