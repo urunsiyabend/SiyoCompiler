@@ -108,6 +108,24 @@ class CliParityTest {
     }
 
     @Test
+    void aSyntaxErrorInAnImportedModuleIsReported() throws Exception {
+        Files.writeString(tempDir.resolve("broken.siyo"), """
+                pub fn f() -> int { 1 +
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "broken"
+                fn main() { println(toString(broken.f())) }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, main.toString());
+            assertEquals(1, result.exitCode, mode + ": " + result.stdout);
+            assertEquals(true, result.stderr.contains("broken.siyo(2, 1)"), mode + ": " + result.stderr);
+        }
+    }
+
+    @Test
     void aFailingTestSuiteExitsNonZero() throws Exception {
         Files.createDirectories(tempDir.resolve("tests"));
         Files.writeString(tempDir.resolve("tests/a_test.siyo"), """

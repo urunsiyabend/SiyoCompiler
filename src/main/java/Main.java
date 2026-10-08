@@ -381,14 +381,14 @@ public class Main {
             EvaluationResult result = compilation.evaluate(variables);
 
             if (result.diagnostics().hasNext()) {
+                // Reported the way run reports them: against the file each was
+                // raised in, so an error in an imported module names that module.
                 DiagnosticBox diagnostics = result.diagnostics();
+                String diagFileName = java.nio.file.Paths.get(path).getFileName().toString();
+                java.util.Set<String> seen = new java.util.LinkedHashSet<>();
                 while (diagnostics.hasNext()) {
-                    Diagnostic diagnostic = diagnostics.next();
-                    var lineIndex = tree.getText().getLineIndex(diagnostic.getSpan().getStart());
-                    var lineNumber = lineIndex + 1;
-                    var line = tree.getText().getLines().get(lineIndex);
-                    var character = diagnostic.getSpan().getStart() - line.getStart() + 1;
-                    System.err.printf("(%d, %d): %s%n", lineNumber, character, diagnostic);
+                    String msg = formatDiagnostic(diagnostics.next(), tree.getText(), diagFileName);
+                    if (seen.add(msg)) System.err.println(msg);
                 }
                 System.exit(1);
             }

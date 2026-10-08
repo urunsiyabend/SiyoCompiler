@@ -515,6 +515,22 @@ public class ModuleHandler {
                 source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(filePath)));
             }
             codeanalysis.syntax.SyntaxTree tree = codeanalysis.syntax.SyntaxTree.parse(source);
+            String failedName = moduleName.contains("/")
+                    ? moduleName.substring(moduleName.lastIndexOf('/') + 1)
+                    : moduleName;
+            // A module that does not parse fails the import. Its syntax errors
+            // used to be dropped, so the importer compiled against whatever the
+            // parser recovered and the program ran.
+            if (tree.diagnostics().size() > 0) {
+                for (int i = 0; i < tree.diagnostics().size(); i++) {
+                    codeanalysis.Diagnostic diagnostic = tree.diagnostics().get(i);
+                    diagnostic.setSource(filePath, tree.getText());
+                    _diagnostics.add(diagnostic);
+                }
+                _diagnostics.markModuleFailed(failedName);
+                if (_registry != null) _registry.markComplete(filePath);
+                return null;
+            }
 
             // Create a dedicated binder for the module so we can access its struct types
             var parentScope = Binder.createParentScopes(null);

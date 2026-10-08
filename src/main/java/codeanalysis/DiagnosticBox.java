@@ -82,6 +82,12 @@ public class DiagnosticBox implements Iterator<Diagnostic> {
      * @param diagnostics The DiagnosticBox containing additional diagnostics to be added.
      * @return This DiagnosticBox instance.
      */
+    /** Adds one diagnostic as it is, keeping the file it was raised in. */
+    public DiagnosticBox add(Diagnostic diagnostic) {
+        _diagnostics.add(diagnostic);
+        return this;
+    }
+
     public DiagnosticBox addAll(DiagnosticBox diagnostics) {
         _diagnostics.addAll(diagnostics._diagnostics);
         return this;
