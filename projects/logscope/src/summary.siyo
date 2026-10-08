@@ -1,0 +1,128 @@
+// Aggregates a run: totals, counts by level and service, and error groups.
+
+import "record"
+import "query"
+
+pub struct Count { name: string, count: int }
+
+pub struct BadLine { line: int, reason: string }
+
+// Every error or fatal record with the same message.
+pub struct ErrorGroup {
+    msg: string,
+    count: int,
+    first: string,
+    last: string,
+    services: string[]
+}
+
+pub struct Summary {
+    total: int,
+    matched: int,
+    invalid: int,
+    bad: Array<BadLine>,
+    byLevel: Array<Count>,
+    byService: Array<Count>,
+    groups: Array<ErrorGroup>
+}
+
+imut SEVERITY = ["fatal", "error", "warn", "info", "debug", "trace"]
+
+pub fn isError(level: string) -> bool {
+    level == "fatal" || level == "error"
+}
+
+// Known levels by severity, any other level after them.
+fn severityRank(level: string) -> int {
+    for mut i = 0 i < len(SEVERITY) i = i + 1 {
+        if SEVERITY[i] == level { return i }
+    }
+    len(SEVERITY)
+}
+
+fn compareText(a: string, b: string) -> int {
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+}
+
+fn bySeverity(a: Count, b: Count) -> int {
+    imut rank = severityRank(a.name) - severityRank(b.name)
+    if rank != 0 { rank } else { compareText(a.name, b.name) }
+}
+
+fn byName(a: Count, b: Count) -> int {
+    compareText(a.name, b.name)
+}
+
+fn byCountThenMessage(a: ErrorGroup, b: ErrorGroup) -> int {
+    if a.count != b.count { b.count - a.count } else { compareText(a.msg, b.msg) }
+}
+
+fn tally(counts: Map<string, int>, key: string) {
+    if counts.has(key) { counts[key] = counts[key] + 1 } else { counts[key] = 1 }
+}
+
+fn toCounts(counts: Map<string, int>) -> Array<Count> {
+    mut out: Array<Count> = []
+    for name in counts { push(out, Count { name: name, count: counts[name] }) }
+    out
+}
+
+fn addToGroup(groups: Map<string, ErrorGroup>, r: LogRecord) {
+    if !groups.has(r.msg) {
+        groups[r.msg] = ErrorGroup { msg: r.msg, count: 0, first: r.ts, last: r.ts, services: [] }
+    }
+    mut g = groups[r.msg]
+    g.count = g.count + 1
+    if r.ts != "" {
+        if g.first == "" || r.ts < g.first { g.first = r.ts }
+        if r.ts > g.last { g.last = r.ts }
+    }
+    mut known = false
+    for s in g.services { if s == r.service { known = true } }
+    if !known { push(g.services, r.service) }
+}
+
+pub fn summarize(lines: Array<Line>, f: Filter) -> Summary {
+    mut total = 0
+    mut matched = 0
+    mut bad: Array<BadLine> = []
+    mut levels: Map<string, int> = {}
+    mut services: Map<string, int> = {}
+    mut groups: Map<string, ErrorGroup> = {}
+
+    for line in lines {
+        match line {
+            Blank => {},
+            Bad(n, why) => {
+                total = total + 1
+                push(bad, BadLine { line: n, reason: why })
+            },
+            Rec(r) => {
+                total = total + 1
+                if query.matches(f, r) {
+                    matched = matched + 1
+                    tally(levels, r.level)
+                    tally(services, r.service)
+                    if isError(r.level) { addToGroup(groups, r) }
+                }
+            }
+        }
+    }
+
+    mut byLevel = toCounts(levels)
+    sort(byLevel, bySeverity)
+    mut byService = toCounts(services)
+    sort(byService, byName)
+    mut ordered: Array<ErrorGroup> = []
+    for msg in groups {
+        mut g = groups[msg]
+        sort(g.services, compareText)
+        push(ordered, g)
+    }
+    sort(ordered, byCountThenMessage)
+
+    Summary {
+        total: total, matched: matched, invalid: len(bad), bad: bad,
+        byLevel: byLevel, byService: byService, groups: ordered
+    }
+}

@@ -1,0 +1,115 @@
+import "std/testing"
+import "record"
+import "query"
+import "summary"
+
+fn r(line: int, ts: string, level: string, service: string, msg: string) -> LogRecord {
+    LogRecord { line: line, ts: ts, level: level, service: service, msg: msg, raw: {} }
+}
+
+fn noFilter() -> Filter {
+    Filter { levels: [], service: "", since: "", until: "", grep: "" }
+}
+
+fn levelFilter() {
+    mut f = noFilter()
+    f.levels = ["error", "warn"]
+    testing.assert(query.matches(f, r(1, "", "error", "api", "x")), "error kept")
+    testing.assert(query.matches(f, r(1, "", "warn", "api", "x")), "warn kept")
+    testing.assert(!query.matches(f, r(1, "", "info", "api", "x")), "info dropped")
+}
+
+fn serviceFilter() {
+    mut f = noFilter()
+    f.service = "api"
+    testing.assert(query.matches(f, r(1, "", "info", "api", "x")), "api kept")
+    testing.assert(!query.matches(f, r(1, "", "info", "web", "x")), "web dropped")
+}
+
+fn sinceInclusiveUntilExclusive() {
+    mut f = noFilter()
+    f.since = "2026-03-01T10:00:00Z"
+    f.until = "2026-03-01T11:00:00Z"
+    testing.assert(query.matches(f, r(1, "2026-03-01T10:00:00Z", "info", "a", "x")), "since is inclusive")
+    testing.assert(!query.matches(f, r(1, "2026-03-01T11:00:00Z", "info", "a", "x")), "until is exclusive")
+    testing.assert(!query.matches(f, r(1, "2026-03-01T09:59:59Z", "info", "a", "x")), "before since")
+    testing.assert(!query.matches(f, r(1, "", "info", "a", "x")), "no timestamp fails a time filter")
+}
+
+fn grepIsCaseInsensitive() {
+    mut f = noFilter()
+    f.grep = "TimeOut"
+    testing.assert(query.matches(f, r(1, "", "error", "a", "database timeout")), "matches")
+    testing.assert(!query.matches(f, r(1, "", "error", "a", "disk full")), "no match")
+}
+
+fn lines() -> Array<Line> {
+    [
+        Rec(r(1, "2026-03-01T10:00:00Z", "error", "api", "db timeout")),
+        Rec(r(2, "2026-03-01T10:01:00Z", "info", "web", "ok")),
+        Bad(3, "json: broken"),
+        Blank,
+        Rec(r(5, "2026-03-01T10:02:00Z", "fatal", "worker", "oom")),
+        Rec(r(6, "2026-03-01T10:03:00Z", "error", "worker", "db timeout")),
+        Rec(r(7, "2026-03-01T10:04:00Z", "error", "api", "auth failed"))
+    ]
+}
+
+fn countsTotalsAndInvalidLines() {
+    imut s = summary.summarize(lines(), noFilter())
+    testing.assertEq(toString(s.total), "6", "blank lines are not counted")
+    testing.assertEq(toString(s.matched), "5", "matched")
+    testing.assertEq(toString(s.invalid), "1", "invalid")
+    testing.assertEq(toString(s.bad[0].line) + " " + s.bad[0].reason, "3 json: broken", "bad line kept")
+}
+
+fn levelCountsInSeverityOrder() {
+    imut s = summary.summarize(lines(), noFilter())
+    mut out = ""
+    for c in s.byLevel { out = out + c.name + "=" + toString(c.count) + " " }
+    testing.assertEq(trim(out), "fatal=1 error=3 info=1", "levels")
+}
+
+fn serviceCountsAlphabetical() {
+    imut s = summary.summarize(lines(), noFilter())
+    mut out = ""
+    for c in s.byService { out = out + c.name + "=" + toString(c.count) + " " }
+    testing.assertEq(trim(out), "api=2 web=1 worker=2", "services")
+}
+
+fn groupsOrderedByCountThenMessage() {
+    imut s = summary.summarize(lines(), noFilter())
+    mut out = ""
+    for g in s.groups { out = out + g.msg + "=" + toString(g.count) + " " }
+    testing.assertEq(trim(out), "db timeout=2 auth failed=1 oom=1", "groups")
+}
+
+fn groupTracksFirstLastAndServices() {
+    imut g = summary.summarize(lines(), noFilter()).groups[0]
+    testing.assertEq(g.first, "2026-03-01T10:00:00Z", "first")
+    testing.assertEq(g.last, "2026-03-01T10:03:00Z", "last")
+    testing.assertEq(toString(g.services), "[api, worker]", "services")
+}
+
+fn filterAppliesBeforeAggregation() {
+    mut f = noFilter()
+    f.service = "api"
+    imut s = summary.summarize(lines(), f)
+    testing.assertEq(toString(s.matched), "2", "matched")
+    testing.assertEq(toString(len(s.groups)), "2", "groups")
+}
+
+fn main() {
+    testing.run("summary", [
+        levelFilter,
+        serviceFilter,
+        sinceInclusiveUntilExclusive,
+        grepIsCaseInsensitive,
+        countsTotalsAndInvalidLines,
+        levelCountsInSeverityOrder,
+        serviceCountsAlphabetical,
+        groupsOrderedByCountThenMessage,
+        groupTracksFirstLastAndServices,
+        filterAppliesBeforeAggregation
+    ])
+}
