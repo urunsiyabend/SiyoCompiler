@@ -70,7 +70,7 @@ info, debug, trace, then any other), services alphabetically.
 |------|---------|
 | 0 | success |
 | 1 | usage error (message and usage on stderr) |
-| 2 | the input file cannot be read |
+| 2 | the input file cannot be read, or a report cannot be written (message on stderr) |
 
 ## Layout
 

@@ -27,15 +27,18 @@ fn printMatching(lines: Array<Line>, f: Filter) {
     }
 }
 
+fn write(path: string, content: string) {
+    try {
+        io.writeFile(path, content)
+    } catch e {
+        fail(2, "cannot write " + path)
+    }
+    println("wrote " + path)
+}
+
 fn writeReports(o: Options, s: Summary) {
-    if o.jsonOut != "" {
-        io.writeFile(o.jsonOut, render.json(s, o.file))
-        println("wrote " + o.jsonOut)
-    }
-    if o.htmlOut != "" {
-        io.writeFile(o.htmlOut, render.html(s, o.file))
-        println("wrote " + o.htmlOut)
-    }
+    if o.jsonOut != "" { write(o.jsonOut, render.json(s, o.file)) }
+    if o.htmlOut != "" { write(o.htmlOut, render.html(s, o.file)) }
 }
 
 fn execute(o: Options) {

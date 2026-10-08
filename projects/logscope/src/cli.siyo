@@ -33,7 +33,7 @@ report outputs:
   --json PATH     write the JSON report to PATH
   --html PATH     write the HTML report to PATH
 
-exit codes: 0 ok, 1 usage error, 2 input error"""
+exit codes: 0 ok, 1 usage error, 2 a file cannot be read or written"""
 }
 
 fn isCommand(name: string) -> bool {

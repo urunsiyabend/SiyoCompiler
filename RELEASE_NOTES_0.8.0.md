@@ -10,7 +10,7 @@ language's fault are fixed here rather than worked around in the app.
 Most of them were the same defect this project cares most about: a program
 that means one thing compiled and another interpreted. Several were silent.
 
-2,229 tests pass, up from 2,184. LogScope itself is now part of `mvn test`:
+2,230 tests pass, up from 2,184. LogScope itself is now part of `mvn test`:
 its whole CLI runs through both backends, under a C locale, against golden
 outputs.
 

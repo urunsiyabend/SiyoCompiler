@@ -98,6 +98,16 @@ class LogScopeEndToEndTest {
     }
 
     @Test
+    void unwritableReportExitsTwo() throws Exception {
+        String target = tempDir.resolve("no-such-dir").resolve("r.json").toString();
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = logscope(mode, "report", "fixtures/app.jsonl", "--json", target);
+            assertEquals(2, result.exitCode(), mode);
+            assertEquals("logscope: cannot write " + target, result.stderr(), mode);
+        }
+    }
+
+    @Test
     void badFlagExitsOneWithUsage() throws Exception {
         for (String mode : List.of("run", "interpret")) {
             CliParityTest.Result result = logscope(mode, "summary", "fixtures/app.jsonl", "--bogus", "x");
