@@ -178,6 +178,25 @@ class CliParityTest {
     }
 
     @Test
+    void aLotOfStandardErrorDoesNotStallTheHarness() throws Exception {
+        Path file = tempDir.resolve("noisy.siyo");
+        Files.writeString(file, """
+                import "std/io"
+                import "std/strings"
+                fn main() {
+                    imut line = strings.repeat("e", 100)
+                    for i in range(0, 5000) { io.eprintln(line) }
+                    println("done")
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals("done", result.stdout, mode);
+            assertEquals(5000, result.stderr.lines().count(), mode);
+        }
+    }
+
+    @Test
     void aFailingTestSuiteExitsNonZero() throws Exception {
         Files.createDirectories(tempDir.resolve("tests"));
         Files.writeString(tempDir.resolve("tests/a_test.siyo"), """
@@ -231,12 +250,30 @@ class CliParityTest {
         if (cwd != null) builder.directory(cwd.toFile());
         builder.environment().putAll(env);
         Process process = builder.start();
-        byte[] out = process.getInputStream().readAllBytes();
-        byte[] err = process.getErrorStream().readAllBytes();
-        int code = process.waitFor();
-        return new Result(code,
-                new String(out, StandardCharsets.UTF_8).trim(),
-                new String(err, StandardCharsets.UTF_8).trim());
+        // Both pipes are drained at once: reading one to the end first can
+        // deadlock once the child fills the other's buffer.
+        java.util.concurrent.CompletableFuture<byte[]> out = drain(process.getInputStream());
+        java.util.concurrent.CompletableFuture<byte[]> err = drain(process.getErrorStream());
+        if (!process.waitFor(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly().waitFor();
+            throw new AssertionError("siyoc " + String.join(" ", args) + " did not finish in "
+                    + TIMEOUT_SECONDS + "s");
+        }
+        return new Result(process.exitValue(),
+                new String(out.get(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS), StandardCharsets.UTF_8).trim(),
+                new String(err.get(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS), StandardCharsets.UTF_8).trim());
+    }
+
+    private static final long TIMEOUT_SECONDS = 60;
+
+    private static java.util.concurrent.CompletableFuture<byte[]> drain(java.io.InputStream stream) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try (stream) {
+                return stream.readAllBytes();
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        });
     }
 
     private Result siyoc(String... args) throws Exception {
