@@ -23,6 +23,7 @@ public class Main {
     private static final String VERSION = "0.7.0";
 
     public static void main(String[] args) {
+        useUtf8Output();
         if (System.getenv("SIYO_DEBUG") != null) {
             System.err.println("[debug] args=" + java.util.Arrays.toString(args));
         }
@@ -200,6 +201,21 @@ public class Main {
     }
 
     private static String[] _programArgs = new String[0];
+
+    /**
+     * Writes standard output and error as UTF-8, the encoding source files
+     * and file I/O already use. Java otherwise follows the locale, and under
+     * a C/POSIX locale every non-ASCII character a program printed became '?'.
+     */
+    private static void useUtf8Output() {
+        java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
+        java.io.PrintStream out = new java.io.PrintStream(new java.io.BufferedOutputStream(
+                new java.io.FileOutputStream(java.io.FileDescriptor.out), 8192), true, utf8);
+        java.io.PrintStream err = new java.io.PrintStream(new java.io.BufferedOutputStream(
+                new java.io.FileOutputStream(java.io.FileDescriptor.err), 8192), true, utf8);
+        System.setOut(out);
+        System.setErr(err);
+    }
 
     /**
      * Loads the project that owns {@code sourceFile}, if any, so imports resolve

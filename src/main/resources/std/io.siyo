@@ -2,6 +2,7 @@ import java "java.io.FileWriter"
 import java "java.io.BufferedReader"
 import java "java.io.FileReader"
 import java "java.io.File"
+import java "java.lang.System"
 import java "codeanalysis.SiyoRuntime"
 
 pub fn readFile(path: string) -> string {
@@ -17,6 +18,11 @@ pub fn readFile(path: string) -> string {
     }
     reader.close()
     return result
+}
+
+// Writes a line to standard error, where a CLI's diagnostics belong.
+pub fn eprintln(msg: string) {
+    System.err.println(msg)
 }
 
 pub fn writeFile(path: string, content: string) {

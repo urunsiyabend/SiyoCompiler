@@ -126,6 +126,58 @@ class CliParityTest {
     }
 
     @Test
+    void ioEprintlnWritesToStandardError() throws Exception {
+        Path file = tempDir.resolve("err.siyo");
+        Files.writeString(file, """
+                import "std/io"
+                fn main() {
+                    println("out")
+                    io.eprintln("oops")
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals("out", result.stdout, mode);
+            assertEquals("oops", result.stderr, mode);
+        }
+    }
+
+    @Test
+    void outputIsUtf8WhateverTheLocale() throws Exception {
+        Path file = tempDir.resolve("utf8.siyo");
+        Files.writeString(file, """
+                import "std/io"
+                fn main() {
+                    println("café ✓")
+                    io.eprintln("crème")
+                }
+                """);
+        java.util.Map<String, String> cLocale = java.util.Map.of("LC_ALL", "C", "LANG", "C");
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(null, cLocale, mode, file.toString());
+            assertEquals("café ✓", result.stdout, mode);
+            assertEquals("crème", result.stderr, mode);
+        }
+    }
+
+    @Test
+    void outputWithoutANewlineSurvivesOsExit() throws Exception {
+        Path file = tempDir.resolve("partial.siyo");
+        Files.writeString(file, """
+                import "std/os"
+                fn main() {
+                    print("no newline")
+                    os.exit(3)
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals(3, result.exitCode, mode);
+            assertEquals("no newline", result.stdout, mode);
+        }
+    }
+
+    @Test
     void aFailingTestSuiteExitsNonZero() throws Exception {
         Files.createDirectories(tempDir.resolve("tests"));
         Files.writeString(tempDir.resolve("tests/a_test.siyo"), """
@@ -165,6 +217,10 @@ class CliParityTest {
 
     /** Runs {@code Main} in a fresh JVM, so {@code System.exit} ends only that process. */
     static Result siyoc(Path cwd, String... args) throws Exception {
+        return siyoc(cwd, java.util.Map.of(), args);
+    }
+
+    static Result siyoc(Path cwd, java.util.Map<String, String> env, String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add("-cp");
@@ -173,6 +229,7 @@ class CliParityTest {
         command.addAll(List.of(args));
         ProcessBuilder builder = new ProcessBuilder(command);
         if (cwd != null) builder.directory(cwd.toFile());
+        builder.environment().putAll(env);
         Process process = builder.start();
         byte[] out = process.getInputStream().readAllBytes();
         byte[] err = process.getErrorStream().readAllBytes();
