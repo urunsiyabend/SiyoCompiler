@@ -347,7 +347,10 @@ public class Binder {
      * @return The bound expression statement.
      */
     private BoundStatement bindExpressionStatement(ExpressionStatementSyntax syntax) {
-        BoundExpression expression = bindExpression(syntax.getExpression());
+        // A match written as a statement is run for its arms' effects.
+        BoundExpression expression = syntax.getExpression() instanceof MatchExpressionSyntax match
+                ? bindMatchExpression(match, false)
+                : bindExpression(syntax.getExpression());
         return new BoundExpressionStatement(expression);
     }
 
@@ -865,7 +868,30 @@ public class Binder {
         return new BoundMatchExpression(cond, arms, resultType);
     }
 
+    private static final String MIXED_ARMS =
+            "All match arms must return the same type; cannot mix void and value arms";
+
+    /**
+     * Matches bound as statements whose arms disagree on a type, with where
+     * they first disagree. Such a match is fine run for its effects, and an
+     * error if a function turns out to return it.
+     */
+    private final Map<BoundMatchExpression, codeanalysis.text.TextSpan> _mixedArmMatches =
+            new java.util.IdentityHashMap<>();
+
     private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax) {
+        return bindMatchExpression(syntax, true);
+    }
+
+    /**
+     * Binds a match. When its value is not used, its arms are not required to
+     * agree on a type: {@code Blank => {}} beside {@code Bad(n, why) =>
+     * { push(bad, why) }} used to be rejected for mixing int and void.
+     *
+     * @param syntax    The match.
+     * @param valueUsed Whether the match's value is read.
+     */
+    private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax, boolean valueUsed) {
         BoundExpression target = bindExpression(syntax.getTarget());
         codeanalysis.UnionSymbol targetUnion = _typeResolver.resolveUnionType(target);
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
@@ -873,6 +899,7 @@ public class Binder {
         boolean hasDefault = false;
         Class<?> resultType = null;
         boolean resultTypeInitialized = false;
+        codeanalysis.text.TextSpan mismatch = null;
         for (MatchArmSyntax arm : syntax.getArms()) {
             if (arm.isDefault()) hasDefault = true;
 
@@ -922,8 +949,11 @@ public class Binder {
                 resultType = bodyType;
                 resultTypeInitialized = true;
             } else if (resultType != bodyType) {
-                _diagnostics.reportError(arm.getBody().getSpan(),
-                        "All match arms must return the same type; cannot mix void and value arms");
+                if (valueUsed) {
+                    _diagnostics.reportError(arm.getBody().getSpan(), MIXED_ARMS);
+                } else if (mismatch == null) {
+                    mismatch = arm.getBody().getSpan();
+                }
             }
             arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(),
                     preStatements, variant));
@@ -942,6 +972,20 @@ public class Binder {
             }
         }
 
+        if (mismatch != null) {
+            // Run for its effects: each arm's value is discarded where it is
+            // produced, and the match itself has none.
+            List<BoundMatchExpression.BoundMatchArm> discarded = new ArrayList<>();
+            for (var arm : arms) {
+                List<BoundStatement> statements = new ArrayList<>(arm.preStatements());
+                statements.add(new BoundExpressionStatement(arm.body()));
+                discarded.add(new BoundMatchExpression.BoundMatchArm(arm.pattern(), new BoundUnitExpression(),
+                        arm.isDefault(), statements, arm.variant()));
+            }
+            BoundMatchExpression statementMatch = new BoundMatchExpression(target, discarded, null);
+            _mixedArmMatches.put(statementMatch, mismatch);
+            return statementMatch;
+        }
         if (!resultTypeInitialized) resultType = Object.class;
         return new BoundMatchExpression(target, arms, resultType);
     }
@@ -3129,7 +3173,7 @@ public class Binder {
      * @param returnType The declared return type, or null for a void function.
      * @return The body with its tail rewritten to return.
      */
-    static BoundBlockStatement applyImplicitReturn(BoundBlockStatement body, Class<?> returnType) {
+    BoundBlockStatement applyImplicitReturn(BoundBlockStatement body, Class<?> returnType) {
         if (returnType == null) return body;
         var statements = new ArrayList<>(body.getStatements());
         if (statements.isEmpty()) return body;
@@ -3144,9 +3188,14 @@ public class Binder {
      * Rewrites one statement so that the value it produces is returned, or
      * returns null when the statement produces no value.
      */
-    private static BoundStatement implicitReturnOf(BoundStatement statement, Class<?> returnType) {
+    private BoundStatement implicitReturnOf(BoundStatement statement, Class<?> returnType) {
         if (statement instanceof BoundExpressionStatement expressionStatement) {
             BoundExpression value = expressionStatement.getExpression();
+            // A match whose arms disagree has no value to return.
+            if (value instanceof BoundMatchExpression match && _mixedArmMatches.containsKey(match)) {
+                _diagnostics.reportError(_mixedArmMatches.get(match), MIXED_ARMS);
+                return null;
+            }
             // An assignment used as a statement is a side effect, not a value.
             if (value instanceof BoundAssignmentExpression) return null;
             // The tail of the body is the return value, so it is widened to the

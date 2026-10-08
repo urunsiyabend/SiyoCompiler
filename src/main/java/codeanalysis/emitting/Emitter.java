@@ -655,6 +655,7 @@ public class Emitter {
     }
 
     private void emitLiteralExpression(BoundLiteralExpression node) {
+        if (node instanceof codeanalysis.binding.BoundUnitExpression) return;
         Object value = node.getValue();
         if (value == null) {
             _mv.visitInsn(ACONST_NULL);

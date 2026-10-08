@@ -251,6 +251,64 @@ class DogfoodRegressionTest {
         assertEquals("x 4 -1", interpret(source, "CatchParams"));
     }
 
+    // --- P12: a match whose value is discarded ---------------------------------
+
+    @Test
+    void aMatchStatementsArmsNeedNotAgreeOnAType() throws Exception {
+        String source = """
+                type Line = Num(int) | Word(string) | Blank | Note(string)
+                fn main() {
+                    imut lines = [Num(1), Blank, Word("a"), Note("n"), Num(2), Word("b")]
+                    mut total = 0
+                    mut words: string[] = []
+                    for line in lines {
+                        match line {
+                            Blank => {},
+                            Num(v) => { total = total + v },
+                            Word(w) => { push(words, w) },
+                            Note(n) => println("note " + n)
+                        }
+                    }
+                    println(toString(total) + " " + toString(words))
+                }
+                """;
+        assertEquals("note n\n3 [a, b]", run(source, "MatchStatementArms"));
+        assertEquals("note n\n3 [a, b]", interpret(source, "MatchStatementArms"));
+    }
+
+    @Test
+    void aMatchStatementMayDiscardValuesOfDifferentTypes() throws Exception {
+        String source = """
+                fn sideEffect(n: int) -> int { println("ran " + toString(n))
+                    n }
+                fn main() {
+                    imut k = 2
+                    match k {
+                        1 => "one",
+                        2 => sideEffect(2),
+                        _ => 3.5
+                    }
+                    println("done")
+                }
+                """;
+        assertEquals("ran 2\ndone", run(source, "MatchStatementValues"));
+        assertEquals("ran 2\ndone", interpret(source, "MatchStatementValues"));
+    }
+
+    @Test
+    void aMatchWhoseArmsDisagreeIsStillRejectedAsAReturnValue() {
+        String message = firstDiagnostic("""
+                fn pick(k: int) -> int {
+                    match k {
+                        1 => 1,
+                        _ => println("no")
+                    }
+                }
+                fn main() { println(toString(pick(1))) }
+                """);
+        assertEquals("All match arms must return the same type; cannot mix void and value arms", message);
+    }
+
     // --- P8: asking what kind of value an erased value is ---------------------
 
     @Test
@@ -304,6 +362,16 @@ class DogfoodRegressionTest {
     }
 
     // --- helpers -------------------------------------------------------------
+
+    private String firstDiagnostic(String source) {
+        SyntaxTree tree = SyntaxTree.parse(source);
+        if (tree.diagnostics().hasNext()) return tree.diagnostics().get(0).getMessage();
+        Compilation compilation = new Compilation(tree, new ModuleRegistry(), sourcePath("Diag"));
+        if (compilation.compile("Diag") != null) fail("expected the program to be rejected");
+        DiagnosticBox diagnostics = compilation.getGlobalScope().getDiagnostics();
+        if (!diagnostics.hasNext()) fail("expected a diagnostic");
+        return diagnostics.get(0).getMessage();
+    }
 
     /** An absolute path, so an import has a directory to resolve against. */
     private static String sourcePath(String name) {
