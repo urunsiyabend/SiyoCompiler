@@ -851,8 +851,12 @@ public class Binder {
         List<BoundStatement> elsePre = new ArrayList<>();
         BoundExpression elseExpr = bindBlockExpressionBody(ifs.getElseClause().getElseStatement(), elsePre);
 
-        Class<?> resultType = thenExpr.getClassType();
-        if (resultType == null || resultType == Object.class) resultType = elseExpr.getClassType();
+        // An arm that throws has no value, so the type comes from the other one.
+        boolean thenDiverges = diverges(thenPre, thenExpr);
+        Class<?> resultType = thenDiverges ? elseExpr.getClassType() : thenExpr.getClassType();
+        if ((resultType == null || resultType == Object.class) && !diverges(elsePre, elseExpr)) {
+            resultType = elseExpr.getClassType();
+        }
         if (resultType == null) resultType = Object.class;
 
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
@@ -910,7 +914,10 @@ public class Binder {
             }
 
             Class<?> bodyType = body.getClassType();
-            if (!resultTypeInitialized) {
+            if (diverges(preStatements, body)) {
+                // An arm that throws or returns never produces a value, so it
+                // takes no part in deciding what the match evaluates to.
+            } else if (!resultTypeInitialized) {
                 // null is a meaningful type here: every arm may be void.
                 resultType = bodyType;
                 resultTypeInitialized = true;
@@ -1005,6 +1012,21 @@ public class Binder {
         }
 
         return new BoundMatchExpression.BoundVariantPattern(union.getName(), variantName, bindings);
+    }
+
+    /**
+     * Whether a block-bodied arm leaves by throwing or returning rather than by
+     * producing a value. Such an arm's body is only the placeholder that
+     * {@link #bindBlockExpressionBody} puts after the last statement.
+     *
+     * <p>Without this {@code Bad(why) => { throw why }} was typed as the
+     * placeholder's int and rejected beside a struct arm, and an if expression
+     * whose first arm threw took the placeholder's type and failed verification.
+     */
+    private static boolean diverges(List<BoundStatement> preStatements, BoundExpression body) {
+        if (preStatements.isEmpty() || !(body instanceof BoundLiteralExpression)) return false;
+        BoundStatement last = preStatements.get(preStatements.size() - 1);
+        return last instanceof BoundThrowStatement || last instanceof BoundReturnStatement;
     }
 
     private BoundExpression bindBlockExpressionBody(StatementSyntax block, List<BoundStatement> preStatements) {

@@ -142,6 +142,50 @@ class DogfoodRegressionTest {
         assertEquals("a\nb", interpret(source, "TripleQuoteBlock"));
     }
 
+    // --- P6: an arm that throws has no type of its own ------------------------
+
+    @Test
+    void aMatchArmThatThrowsSitsBesideValueArms() throws Exception {
+        String source = """
+                struct Opts { name: string }
+                type Parsed = Ok(Opts) | Bad(string)
+                fn unwrap(p: Parsed) -> Opts {
+                    match p {
+                        Ok(o) => o,
+                        Bad(why) => { throw "bad: " + why }
+                    }
+                }
+                fn main() {
+                    println(unwrap(Ok(Opts { name: "x" })).name)
+                    try { unwrap(Bad("nope")) } catch e { println(e) }
+                }
+                """;
+        assertEquals("x\nbad: nope", run(source, "MatchArmThrows"));
+        assertEquals("x\nbad: nope", interpret(source, "MatchArmThrows"));
+    }
+
+    @Test
+    void anIfExpressionTakesItsTypeFromTheArmThatDoesNotThrow() throws Exception {
+        String source = """
+                fn half(n: int) -> int {
+                    imut h = if n % 2 == 0 { n / 2 } else { throw "odd" }
+                    h + 0
+                }
+                fn label(n: int) -> string {
+                    imut s = if n < 0 { throw "negative" } else { "n=" + toString(n) }
+                    s
+                }
+                fn main() {
+                    println(toString(half(8)))
+                    println(label(3))
+                    try { half(3) } catch e { println(e) }
+                    try { label(-1) } catch e { println(e) }
+                }
+                """;
+        assertEquals("4\nn=3\nodd\nnegative", run(source, "IfArmThrows"));
+        assertEquals("4\nn=3\nodd\nnegative", interpret(source, "IfArmThrows"));
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private String interpret(String source, String name) throws Exception {
