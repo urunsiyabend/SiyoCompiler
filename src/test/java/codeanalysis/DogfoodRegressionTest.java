@@ -407,6 +407,56 @@ class DogfoodRegressionTest {
         }
     }
 
+    // --- P19: a field a struct does not have ----------------------------------
+
+    @Test
+    void readingAFieldAStructDoesNotHaveIsRejected() {
+        assertEquals("Struct 'P' has no field 'nope'", firstDiagnostic("""
+                struct P { x: int }
+                fn main() {
+                    imut p = P { x: 1 }
+                    println(toString(p.nope))
+                }
+                """));
+    }
+
+    @Test
+    void writingAFieldAStructDoesNotHaveIsRejected() {
+        assertEquals("Struct 'P' has no field 'nope'", firstDiagnostic("""
+                struct P { x: int }
+                fn main() {
+                    mut p = P { x: 1 }
+                    p.nope = 2
+                }
+                """));
+    }
+
+    @Test
+    void aStructLiteralWithAFieldTheStructDoesNotHaveIsRejected() {
+        assertEquals("Struct 'P' has no field 'y'", firstDiagnostic("""
+                struct P { x: int }
+                fn main() { println(toString(P { x: 1, y: 2 }.x)) }
+                """));
+    }
+
+    @Test
+    void knownFieldsStillWorkThroughAnInterface() throws Exception {
+        String source = """
+                interface Named { fn name() -> string }
+                struct Dog { label: string }
+                impl Named for Dog { fn name(self) -> string { self.label } }
+                fn main() {
+                    imut xs: Array<Named> = [Dog { label: "rex" }]
+                    for x in xs { println(x.name()) }
+                    mut d = Dog { label: "a" }
+                    d.label = "b"
+                    println(d.label)
+                }
+                """;
+        assertEquals("rex\nb", run(source, "FieldsViaInterface"));
+        assertEquals("rex\nb", interpret(source, "FieldsViaInterface"));
+    }
+
     // --- P8: asking what kind of value an erased value is ---------------------
 
     @Test

@@ -2167,6 +2167,10 @@ public class Binder {
             }
         }
 
+        if (structType != null && !structType.hasField(memberName)) {
+            reportNoSuchField(syntax.getMember().getSpan(), structType, memberName);
+            return new BoundLiteralExpression(0);
+        }
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
             // If field is typed "object" but the type name is a known struct/actor, upgrade to SiyoStruct
@@ -2193,11 +2197,25 @@ public class Binder {
         if (syntax.getTarget() instanceof MemberAccessExpressionSyntax memberSyntax) {
             BoundExpression target = bindExpression(memberSyntax.getTarget());
             String memberName = memberSyntax.getMember().getData();
+            StructSymbol structType = target.getClassType() == SiyoStruct.class
+                    ? _typeResolver.resolveStructType(target) : null;
+            if (structType != null && !structType.hasField(memberName)) {
+                reportNoSuchField(memberSyntax.getMember().getSpan(), structType, memberName);
+            }
             return new BoundMemberAssignmentExpression(target, memberName, value);
         }
 
         _diagnostics.reportCannotAssign(syntax.getEqualsToken().getSpan(), "expression");
         return value;
+    }
+
+    /**
+     * A field the struct does not declare. Reading one used to give null and
+     * writing one added it silently, on both backends, so a misspelt field
+     * name became a wrong value at run time instead of an error.
+     */
+    private void reportNoSuchField(codeanalysis.text.TextSpan span, StructSymbol structType, String fieldName) {
+        _diagnostics.reportError(span, "Struct '" + structType.getName() + "' has no field '" + fieldName + "'");
     }
 
     private BoundExpression bindStructLiteralExpression(StructLiteralExpressionSyntax syntax) {
@@ -2214,6 +2232,9 @@ public class Binder {
             FieldAssignmentSyntax field = (FieldAssignmentSyntax) node;
             String fieldName = field.getFieldName().getData();
             BoundExpression fieldValue = bindExpression(field.getValue());
+            if (!structType.hasField(fieldName)) {
+                reportNoSuchField(field.getFieldName().getSpan(), structType, fieldName);
+            }
             fieldValues.put(fieldName, fieldValue);
         }
 
