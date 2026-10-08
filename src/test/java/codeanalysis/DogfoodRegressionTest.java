@@ -109,6 +109,39 @@ class DogfoodRegressionTest {
         assertEquals("2", interpret(source, "NestedMap"));
     }
 
+    // --- P5: a triple-quoted string that starts on its opening line -----------
+
+    @Test
+    void aTripleQuotedStringMayStartOnTheOpeningLine() throws Exception {
+        String source = """
+                fn usage() -> string {
+                    \"""usage: tool <file>
+
+                  --flag  does "things" here\"""
+                }
+                fn main() {
+                    println(usage())
+                    println(\"""one line\""")
+                }
+                """;
+        String expected = "usage: tool <file>\n\n  --flag  does \"things\" here\none line";
+        assertEquals(expected, run(source, "TripleQuoteInline"));
+        assertEquals(expected, interpret(source, "TripleQuoteInline"));
+    }
+
+    @Test
+    void aTripleQuotedStringOnItsOwnLineStillDropsTheLeadingNewline() throws Exception {
+        String source = """
+                fn main() {
+                    println(\"""
+                a
+                b\""")
+                }
+                """;
+        assertEquals("a\nb", run(source, "TripleQuoteBlock"));
+        assertEquals("a\nb", interpret(source, "TripleQuoteBlock"));
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private String interpret(String source, String name) throws Exception {

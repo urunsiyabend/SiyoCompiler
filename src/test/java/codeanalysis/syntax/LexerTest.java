@@ -193,6 +193,10 @@ class LexerTest {
         if (t1Type == SyntaxType.IdentifierToken && t2Type == SyntaxType.NumberToken)
             return true;
 
+        // "" written against a string is """, which opens a triple-quoted string.
+        if (t1Type == SyntaxType.StringToken && t2Type == SyntaxType.StringToken)
+            return true;
+
         if (t1IsKeyword && t2Type == SyntaxType.NumberToken)
             return true;
 
