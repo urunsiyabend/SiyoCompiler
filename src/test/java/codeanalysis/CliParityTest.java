@@ -87,6 +87,27 @@ class CliParityTest {
     }
 
     @Test
+    void aModuleCallsIntoItsOwnImportWhenInterpreted() throws Exception {
+        Files.writeString(tempDir.resolve("base.siyo"), """
+                pub fn twice(n: int) -> int { n * 2 }
+                """);
+        Files.writeString(tempDir.resolve("mid.siyo"), """
+                import "base"
+                import "base" as b
+                pub fn quad(n: int) -> int { base.twice(b.twice(n)) }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "mid"
+                fn main() { println(toString(mid.quad(3))) }
+                """);
+        Result compiled = siyoc("run", main.toString());
+        assertEquals("12", compiled.stdout, compiled.stderr);
+        Result interpreted = siyoc("interpret", main.toString());
+        assertEquals("12", interpreted.stdout, interpreted.stderr);
+    }
+
+    @Test
     void aFailingTestSuiteExitsNonZero() throws Exception {
         Files.createDirectories(tempDir.resolve("tests"));
         Files.writeString(tempDir.resolve("tests/a_test.siyo"), """

@@ -141,6 +141,33 @@ public class Evaluator {
         _moduleVariables = moduleVariables;
     }
 
+    /**
+     * Module function bodies keyed by {@code OwnerClass#name/arity}.
+     *
+     * <p>A module that imports another reaches its functions through copies
+     * named for the qualifier it wrote ({@code b.twice}), which carry the
+     * owning class and the owner's own name — what a compiled call is made
+     * with. Only the entry file's copies have bodies here, so a call a module
+     * makes into its own import was not found interpreted.
+     */
+    private Map<String, BoundBlockStatement> _moduleFunctions = java.util.Collections.emptyMap();
+
+    public void setModuleFunctions(Map<String, BoundBlockStatement> moduleFunctions) {
+        _moduleFunctions = moduleFunctions;
+    }
+
+    /** The key a module function is found under; see {@link #setModuleFunctions}. */
+    public static String moduleFunctionKey(String ownerClass, String name, int arity) {
+        return ownerClass + "#" + name + "/" + arity;
+    }
+
+    private BoundBlockStatement bodyOf(FunctionSymbol function) {
+        BoundBlockStatement body = _functions.get(function);
+        if (body != null || function.getModuleName() == null || function.getJvmMethodName() == null) return body;
+        return _moduleFunctions.get(moduleFunctionKey(function.getModuleName(),
+                function.getJvmMethodName(), function.getParameters().size()));
+    }
+
     private VariableSymbol canonical(VariableSymbol variable) {
         if (variable.getOwnerClass() == null) return variable;
         VariableSymbol own = _moduleVariables.get(variable.getOwnerClass() + "." + variable.getFieldName());
@@ -538,7 +565,7 @@ public class Evaluator {
         }
 
         // Get the function body
-        BoundBlockStatement body = _functions.get(function);
+        BoundBlockStatement body = bodyOf(function);
         if (body == null) {
             throw new Exception("Function body not found: " + function.getName());
         }
@@ -554,13 +581,16 @@ public class Evaluator {
 
         // Push frame and execute
         _callStack.push(frame);
-        _returnTriggered = false;
-        _returnValue = null;
+        try {
+            _returnTriggered = false;
+            _returnValue = null;
 
-        evaluateBlock(body);
-
-        // Pop frame
-        _callStack.pop();
+            evaluateBlock(body);
+        } finally {
+            // An exception unwinding through this call takes its frame with it;
+            // otherwise the catching caller read its locals from this frame.
+            _callStack.pop();
+        }
 
         // Return the result (explicit return or implicit last expression value)
         Object result = _returnTriggered ? _returnValue : _lastValue;
@@ -727,8 +757,11 @@ public class Evaluator {
 
         // Execute
         _callStack.push(frame);
-        evaluateBlock(closure.getBody());
-        _callStack.pop();
+        try {
+            evaluateBlock(closure.getBody());
+        } finally {
+            _callStack.pop();
+        }
 
         Object result = _returnTriggered ? _returnValue : _lastValue;
         _returnTriggered = false;
@@ -757,8 +790,11 @@ public class Evaluator {
         }
 
         _callStack.push(frame);
-        evaluateBlock(closure.getBody());
-        _callStack.pop();
+        try {
+            evaluateBlock(closure.getBody());
+        } finally {
+            _callStack.pop();
+        }
 
         Object result = _returnTriggered ? _returnValue : _lastValue;
         _returnTriggered = false;
@@ -942,6 +978,7 @@ public class Evaluator {
                         java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                 Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
                 taskEval.setModuleVariables(_moduleVariables);
+                taskEval.setModuleFunctions(_moduleFunctions);
 
                 // Inject captured variables (immutable values + channels)
                 StackFrame frame = new StackFrame(null);
@@ -949,8 +986,11 @@ public class Evaluator {
                     frame.getLocals().put(entry.getKey(), entry.getValue());
                 }
                 taskEval._callStack.push(frame);
-                taskEval.evaluateBlock(body);
-                taskEval._callStack.pop();
+                try {
+                    taskEval.evaluateBlock(body);
+                } finally {
+                    taskEval._callStack.pop();
+                }
             } catch (Exception e) {
                 _scopeErrors.add(e);
             }
@@ -1003,6 +1043,7 @@ public class Evaluator {
                             java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                     Evaluator actorEval = new Evaluator(body, isolatedGlobals, _functions);
                     actorEval.setModuleVariables(_moduleVariables);
+                    actorEval.setModuleFunctions(_moduleFunctions);
                     StackFrame frame = new StackFrame(func);
 
                     // Bind self (first param) to actor state
@@ -1013,9 +1054,12 @@ public class Evaluator {
                     }
 
                     actorEval._callStack.push(frame);
-                    actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
-                    actorEval.evaluateBlock(body);
-                    actorEval._callStack.pop();
+                    try {
+                        actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
+                        actorEval.evaluateBlock(body);
+                    } finally {
+                        actorEval._callStack.pop();
+                    }
 
                     Object result = actorEval._returnTriggered ? actorEval._returnValue : actorEval._lastValue;
                     actorEval._returnTriggered = false;
@@ -1335,9 +1379,12 @@ public class Evaluator {
                     frame.getLocals().put(comparator.getParameters().get(0), a);
                     frame.getLocals().put(comparator.getParameters().get(1), b);
                     _callStack.push(frame);
-                    _returnTriggered = false;
-                    evaluateBlock(comparator.getBody());
-                    _callStack.pop();
+                    try {
+                        _returnTriggered = false;
+                        evaluateBlock(comparator.getBody());
+                    } finally {
+                        _callStack.pop();
+                    }
                     Object result = _returnTriggered ? _returnValue : _lastValue;
                     _returnTriggered = false;
                     _returnValue = null;

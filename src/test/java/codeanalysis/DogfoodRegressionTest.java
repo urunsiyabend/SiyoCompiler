@@ -213,6 +213,44 @@ class DogfoodRegressionTest {
         assertEquals("6\n3", interpret(source, "LoopInArm"));
     }
 
+    // --- P11: a caught exception unwinds the frames it passed through ----------
+
+    @Test
+    void aLoopKeepsGoingAfterCatchingAnExceptionFromACall() throws Exception {
+        String source = """
+                fn deep(k: int) -> int {
+                    imut z = k
+                    throw "deep " + toString(z)
+                }
+                fn runAll(names: string[]) -> int {
+                    mut failed = 0
+                    for mut i = 0 i < len(names) i = i + 1 {
+                        try { deep(i) } catch e { failed += 1 }
+                    }
+                    failed
+                }
+                fn main() {
+                    println("failed " + toString(runAll(["a", "b", "c"])))
+                }
+                """;
+        assertEquals("failed 3", run(source, "CatchInLoop"));
+        assertEquals("failed 3", interpret(source, "CatchInLoop"));
+    }
+
+    @Test
+    void aCallerReadsItsOwnParametersAfterCatching() throws Exception {
+        String source = """
+                fn fail(n: int) -> int { throw "no" }
+                fn guarded(label: string, n: int) -> string {
+                    imut r = try { fail(n) } catch e { -1 }
+                    label + " " + toString(n) + " " + toString(r)
+                }
+                fn main() { println(guarded("x", 4)) }
+                """;
+        assertEquals("x 4 -1", run(source, "CatchParams"));
+        assertEquals("x 4 -1", interpret(source, "CatchParams"));
+    }
+
     // --- P8: asking what kind of value an erased value is ---------------------
 
     @Test

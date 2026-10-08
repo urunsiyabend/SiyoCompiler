@@ -107,10 +107,18 @@ public class Compilation {
         FunctionSymbol init = _filePath != null ? findEntryPoint(functions, "init") : null;
         FunctionSymbol main = _filePath != null ? findEntryPoint(functions, "main") : null;
         // Every module's functions are callable, including a transitive
-        // import's init() that this file never names.
+        // import's init() that this file never names, and are also found by
+        // owner so a module's call into its own import resolves.
+        Map<String, BoundBlockStatement> moduleFunctions = new HashMap<>();
         for (ModuleSymbol module : getRegistry().getAllModules()) {
             for (var entry : module.getFunctionBodies().entrySet()) {
-                functions.computeIfAbsent(entry.getKey(), k -> Lowerer.lower(entry.getValue()));
+                FunctionSymbol function = entry.getKey();
+                BoundBlockStatement lowered = functions.computeIfAbsent(function, k -> Lowerer.lower(entry.getValue()));
+                String ownName = function.getJvmMethodName() != null
+                        ? function.getJvmMethodName()
+                        : function.getName().replace('.', '$');
+                moduleFunctions.putIfAbsent(Evaluator.moduleFunctionKey(module.getClassName(), ownName,
+                        function.getParameters().size()), lowered);
             }
         }
         Map<String, VariableSymbol> moduleVariables = new HashMap<>();
@@ -121,6 +129,7 @@ public class Compilation {
         }
         Evaluator evaluator = new Evaluator(statement, variables, functions);
         evaluator.setModuleVariables(moduleVariables);
+        evaluator.setModuleFunctions(moduleFunctions);
         for (var entry : getGlobalScope().getStructTypes().entrySet()) {
             if (entry.getValue().isActor()) {
                 evaluator.registerActorType(entry.getKey());
@@ -130,7 +139,7 @@ public class Compilation {
         // importers — the order the bytecode backend's class initialisers run
         // in. Without this every module-level variable read as null.
         for (ModuleSymbol module : getRegistry().getAllModules()) {
-            initialiseModule(module, variables, functions, moduleVariables);
+            initialiseModule(module, variables, functions, moduleVariables, moduleFunctions);
         }
         Object value = evaluator.evaluate();
 
@@ -153,11 +162,13 @@ public class Compilation {
      */
     private static void initialiseModule(ModuleSymbol module, Map<VariableSymbol, Object> variables,
                                          Map<FunctionSymbol, BoundBlockStatement> functions,
-                                         Map<String, VariableSymbol> moduleVariables) throws Exception {
+                                         Map<String, VariableSymbol> moduleVariables,
+                                         Map<String, BoundBlockStatement> moduleFunctions) throws Exception {
         Evaluator evaluator = module.getTopLevelBlock() != null
                 ? new Evaluator(Lowerer.lower(module.getTopLevelBlock()), variables, functions)
                 : new Evaluator(new BoundBlockStatement(new java.util.ArrayList<>()), variables, functions);
         evaluator.setModuleVariables(moduleVariables);
+        evaluator.setModuleFunctions(moduleFunctions);
         evaluator.evaluate();
         FunctionSymbol init = module.initFunction();
         if (init != null) evaluator.invokeFunction(init, new Object[0]);
