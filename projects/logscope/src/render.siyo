@@ -94,7 +94,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; }
 </head>
 <body>
 """
-    out = out + "<h1>logscope: " + html.escape(file) + "</h1>\n"
+    out = out + "\n<h1>logscope: " + html.escape(file) + "</h1>\n"
     out = out + "<p>" + toString(s.total) + " records read, " + toString(s.matched) + " matched, "
         + toString(s.invalid) + " invalid.</p>\n"
     out = out + "<h2>By level</h2>\n<table>\n<tr><th>level</th><th>count</th></tr>\n" + countRows(s.byLevel) + "</table>\n"

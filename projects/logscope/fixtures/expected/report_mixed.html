@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>logscope: fixtures/mixed.jsonl</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1f2328; }
+table { border-collapse: collapse; margin-bottom: 1.5rem; }
+th, td { border: 1px solid #d0d7de; padding: 0.3rem 0.6rem; text-align: left; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.error { color: #b42318; }
+</style>
+</head>
+<body>
+<h1>logscope: fixtures/mixed.jsonl</h1>
+<p>10 records read, 5 matched, 5 invalid.</p>
+<h2>By level</h2>
+<table>
+<tr><th>level</th><th>count</th></tr>
+<tr><td>error</td><td class="n">3</td></tr>
+<tr><td>warn</td><td class="n">1</td></tr>
+<tr><td>info</td><td class="n">1</td></tr>
+</table>
+<h2>By service</h2>
+<table>
+<tr><th>service</th><th>count</th></tr>
+<tr><td>auth</td><td class="n">4</td></tr>
+<tr><td>billing</td><td class="n">1</td></tr>
+</table>
+<h2>Error groups</h2>
+<table>
+<tr><th>count</th><th>message</th><th>services</th><th>first</th><th>last</th></tr>
+<tr><td class="n">2</td><td class="error">bad token &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</td><td>auth</td><td>2026-03-02T08:00:03Z</td><td>2026-03-02T08:00:12Z</td></tr>
+<tr><td class="n">1</td><td class="error">card declined</td><td>billing</td><td>2026-03-02T08:00:13Z</td><td>2026-03-02T08:00:13Z</td></tr>
+</table>
+<h2>Invalid lines</h2>
+<table>
+<tr><th>line</th><th>reason</th></tr>
+<tr><td class="n">4</td><td>json: expected an object at position 0 ('t')</td></tr>
+<tr><td class="n">5</td><td>json: expected an object at position 0 ('[')</td></tr>
+<tr><td class="n">6</td><td>missing &quot;level&quot;</td></tr>
+<tr><td class="n">8</td><td>&quot;level&quot; is not a string</td></tr>
+<tr><td class="n">11</td><td>json: expected ':' after a key at position 38 (end of input)</td></tr>
+</table>
+</body>
+</html>

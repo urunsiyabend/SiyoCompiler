@@ -1,0 +1,3 @@
+{"ts":"2026-03-01T10:02:40Z","level":"error","service":"api","msg":"database timeout","ms":5000}
+{"ts":"2026-03-01T10:02:41Z","level":"error","service":"worker","msg":"database timeout","ms":5000}
+{"ts":"2026-03-01T10:05:00Z","level":"error","service":"api","msg":"database timeout","ms":5000}

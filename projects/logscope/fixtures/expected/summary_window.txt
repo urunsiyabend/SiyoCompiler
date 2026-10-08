@@ -1,0 +1,21 @@
+logscope summary: fixtures/app.jsonl
+records: 14 read, 5 matched, 0 invalid
+
+by level:
+  fatal  1
+  error  2
+  warn   1
+  info   1
+
+by service:
+  api     1
+  web     2
+  worker  2
+
+error groups:
+  1x  database timeout
+      services: api  first: 2026-03-01T10:05:00Z  last: 2026-03-01T10:05:00Z
+  1x  out of memory
+      services: worker  first: 2026-03-01T10:07:45Z  last: 2026-03-01T10:07:45Z
+  1x  template missing: orders.html
+      services: web  first: 2026-03-01T10:04:22Z  last: 2026-03-01T10:04:22Z
