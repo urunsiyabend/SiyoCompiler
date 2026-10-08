@@ -2419,8 +2419,12 @@ public class Binder {
         _scope = outerScope;
         _moduleHandler.setScope(_scope);
 
+        // A lambda returns the value of its body exactly as a named function
+        // does. Without this a tail if/else was left a statement: the
+        // interpreter still took its value, the emitter returned the default.
         // Lower the body
-        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(blockBody);
+        BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(
+                applyImplicitReturn(blockBody, returnType));
 
         return new BoundLambdaExpression(parameters, loweredBody, returnType, captured);
     }
