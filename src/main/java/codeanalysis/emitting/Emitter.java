@@ -2342,6 +2342,12 @@ public class Emitter {
                     "(Ljava/lang/Object;)Lcodeanalysis/SiyoMap;", false);
             return;
         }
+        if (function == BuiltinFunctions.TYPE_OF) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "typeOf",
+                    "(Ljava/lang/Object;)Ljava/lang/String;", false);
+            return;
+        }
         if (function == BuiltinFunctions.TYPE_NAME) {
             emitCoerceArg(node.getArguments().get(0), Object.class);
             _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "typeNameOf",

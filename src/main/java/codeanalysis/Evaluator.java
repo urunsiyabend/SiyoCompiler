@@ -863,27 +863,36 @@ public class Evaluator {
                 for (int i = 0; i < bindings.size(); i++) {
                     if (bindings.get(i) != null) assignVariable(bindings.get(i), union.get(i));
                 }
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
             }
             if (arm.isDefault()) {
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 defaultResult = evaluateExpression(arm.body());
                 continue;
             }
             Object pattern = evaluateExpression(arm.pattern());
             if (java.util.Objects.equals(target, pattern)) {
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
             }
         }
         return defaultResult;
+    }
+
+    /**
+     * Arm pre-statements, lowered once per arm. The binder leaves a block
+     * arm's statements structured — the emitter lowers them as it emits — so
+     * a loop inside an arm reached the interpreter un-lowered and failed.
+     */
+    private final Map<java.util.List<BoundStatement>, BoundBlockStatement> _loweredArms =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    private void evaluatePreStatements(java.util.List<BoundStatement> preStatements) throws Exception {
+        if (preStatements.isEmpty()) return;
+        BoundBlockStatement lowered = _loweredArms.computeIfAbsent(preStatements,
+                pre -> codeanalysis.lowering.Lowerer.lower(new BoundBlockStatement(new java.util.ArrayList<>(pre))));
+        evaluateBlock(lowered);
     }
 
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
@@ -1187,6 +1196,9 @@ public class Evaluator {
         }
         if (function == BuiltinFunctions.TO_MAP) {
             return SiyoRuntime.structToMap(arguments[0]);
+        }
+        if (function == BuiltinFunctions.TYPE_OF) {
+            return SiyoRuntime.typeOf(arguments[0]);
         }
         if (function == BuiltinFunctions.TYPE_NAME) {
             return SiyoRuntime.typeNameOf(arguments[0]);

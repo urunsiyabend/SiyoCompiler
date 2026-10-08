@@ -186,7 +186,91 @@ class DogfoodRegressionTest {
         assertEquals("4\nn=3\nodd\nnegative", interpret(source, "IfArmThrows"));
     }
 
+    // --- P9: a loop inside a block-bodied arm ----------------------------------
+
+    @Test
+    void aLoopInsideAMatchOrIfArmRunsInterpreted() throws Exception {
+        String source = """
+                fn main() {
+                    imut n = 2
+                    match n {
+                        2 => {
+                            mut out = 0
+                            for k in [1, 2, 3] { out = out + k }
+                            println(toString(out))
+                        },
+                        _ => println("other")
+                    }
+                    imut s = if n > 1 {
+                        mut t = 0
+                        while t < 3 { t = t + 1 }
+                        t
+                    } else { 0 }
+                    println(toString(s))
+                }
+                """;
+        assertEquals("6\n3", run(source, "LoopInArm"));
+        assertEquals("6\n3", interpret(source, "LoopInArm"));
+    }
+
+    // --- P8: asking what kind of value an erased value is ---------------------
+
+    @Test
+    void typeOfNamesEveryKindOfValue() throws Exception {
+        String source = """
+                struct Point { x: int }
+                type Shape = Circle(int) | Dot
+                fn main() {
+                    mut values: object[] = []
+                    push(values, 1)
+                    push(values, 9000000000L)
+                    push(values, 1.5)
+                    push(values, true)
+                    push(values, "s")
+                    push(values, [1])
+                    push(values, {"k": 1})
+                    push(values, #{1})
+                    push(values, Point { x: 1 })
+                    push(values, Circle(2))
+                    push(values, Dot)
+                    push(values, fn(a: int) -> int { a })
+                    push(values, null)
+                    mut out = ""
+                    for v in values { out = out + typeOf(v) + " " }
+                    println(trim(out))
+                }
+                """;
+        String expected = "int long float bool string array map set Point Shape Shape fn null";
+        assertEquals(expected, run(source, "TypeOfKinds"));
+        assertEquals(expected, interpret(source, "TypeOfKinds"));
+    }
+
+    @Test
+    void typeOfTellsJsonFieldsApart() throws Exception {
+        String source = """
+                import "std/json"
+                fn main() {
+                    match json.parse("{\\"a\\":\\"x\\",\\"b\\":2,\\"c\\":2.5,\\"d\\":false,\\"e\\":null,\\"f\\":[1],\\"g\\":{}}") {
+                        Parsed(m) => {
+                            mut out = ""
+                            for k in ["a", "b", "c", "d", "e", "f", "g", "missing"] { out = out + typeOf(m[k]) + " " }
+                            println(trim(out))
+                        },
+                        Invalid(why) => println(why)
+                    }
+                }
+                """;
+        String expected = "string int float bool null array map null";
+        assertEquals(expected, run(source, "TypeOfJson"));
+        assertEquals(expected, interpret(source, "TypeOfJson"));
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /** An absolute path, so an import has a directory to resolve against. */
+    private static String sourcePath(String name) {
+        return java.nio.file.Path.of(name + ".siyo").toAbsolutePath().toString();
+    }
 
     private String interpret(String source, String name) throws Exception {
         PrintStream oldOut = System.out;
@@ -194,7 +278,7 @@ class DogfoodRegressionTest {
         System.setOut(new PrintStream(output));
         try {
             Compilation compilation = new Compilation(
-                    SyntaxTree.parse(source), new ModuleRegistry(), name + ".siyo");
+                    SyntaxTree.parse(source), new ModuleRegistry(), sourcePath(name));
             EvaluationResult result = compilation.evaluate(new HashMap<>());
             if (result.diagnostics().hasNext()) {
                 fail("Interpreter diagnostics: " + result.diagnostics().get(0).getMessage());
@@ -207,7 +291,8 @@ class DogfoodRegressionTest {
 
     private String run(String source, String className) throws Exception {
         SyntaxTree tree = SyntaxTree.parse(source);
-        Compilation compilation = new Compilation(tree, new ModuleRegistry(), className + ".siyo");
+        ModuleRegistry registry = new ModuleRegistry();
+        Compilation compilation = new Compilation(tree, registry, sourcePath(className));
         byte[] bytes = compilation.compile(className);
         if (bytes == null) {
             String message = compilation.getGlobalScope().getDiagnostics().hasNext()
@@ -223,6 +308,11 @@ class DogfoodRegressionTest {
             @Override
             protected Class<?> findClass(String name) throws ClassNotFoundException {
                 if (name.equals(className)) return defineClass(name, bytes, 0, bytes.length);
+                for (ModuleSymbol module : registry.getAllModules()) {
+                    if (!name.equals(module.getClassName())) continue;
+                    byte[] moduleBytes = Compilation.emitModule(module);
+                    return defineClass(name, moduleBytes, 0, moduleBytes.length);
+                }
                 return super.findClass(name);
             }
         };

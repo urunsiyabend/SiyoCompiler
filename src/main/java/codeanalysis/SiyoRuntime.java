@@ -353,6 +353,35 @@ public class SiyoRuntime {
         return name == null ? "" : name;
     }
 
+    /**
+     * What kind of value something is, named the way a Siyo program writes
+     * the type. An erased value — a JSON field, an object[] element — could
+     * otherwise only be told apart by how it printed.
+     *
+     * @param value The value.
+     * @return Its type name.
+     */
+    public static String typeOf(Object value) {
+        if (value == null) return "null";
+        String struct = structNameOf(value);
+        if (struct != null) return struct;
+        if (value instanceof SiyoUnion union) return union.getTypeName();
+        if (value instanceof Integer) return "int";
+        if (value instanceof Long) return "long";
+        if (value instanceof Double) return "float";
+        if (value instanceof Boolean) return "bool";
+        if (value instanceof String) return "string";
+        if (value instanceof SiyoArray) return "array";
+        if (value instanceof SiyoMap) return "map";
+        if (value instanceof SiyoSet) return "set";
+        if (value instanceof SiyoChannel) return "channel";
+        // A closure is a SiyoClosure interpreted and an Object[]{id, captured} compiled.
+        if (value instanceof SiyoClosure) return "fn";
+        if (value instanceof Object[] closure && closure.length >= 2
+                && closure[0] instanceof Integer && closure[1] instanceof Object[]) return "fn";
+        return value.getClass().getSimpleName();
+    }
+
     /** The field map behind a struct, whichever backend built it. */
     private static java.util.Map<String, Object> fieldMapOf(Object value) {
         if (value instanceof SiyoStruct struct) return struct.getFieldsMap();
