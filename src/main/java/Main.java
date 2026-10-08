@@ -155,8 +155,24 @@ public class Main {
             System.exit(1);
         }
 
+        _runningSuite = true;
         for (java.nio.file.Path p : discovered) {
             compileAndRun(p.toString());
+        }
+        exitIfTestsFailed();
+    }
+
+    /** True while siyoc test runs several files, which are judged together at the end. */
+    private static boolean _runningSuite = false;
+
+    /**
+     * Ends the process with status 1 when std/testing recorded a failure. A
+     * suite that printed FAIL used to exit 0, so CI could not see it.
+     */
+    private static void exitIfTestsFailed() {
+        if (codeanalysis.SiyoRuntime.testFailures() > 0) {
+            System.out.flush();
+            System.exit(1);
         }
     }
 
@@ -260,6 +276,7 @@ public class Main {
             Thread.currentThread().setContextClassLoader(loader);
             Class<?> cls = loader.loadClass(className);
             cls.getMethod("main", String[].class).invoke(null, (Object) _programArgs);
+            if (!_runningSuite) exitIfTestsFailed();
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
                 e.getCause().printStackTrace(System.err);
@@ -379,6 +396,7 @@ public class Main {
             if (result.getValue() != null) {
                 System.out.println(result.getValue());
             }
+            exitIfTestsFailed();
         } catch (Exception e) {
             e.printStackTrace(System.err);
             System.err.flush();

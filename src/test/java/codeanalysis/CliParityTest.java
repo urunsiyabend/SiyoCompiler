@@ -86,6 +86,42 @@ class CliParityTest {
         assertEquals(expected, interpreted.stdout, interpreted.stderr);
     }
 
+    @Test
+    void aFailingTestSuiteExitsNonZero() throws Exception {
+        Files.createDirectories(tempDir.resolve("tests"));
+        Files.writeString(tempDir.resolve("tests/a_test.siyo"), """
+                import "std/testing"
+                fn fails() { testing.assertEq("1", "2", "one is two") }
+                fn main() { testing.run("a", [fails]) }
+                """);
+        Files.writeString(tempDir.resolve("tests/b_test.siyo"), """
+                import "std/testing"
+                fn passes() { testing.assertEq("1", "1", "one is one") }
+                fn main() { testing.run("b", [passes]) }
+                """);
+        Result suite = siyoc(tempDir, "test");
+        assertEquals(1, suite.exitCode, suite.stdout);
+        // Every file still runs: the failure in a_test does not hide b_test.
+        assertEquals(true, suite.stdout.contains("=== b ==="), suite.stdout);
+        String failing = tempDir.resolve("tests/a_test.siyo").toString();
+        assertEquals(1, siyoc("run", failing).exitCode);
+        assertEquals(1, siyoc("interpret", failing).exitCode);
+        String passing = tempDir.resolve("tests/b_test.siyo").toString();
+        assertEquals(0, siyoc("run", passing).exitCode);
+        assertEquals(0, siyoc("interpret", passing).exitCode);
+    }
+
+    @Test
+    void aFailingTestCaseExitsNonZero() throws Exception {
+        Path file = tempDir.resolve("one_test.siyo");
+        Files.writeString(file, """
+                import "std/testing"
+                fn main() { testing.test("no", fn() -> bool { false }) }
+                """);
+        assertEquals(1, siyoc("run", file.toString()).exitCode);
+        assertEquals(1, siyoc("interpret", file.toString()).exitCode);
+    }
+
     record Result(int exitCode, String stdout, String stderr) {}
 
     /** Runs {@code Main} in a fresh JVM, so {@code System.exit} ends only that process. */

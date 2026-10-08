@@ -20,6 +20,22 @@ public class SiyoRuntime {
         return new SiyoArray(list, String.class);
     }
 
+    /**
+     * Test cases std/testing has seen fail in this process. The CLI exits
+     * non-zero when any did, so a failing suite fails the command that ran it.
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger testFailures =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Records failed test cases; called by std/testing. */
+    public static void recordTestFailures(int count) {
+        if (count > 0) testFailures.addAndGet(count);
+    }
+
+    /** How many test cases have failed in this process. */
+    public static int testFailures() {
+        return testFailures.get();
+    }
 
     /**
      * Sorts a list using a Siyo closure as comparator.
