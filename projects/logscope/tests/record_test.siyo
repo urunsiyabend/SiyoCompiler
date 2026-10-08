@@ -1,0 +1,79 @@
+import "std/testing"
+import "record"
+
+fn rec(text: string) -> LogRecord {
+    match record.parseLine(7, text) {
+        Rec(r) => r,
+        Bad(n, why) => { throw "unexpected bad line: " + why },
+        Blank => { throw "unexpected blank line" }
+    }
+}
+
+fn badReason(text: string) -> string {
+    match record.parseLine(3, text) {
+        Rec(r) => "",
+        Bad(n, why) => toString(n) + ": " + why,
+        Blank => "blank"
+    }
+}
+
+fn parsesAWellFormedLine() {
+    imut r = rec("{\"ts\":\"2026-03-01T10:00:00Z\",\"level\":\"error\",\"service\":\"api\",\"msg\":\"db timeout\",\"ms\":120}")
+    testing.assertEq(toString(r.line), "7", "line number")
+    testing.assertEq(r.ts, "2026-03-01T10:00:00Z", "ts")
+    testing.assertEq(r.level, "error", "level")
+    testing.assertEq(r.service, "api", "service")
+    testing.assertEq(r.msg, "db timeout", "msg")
+    testing.assertEq(toString(r.raw["ms"]), "120", "extra fields are kept")
+}
+
+fn levelIsLowercased() {
+    testing.assertEq(rec("{\"level\":\"WARN\",\"msg\":\"m\"}").level, "warn", "level")
+}
+
+fn missingServiceDefaultsToDash() {
+    imut r = rec("{\"level\":\"info\",\"msg\":\"m\"}")
+    testing.assertEq(r.service, "-", "service")
+    testing.assertEq(r.ts, "", "ts")
+}
+
+fn nonObjectLineIsBad() {
+    testing.assertEq(badReason("[1, 2]"), "3: json: expected an object at position 0 ('[')", "array line")
+    testing.assertEq(badReason("not json"), "3: json: expected an object at position 0 ('n')", "garbage line")
+}
+
+fn missingLevelIsBad() {
+    testing.assertEq(badReason("{\"msg\":\"m\"}"), "3: missing \"level\"", "no level")
+}
+
+fn missingMsgIsBad() {
+    testing.assertEq(badReason("{\"level\":\"info\"}"), "3: missing \"msg\"", "no msg")
+}
+
+fn nonStringLevelIsBad() {
+    testing.assertEq(badReason("{\"level\":3,\"msg\":\"m\"}"), "3: \"level\" is not a string", "numeric level")
+}
+
+fn blankLineIsSkipped() {
+    testing.assertEq(badReason(""), "blank", "empty")
+    testing.assertEq(badReason("   \t"), "blank", "whitespace")
+}
+
+fn readsAFileLineByLine() {
+    imut lines = record.readRecords("fixtures/app.jsonl")
+    testing.assert(len(lines) > 0, "fixture has lines")
+}
+
+fn main() {
+    testing.run("record", [
+        parsesAWellFormedLine,
+        levelIsLowercased,
+        missingServiceDefaultsToDash,
+        nonObjectLineIsBad,
+        missingLevelIsBad,
+        missingMsgIsBad,
+        nonStringLevelIsBad,
+        blankLineIsSkipped,
+        readsAFileLineByLine
+    ])
+}

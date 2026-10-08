@@ -1,0 +1,65 @@
+// One JSONL line in, one log record (or the reason it is not one) out.
+
+import "std/io"
+import "std/json"
+
+pub struct LogRecord {
+    line: int,
+    ts: string,
+    level: string,
+    service: string,
+    msg: string,
+    raw: map
+}
+
+// A line is a record, a line that could not be read as one, or nothing at all.
+pub type Line = Rec(LogRecord) | Bad(int, string) | Blank
+
+// "" when the field is usable, otherwise why it is not.
+fn fieldProblem(m: map, key: string, required: bool) -> string {
+    imut kind = typeOf(m[key])
+    if kind == "null" {
+        return if required { "missing \"" + key + "\"" } else { "" }
+    }
+    if kind != "string" { return "\"" + key + "\" is not a string" }
+    ""
+}
+
+fn text(m: map, key: string, fallback: string) -> string {
+    if typeOf(m[key]) == "string" { toString(m[key]) } else { fallback }
+}
+
+fn fromMap(lineNo: int, m: map) -> Line {
+    for check in [fieldProblem(m, "level", true), fieldProblem(m, "msg", true),
+                  fieldProblem(m, "ts", false), fieldProblem(m, "service", false)] {
+        if check != "" { return Bad(lineNo, check) }
+    }
+    Rec(LogRecord {
+        line: lineNo,
+        ts: text(m, "ts", ""),
+        level: toLower(text(m, "level", "")),
+        service: text(m, "service", "-"),
+        msg: text(m, "msg", ""),
+        raw: m
+    })
+}
+
+pub fn parseLine(lineNo: int, text: string) -> Line {
+    if len(trim(text)) == 0 { return Blank }
+    match json.parse(text) {
+        Parsed(m) => fromMap(lineNo, m),
+        Invalid(why) => Bad(lineNo, why)
+    }
+}
+
+// Every line of a JSONL file, numbered from 1. Throws "cannot read <path>".
+pub fn readRecords(path: string) -> Array<Line> {
+    if !io.isFile(path) { throw "cannot read " + path }
+    mut out: Array<Line> = []
+    mut lineNo = 0
+    for text in io.readLines(path) {
+        lineNo = lineNo + 1
+        push(out, parseLine(lineNo, text))
+    }
+    out
+}
