@@ -1144,19 +1144,8 @@ public class Parser {
                 ? asIdentifier(nextToken())
                 : match(SyntaxType.IdentifierToken);
         SyntaxToken colon = match(SyntaxType.ColonToken);
-        SyntaxToken fieldType;
-        if (current().getType() == SyntaxType.FnKeyword) {
-            fieldType = parseFunctionTypeName(nextToken());
-        } else {
-            fieldType = match(SyntaxType.IdentifierToken);
-        }
-        if (current().getType() == SyntaxType.OpenBracketToken && peek(1).getType() == SyntaxType.CloseBracketToken) {
-            nextToken();
-            nextToken();
-            fieldType = new SyntaxToken(SyntaxType.IdentifierToken, fieldType.getPosition(),
-                    fieldType.getData() + "[]", fieldType.getValue());
-        }
-        return new ParameterSyntax(fieldName, colon, fieldType);
+        // A field takes any type a parameter does, including Array<Item>.
+        return new ParameterSyntax(fieldName, colon, parseTypeName());
     }
 
     private StatementSyntax parseStructDeclaration() {

@@ -309,6 +309,26 @@ class DogfoodRegressionTest {
         assertEquals("All match arms must return the same type; cannot mix void and value arms", message);
     }
 
+    // --- P13: a struct field declared with a generic type ---------------------
+
+    @Test
+    void aStructFieldMayHaveAGenericType() throws Exception {
+        String source = """
+                struct Item { n: int }
+                struct Box { items: Array<Item>, counts: Map<string, int>, groups: Map<string, Array<Item>> }
+                fn main() {
+                    imut b = Box { items: [Item { n: 4 }], counts: {"a": 1}, groups: {} }
+                    b.groups["g"] = [Item { n: 7 }]
+                    println(toString(b.items[0].n))
+                    println(toString(b.counts["a"] + 1))
+                    for it in b.items { println(toString(it.n)) }
+                    println(toString(b.groups["g"][0].n))
+                }
+                """;
+        assertEquals("4\n2\n4\n7", run(source, "GenericFields"));
+        assertEquals("4\n2\n4\n7", interpret(source, "GenericFields"));
+    }
+
     // --- P8: asking what kind of value an erased value is ---------------------
 
     @Test

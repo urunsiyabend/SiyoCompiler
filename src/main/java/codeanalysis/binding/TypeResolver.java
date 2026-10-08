@@ -350,8 +350,8 @@ public class TypeResolver {
             StructSymbol ownerStruct = resolveStructType(memberExpr.getTarget());
             if (ownerStruct != null) {
                 String fieldTypeName = ownerStruct.getFieldTypeName(memberExpr.getMemberName());
-                if (fieldTypeName != null && fieldTypeName.endsWith("[]")) {
-                    String elemName = fieldTypeName.substring(0, fieldTypeName.length() - 2);
+                String elemName = elementTypeNameOf(fieldTypeName);
+                if (elemName != null) {
                     StructSymbol elemStruct = _structTypes.get(elemName);
                     if (elemStruct != null) return elemStruct;
                 }
