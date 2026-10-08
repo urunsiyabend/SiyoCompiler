@@ -1,0 +1,11 @@
+logscope summary: fixtures/empty.jsonl
+records: 0 read, 0 matched, 0 invalid
+
+by level:
+  (none)
+
+by service:
+  (none)
+
+error groups:
+  (none)

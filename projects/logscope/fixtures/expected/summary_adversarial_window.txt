@@ -1,0 +1,17 @@
+logscope summary: fixtures/adversarial.jsonl
+records: 7 read, 2 matched, 1 invalid
+
+by level:
+  error  1
+  info   1
+
+by service:
+  -0  1
+  01  1
+
+error groups:
+  1x  123
+      services: 01  first: 2026-03-01T10:00:00.500Z  last: 2026-03-01T10:00:00.500Z
+
+invalid lines:
+  line 6: "ts" is not an ISO-8601 UTC timestamp

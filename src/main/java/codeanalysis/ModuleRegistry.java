@@ -6,7 +6,9 @@ import java.util.*;
  * Shared cache for compiled modules. Tracks compilation state for circular import detection.
  */
 public class ModuleRegistry {
-    private final Map<String, ModuleSymbol> _compiledModules = new HashMap<>();
+    // Insertion order is completion order: a module is registered once its own
+    // imports are, so iterating initialises dependencies first.
+    private final Map<String, ModuleSymbol> _compiledModules = new LinkedHashMap<>();
     private final Set<String> _inProgress = new HashSet<>();
 
     public boolean isCompiled(String modulePath) {

@@ -332,10 +332,11 @@ public class Lexer {
      * emits InterpolatedStringMidToken or InterpolatedStringEndToken.
      */
     private void readStringToken() {
-        // Check for triple-quote multi-line string: """..."""
-        // Only trigger if """ is followed by newline or """ (empty multi-line string)
-        if (peek(1) == '"' && peek(2) == '"'
-                && (peek(3) == '\n' || peek(3) == '\r' || (peek(3) == '"' && peek(4) == '"' && peek(5) == '"'))) {
+        // A triple-quoted string: """...""". It used to open only when the
+        // quotes were followed by a newline, so """usage: x ...""" lexed as ""
+        // followed by an unterminated string. An empty string can never be
+        // directly followed by another string, so """ always opens one.
+        if (peek(1) == '"' && peek(2) == '"') {
             readTripleQuoteString();
             return;
         }

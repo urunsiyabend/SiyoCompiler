@@ -1,0 +1,23 @@
+logscope summary: fixtures/mixed.jsonl
+records: 10 read, 4 matched, 5 invalid
+
+by level:
+  error  3
+  warn   1
+
+by service:
+  auth     3
+  billing  1
+
+error groups:
+  2x  bad token <script>alert("x")</script>
+      services: auth  first: 2026-03-02T08:00:03Z  last: 2026-03-02T08:00:12Z
+  1x  card declined
+      services: billing  first: 2026-03-02T08:00:13Z  last: 2026-03-02T08:00:13Z
+
+invalid lines:
+  line 4: json: expected an object at position 0 ('t')
+  line 5: json: expected an object at position 0 ('[')
+  line 6: missing "level"
+  line 8: "level" is not a string
+  line 11: json: expected ':' after a key at position 38 (end of input)

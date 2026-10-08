@@ -1,0 +1,7 @@
+{"ts":"2026-03-01T10:00:00.500Z","level":"error","service":"01","msg":"123","code":"007","n":7}
+{"ts":"2026-03-01T10:00:00Z","level":"error","service":"01","msg":"123","code":"1e3"}
+{"ts":"2026-03-01T10:00:00.250Z","level":"error","service":"api","msg":"123","ratio":0.5}
+{"ts":"2026-03-01T10:00:01Z","level":"warn","service":"api","msg":"ctl:\u0000\u0001\b\f\u001f\t\n\r|end","padded":" 42"}
+{"ts":"2026-03-01T10:00:00.750Z","level":"info","service":"-0","msg":"-0","ok":true,"none":null}
+{"ts":"2026-03-01T12:00:00+02:00","level":"error","service":"api","msg":"offset zone"}
+{"ts":"2026-03-01T10:00:02.000000001z","level":"fatal","service":"api","msg":"true"}

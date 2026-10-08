@@ -1,0 +1,106 @@
+// Command-line parsing: argv in, Options or a usage error out.
+
+import "timestamp"
+
+pub struct Options {
+    command: string,
+    file: string,
+    levels: string[],
+    service: string,
+    since: string,
+    until: string,
+    grep: string,
+    jsonOut: string,
+    htmlOut: string
+}
+
+pub type Parsed = Opts(Options) | Usage(string) | Help
+
+pub fn usage() -> string {
+    """usage: logscope <command> <file.jsonl> [options]
+
+commands:
+  summary   print totals, counts by level and service, and error groups
+  filter    print the matching records as JSONL
+  report    write a JSON and/or HTML report (needs --json or --html)
+
+filters:
+  --level L[,L]   only these levels (case-insensitive)
+  --service S     only this service
+  --since TS      records at or after TS (inclusive)
+  --until TS      records before TS (exclusive)
+                  TS is an ISO-8601 UTC timestamp, 2026-03-01T10:00:00.5Z,
+                  or a date, 2026-03-01 (midnight UTC)
+  --grep TEXT     message contains TEXT (case-insensitive)
+
+report outputs:
+  --json PATH     write the JSON report to PATH
+  --html PATH     write the HTML report to PATH
+
+exit codes: 0 ok, 1 usage error, 2 a file cannot be read or written"""
+}
+
+fn isCommand(name: string) -> bool {
+    name == "summary" || name == "filter" || name == "report"
+}
+
+fn isFlag(name: string) -> bool {
+    imut known = ["--level", "--service", "--since", "--until", "--grep", "--json", "--html"]
+    for k in known { if k == name { return true } }
+    false
+}
+
+fn splitLevels(value: string) -> string[] {
+    mut levels: string[] = []
+    for part in split(value, ",") {
+        imut level = toLower(trim(part))
+        if len(level) > 0 { push(levels, level) }
+    }
+    levels
+}
+
+pub fn parseArgs(args: string[]) -> Parsed {
+    if len(args) == 0 { return Usage("missing command") }
+    imut command = args[0]
+    if command == "help" || command == "--help" || command == "-h" { return Help }
+    if !isCommand(command) { return Usage("unknown command '" + command + "'") }
+    if len(args) < 2 || startsWith(args[1], "--") { return Usage("missing input file") }
+
+    mut o = Options {
+        command: command, file: args[1], levels: [], service: "", since: "",
+        until: "", grep: "", jsonOut: "", htmlOut: ""
+    }
+    mut i = 2
+    while i < len(args) {
+        imut flag = args[i]
+        if !startsWith(flag, "--") { return Usage("unexpected argument '" + flag + "'") }
+        if !isFlag(flag) { return Usage("unknown flag '" + flag + "'") }
+        if i + 1 >= len(args) { return Usage("flag '" + flag + "' needs a value") }
+        imut value = args[i + 1]
+        // "report x --json --html" must not write a file called --html.
+        if isFlag(value) { return Usage("flag '" + flag + "' needs a value") }
+        if (flag == "--since" || flag == "--until") && timestamp.sortKey(value) == "" {
+            return Usage(flag + " needs an ISO-8601 UTC timestamp, got '" + value + "'")
+        }
+        if flag == "--level" {
+            o.levels = splitLevels(value)
+        } else if flag == "--service" {
+            o.service = value
+        } else if flag == "--since" {
+            o.since = value
+        } else if flag == "--until" {
+            o.until = value
+        } else if flag == "--grep" {
+            o.grep = value
+        } else if flag == "--json" {
+            o.jsonOut = value
+        } else {
+            o.htmlOut = value
+        }
+        i = i + 2
+    }
+    if command == "report" && o.jsonOut == "" && o.htmlOut == "" {
+        return Usage("report needs --json or --html")
+    }
+    Opts(o)
+}

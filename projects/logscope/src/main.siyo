@@ -1,0 +1,74 @@
+// LogScope: summarise, filter and report on JSONL logs.
+//
+//   siyoc run summary fixtures/app.jsonl --level error
+//   siyoc run filter  fixtures/app.jsonl --grep timeout
+//   siyoc run report  fixtures/app.jsonl --json out.json --html out.html
+
+import "std/io"
+import "std/os"
+import "cli"
+import "record"
+import "query"
+import "summary"
+import "render"
+
+fn fail(code: int, msg: string) {
+    io.eprintln("logscope: " + msg)
+    os.exit(code)
+}
+
+fn printMatching(lines: Array<Line>, f: Filter) {
+    for line in lines {
+        match line {
+            Rec(r) => { if query.matches(f, r) { println(render.recordJson(r)) } },
+            Bad(n, why) => {},
+            Blank => {}
+        }
+    }
+}
+
+fn write(path: string, content: string) {
+    try {
+        io.writeFile(path, content)
+    } catch e {
+        fail(2, "cannot write " + path)
+    }
+    println("wrote " + path)
+}
+
+fn writeReports(o: Options, s: Summary) {
+    if o.jsonOut != "" { write(o.jsonOut, render.json(s, o.file)) }
+    if o.htmlOut != "" { write(o.htmlOut, render.html(s, o.file)) }
+}
+
+fn execute(o: Options) {
+    mut lines: Array<Line> = []
+    try {
+        lines = record.readRecords(o.file)
+    } catch e {
+        fail(2, toString(e))
+    }
+    imut f = query.fromOptions(o)
+    if o.command == "filter" {
+        printMatching(lines, f)
+        return
+    }
+    imut s = summary.summarize(lines, f)
+    if o.command == "summary" {
+        print(render.text(s, o.file))
+    } else {
+        writeReports(o, s)
+    }
+}
+
+fn main() {
+    match cli.parseArgs(os.args()) {
+        Opts(o) => execute(o),
+        Help => println(cli.usage()),
+        Usage(why) => {
+            io.eprintln("logscope: " + why)
+            io.eprintln(cli.usage())
+            os.exit(1)
+        }
+    }
+}

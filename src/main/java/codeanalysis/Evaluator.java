@@ -127,6 +127,54 @@ public class Evaluator {
     }
 
     /**
+     * Module-level variables keyed by {@code OwnerClass.field}.
+     *
+     * <p>An importer reaches a module's variable through its own symbol that
+     * names the owning class and field, which is all the bytecode backend
+     * needs. The interpreter stores globals by symbol, so that copy is mapped
+     * back to the module's own symbol; otherwise every imported module
+     * variable read as null.
+     */
+    private Map<String, VariableSymbol> _moduleVariables = java.util.Collections.emptyMap();
+
+    public void setModuleVariables(Map<String, VariableSymbol> moduleVariables) {
+        _moduleVariables = moduleVariables;
+    }
+
+    /**
+     * Module function bodies keyed by {@code OwnerClass#name/arity}.
+     *
+     * <p>A module that imports another reaches its functions through copies
+     * named for the qualifier it wrote ({@code b.twice}), which carry the
+     * owning class and the owner's own name — what a compiled call is made
+     * with. Only the entry file's copies have bodies here, so a call a module
+     * makes into its own import was not found interpreted.
+     */
+    private Map<String, BoundBlockStatement> _moduleFunctions = java.util.Collections.emptyMap();
+
+    public void setModuleFunctions(Map<String, BoundBlockStatement> moduleFunctions) {
+        _moduleFunctions = moduleFunctions;
+    }
+
+    /** The key a module function is found under; see {@link #setModuleFunctions}. */
+    public static String moduleFunctionKey(String ownerClass, String name, int arity) {
+        return ownerClass + "#" + name + "/" + arity;
+    }
+
+    private BoundBlockStatement bodyOf(FunctionSymbol function) {
+        BoundBlockStatement body = _functions.get(function);
+        if (body != null || function.getModuleName() == null || function.getJvmMethodName() == null) return body;
+        return _moduleFunctions.get(moduleFunctionKey(function.getModuleName(),
+                function.getJvmMethodName(), function.getParameters().size()));
+    }
+
+    private VariableSymbol canonical(VariableSymbol variable) {
+        if (variable.getOwnerClass() == null) return variable;
+        VariableSymbol own = _moduleVariables.get(variable.getOwnerClass() + "." + variable.getFieldName());
+        return own != null ? own : variable;
+    }
+
+    /**
      * Evaluates the specified expression statement syntax node and computes the result.
      *
      * @param statement The bound statement node to evaluate.
@@ -185,7 +233,7 @@ public class Evaluator {
                 return;
             }
         }
-        _globals.put(variable, value);
+        _globals.put(canonical(variable), value);
     }
 
     /**
@@ -199,7 +247,7 @@ public class Evaluator {
             StackFrame frame = _callStack.peek();
             if (frame.getLocals().get(variable) instanceof Object[] cell) return cell;
         }
-        return _globals.get(variable) instanceof Object[] cell ? cell : null;
+        return _globals.get(canonical(variable)) instanceof Object[] cell ? cell : null;
     }
 
     /**
@@ -306,7 +354,7 @@ public class Evaluator {
                 return frame.getLocals().get(variable);
             }
         }
-        return _globals.get(variable);
+        return _globals.get(canonical(variable));
     }
 
     /**
@@ -517,7 +565,7 @@ public class Evaluator {
         }
 
         // Get the function body
-        BoundBlockStatement body = _functions.get(function);
+        BoundBlockStatement body = bodyOf(function);
         if (body == null) {
             throw new Exception("Function body not found: " + function.getName());
         }
@@ -533,13 +581,16 @@ public class Evaluator {
 
         // Push frame and execute
         _callStack.push(frame);
-        _returnTriggered = false;
-        _returnValue = null;
+        try {
+            _returnTriggered = false;
+            _returnValue = null;
 
-        evaluateBlock(body);
-
-        // Pop frame
-        _callStack.pop();
+            evaluateBlock(body);
+        } finally {
+            // An exception unwinding through this call takes its frame with it;
+            // otherwise the catching caller read its locals from this frame.
+            _callStack.pop();
+        }
 
         // Return the result (explicit return or implicit last expression value)
         Object result = _returnTriggered ? _returnValue : _lastValue;
@@ -706,8 +757,11 @@ public class Evaluator {
 
         // Execute
         _callStack.push(frame);
-        evaluateBlock(closure.getBody());
-        _callStack.pop();
+        try {
+            evaluateBlock(closure.getBody());
+        } finally {
+            _callStack.pop();
+        }
 
         Object result = _returnTriggered ? _returnValue : _lastValue;
         _returnTriggered = false;
@@ -736,8 +790,11 @@ public class Evaluator {
         }
 
         _callStack.push(frame);
-        evaluateBlock(closure.getBody());
-        _callStack.pop();
+        try {
+            evaluateBlock(closure.getBody());
+        } finally {
+            _callStack.pop();
+        }
 
         Object result = _returnTriggered ? _returnValue : _lastValue;
         _returnTriggered = false;
@@ -842,27 +899,36 @@ public class Evaluator {
                 for (int i = 0; i < bindings.size(); i++) {
                     if (bindings.get(i) != null) assignVariable(bindings.get(i), union.get(i));
                 }
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
             }
             if (arm.isDefault()) {
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 defaultResult = evaluateExpression(arm.body());
                 continue;
             }
             Object pattern = evaluateExpression(arm.pattern());
             if (java.util.Objects.equals(target, pattern)) {
-                if (!arm.preStatements().isEmpty()) {
-                    evaluateBlock(new BoundBlockStatement(new java.util.ArrayList<>(arm.preStatements())));
-                }
+                evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
             }
         }
         return defaultResult;
+    }
+
+    /**
+     * Arm pre-statements, lowered once per arm. The binder leaves a block
+     * arm's statements structured — the emitter lowers them as it emits — so
+     * a loop inside an arm reached the interpreter un-lowered and failed.
+     */
+    private final Map<java.util.List<BoundStatement>, BoundBlockStatement> _loweredArms =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    private void evaluatePreStatements(java.util.List<BoundStatement> preStatements) throws Exception {
+        if (preStatements.isEmpty()) return;
+        BoundBlockStatement lowered = _loweredArms.computeIfAbsent(preStatements,
+                pre -> codeanalysis.lowering.Lowerer.lower(new BoundBlockStatement(new java.util.ArrayList<>(pre))));
+        evaluateBlock(lowered);
     }
 
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
@@ -911,6 +977,8 @@ public class Evaluator {
                 java.util.Map<VariableSymbol, Object> isolatedGlobals =
                         java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                 Evaluator taskEval = new Evaluator(body, isolatedGlobals, funcsCopy);
+                taskEval.setModuleVariables(_moduleVariables);
+                taskEval.setModuleFunctions(_moduleFunctions);
 
                 // Inject captured variables (immutable values + channels)
                 StackFrame frame = new StackFrame(null);
@@ -918,8 +986,11 @@ public class Evaluator {
                     frame.getLocals().put(entry.getKey(), entry.getValue());
                 }
                 taskEval._callStack.push(frame);
-                taskEval.evaluateBlock(body);
-                taskEval._callStack.pop();
+                try {
+                    taskEval.evaluateBlock(body);
+                } finally {
+                    taskEval._callStack.pop();
+                }
             } catch (Exception e) {
                 _scopeErrors.add(e);
             }
@@ -971,6 +1042,8 @@ public class Evaluator {
                     java.util.Map<VariableSymbol, Object> isolatedGlobals =
                             java.util.Collections.synchronizedMap(new java.util.HashMap<>(_globals));
                     Evaluator actorEval = new Evaluator(body, isolatedGlobals, _functions);
+                    actorEval.setModuleVariables(_moduleVariables);
+                    actorEval.setModuleFunctions(_moduleFunctions);
                     StackFrame frame = new StackFrame(func);
 
                     // Bind self (first param) to actor state
@@ -981,9 +1054,12 @@ public class Evaluator {
                     }
 
                     actorEval._callStack.push(frame);
-                    actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
-                    actorEval.evaluateBlock(body);
-                    actorEval._callStack.pop();
+                    try {
+                        actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
+                        actorEval.evaluateBlock(body);
+                    } finally {
+                        actorEval._callStack.pop();
+                    }
 
                     Object result = actorEval._returnTriggered ? actorEval._returnValue : actorEval._lastValue;
                     actorEval._returnTriggered = false;
@@ -1165,6 +1241,9 @@ public class Evaluator {
         if (function == BuiltinFunctions.TO_MAP) {
             return SiyoRuntime.structToMap(arguments[0]);
         }
+        if (function == BuiltinFunctions.TYPE_OF) {
+            return SiyoRuntime.typeOf(arguments[0]);
+        }
         if (function == BuiltinFunctions.TYPE_NAME) {
             return SiyoRuntime.typeNameOf(arguments[0]);
         }
@@ -1300,9 +1379,12 @@ public class Evaluator {
                     frame.getLocals().put(comparator.getParameters().get(0), a);
                     frame.getLocals().put(comparator.getParameters().get(1), b);
                     _callStack.push(frame);
-                    _returnTriggered = false;
-                    evaluateBlock(comparator.getBody());
-                    _callStack.pop();
+                    try {
+                        _returnTriggered = false;
+                        evaluateBlock(comparator.getBody());
+                    } finally {
+                        _callStack.pop();
+                    }
                     Object result = _returnTriggered ? _returnValue : _lastValue;
                     _returnTriggered = false;
                     _returnValue = null;

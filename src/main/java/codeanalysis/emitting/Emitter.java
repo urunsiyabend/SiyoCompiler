@@ -655,6 +655,7 @@ public class Emitter {
     }
 
     private void emitLiteralExpression(BoundLiteralExpression node) {
+        if (node instanceof codeanalysis.binding.BoundUnitExpression) return;
         Object value = node.getValue();
         if (value == null) {
             _mv.visitInsn(ACONST_NULL);
@@ -2340,6 +2341,12 @@ public class Emitter {
             emitCoerceArg(node.getArguments().get(0), Object.class);
             _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "structToMap",
                     "(Ljava/lang/Object;)Lcodeanalysis/SiyoMap;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.TYPE_OF) {
+            emitCoerceArg(node.getArguments().get(0), Object.class);
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "typeOf",
+                    "(Ljava/lang/Object;)Ljava/lang/String;", false);
             return;
         }
         if (function == BuiltinFunctions.TYPE_NAME) {

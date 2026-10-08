@@ -1,0 +1,99 @@
+import "std/testing"
+import "cli"
+
+fn opts(args: string[]) -> Options {
+    match cli.parseArgs(args) {
+        Opts(o) => o,
+        Usage(why) => { throw "unexpected usage error: " + why },
+        Help => { throw "unexpected help" }
+    }
+}
+
+fn usageOf(args: string[]) -> string {
+    match cli.parseArgs(args) {
+        Opts(o) => "",
+        Usage(why) => why,
+        Help => "help"
+    }
+}
+
+fn parsesSummaryWithFilters() {
+    imut o = opts(["summary", "app.jsonl", "--service", "api", "--since", "2026-01-01", "--until", "2026-02-01", "--grep", "Timeout"])
+    testing.assertEq(o.command, "summary", "command")
+    testing.assertEq(o.file, "app.jsonl", "file")
+    testing.assertEq(o.service, "api", "service")
+    testing.assertEq(o.since, "2026-01-01", "since")
+    testing.assertEq(o.until, "2026-02-01", "until")
+    testing.assertEq(o.grep, "Timeout", "grep")
+    testing.assertEq(toString(len(o.levels)), "0", "no level filter")
+}
+
+fn levelListIsSplitOnComma() {
+    imut o = opts(["filter", "app.jsonl", "--level", "ERROR, warn"])
+    testing.assertEq(toString(o.levels), "[error, warn]", "levels are trimmed and lowercased")
+}
+
+fn reportTakesOutputPaths() {
+    imut o = opts(["report", "app.jsonl", "--json", "out.json", "--html", "out.html"])
+    testing.assertEq(o.jsonOut, "out.json", "json")
+    testing.assertEq(o.htmlOut, "out.html", "html")
+}
+
+fn reportNeedsAnOutput() {
+    testing.assertEq(usageOf(["report", "app.jsonl"]), "report needs --json or --html", "report without outputs")
+}
+
+fn unknownCommandIsUsageError() {
+    testing.assertEq(usageOf(["explode", "app.jsonl"]), "unknown command 'explode'", "unknown command")
+}
+
+fn unknownFlagIsUsageError() {
+    testing.assertEq(usageOf(["summary", "app.jsonl", "--colour"]), "unknown flag '--colour'", "unknown flag")
+}
+
+fn flagWithoutValueIsUsageError() {
+    testing.assertEq(usageOf(["summary", "app.jsonl", "--level"]), "flag '--level' needs a value", "missing value")
+}
+
+fn missingFileIsUsageError() {
+    testing.assertEq(usageOf(["summary"]), "missing input file", "missing file")
+    testing.assertEq(usageOf([]), "missing command", "missing command")
+}
+
+fn aTimeFilterMustBeAUtcTimestamp() {
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--since", "last tuesday"]),
+        "--since needs an ISO-8601 UTC timestamp, got 'last tuesday'", "since")
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--until", "2026-03-01T10:00:00+02:00"]),
+        "--until needs an ISO-8601 UTC timestamp, got '2026-03-01T10:00:00+02:00'", "until")
+    testing.assertEq(opts(["summary", "a.jsonl", "--since", "2026-03-01T10:00:00.5Z"]).since,
+        "2026-03-01T10:00:00.5Z", "a fraction is accepted")
+}
+
+fn aFlagIsNotTakenAsAValue() {
+    testing.assertEq(usageOf(["report", "a.jsonl", "--json", "--html"]), "flag '--json' needs a value", "--json --html")
+    testing.assertEq(usageOf(["report", "a.jsonl", "--json", "--html", "out.html"]), "flag '--json' needs a value", "--json --html x")
+    testing.assertEq(usageOf(["summary", "a.jsonl", "--level", "--service", "api"]), "flag '--level' needs a value", "--level --service")
+    testing.assertEq(opts(["summary", "a.jsonl", "--grep", "--verbose"]).grep, "--verbose", "an unknown --word is still a value")
+}
+
+fn helpIsNotAnError() {
+    testing.assertEq(usageOf(["help"]), "help", "help")
+    testing.assertEq(usageOf(["--help"]), "help", "--help")
+    testing.assertEq(usageOf(["-h"]), "help", "-h")
+}
+
+fn main() {
+    testing.run("cli", [
+        parsesSummaryWithFilters,
+        levelListIsSplitOnComma,
+        reportTakesOutputPaths,
+        reportNeedsAnOutput,
+        unknownCommandIsUsageError,
+        unknownFlagIsUsageError,
+        flagWithoutValueIsUsageError,
+        missingFileIsUsageError,
+        helpIsNotAnError,
+        aTimeFilterMustBeAUtcTimestamp,
+        aFlagIsNotTakenAsAValue
+    ])
+}

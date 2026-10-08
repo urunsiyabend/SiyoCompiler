@@ -20,9 +20,10 @@ import codeanalysis.syntax.SyntaxTree;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.7.0";
+    private static final String VERSION = "0.8.0";
 
     public static void main(String[] args) {
+        useUtf8Output();
         if (System.getenv("SIYO_DEBUG") != null) {
             System.err.println("[debug] args=" + java.util.Arrays.toString(args));
         }
@@ -90,6 +91,10 @@ public class Main {
             return;
         }
         if (cargs.length >= 2 && cargs[0].equals("interpret")) {
+            // siyoc interpret file.siyo [args...] — same arguments as run
+            if (cargs.length > 2) {
+                _programArgs = java.util.Arrays.copyOfRange(cargs, 2, cargs.length);
+            }
             runFile(cargs[1]); // interpreter path (for debugging)
             return;
         }
@@ -151,8 +156,24 @@ public class Main {
             System.exit(1);
         }
 
+        _runningSuite = true;
         for (java.nio.file.Path p : discovered) {
             compileAndRun(p.toString());
+        }
+        exitIfTestsFailed();
+    }
+
+    /** True while siyoc test runs several files, which are judged together at the end. */
+    private static boolean _runningSuite = false;
+
+    /**
+     * Ends the process with status 1 when std/testing recorded a failure. A
+     * suite that printed FAIL used to exit 0, so CI could not see it.
+     */
+    private static void exitIfTestsFailed() {
+        if (codeanalysis.SiyoRuntime.testFailures() > 0) {
+            System.out.flush();
+            System.exit(1);
         }
     }
 
@@ -180,6 +201,21 @@ public class Main {
     }
 
     private static String[] _programArgs = new String[0];
+
+    /**
+     * Writes standard output and error as UTF-8, the encoding source files
+     * and file I/O already use. Java otherwise follows the locale, and under
+     * a C/POSIX locale every non-ASCII character a program printed became '?'.
+     */
+    private static void useUtf8Output() {
+        java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
+        java.io.PrintStream out = new java.io.PrintStream(new java.io.BufferedOutputStream(
+                new java.io.FileOutputStream(java.io.FileDescriptor.out), 8192), true, utf8);
+        java.io.PrintStream err = new java.io.PrintStream(new java.io.BufferedOutputStream(
+                new java.io.FileOutputStream(java.io.FileDescriptor.err), 8192), true, utf8);
+        System.setOut(out);
+        System.setErr(err);
+    }
 
     /**
      * Loads the project that owns {@code sourceFile}, if any, so imports resolve
@@ -245,17 +281,7 @@ public class Main {
                     // Load dependency modules
                     for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
                         if (name.equals(module.getClassName())) {
-                            java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
-                            for (var entry : module.getFunctionBodies().entrySet()) {
-                                loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
-                            }
-                            // Use module's top-level block so module-level variables become static fields
-                            codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
-                                    ? module.getTopLevelBlock()
-                                    : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
-                            codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
-                            depEmitter.setModuleClass(true);
-                            byte[] depBytes = depEmitter.emit(module.getClassName());
+                            byte[] depBytes = Compilation.emitModule(module);
                             return defineClass(name, depBytes, 0, depBytes.length);
                         }
                     }
@@ -266,6 +292,7 @@ public class Main {
             Thread.currentThread().setContextClassLoader(loader);
             Class<?> cls = loader.loadClass(className);
             cls.getMethod("main", String[].class).invoke(null, (Object) _programArgs);
+            if (!_runningSuite) exitIfTestsFailed();
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
                 e.getCause().printStackTrace(System.err);
@@ -344,17 +371,7 @@ public class Main {
 
             // Write dependency .class files
             for (codeanalysis.ModuleSymbol module : registry.getAllModules()) {
-                // Lower function bodies before emitting
-                java.util.Map<codeanalysis.FunctionSymbol, codeanalysis.binding.BoundBlockStatement> loweredBodies = new java.util.HashMap<>();
-                for (var entry : module.getFunctionBodies().entrySet()) {
-                    loweredBodies.put(entry.getKey(), codeanalysis.lowering.Lowerer.lower(entry.getValue()));
-                }
-                codeanalysis.binding.BoundBlockStatement topLevel = module.getTopLevelBlock() != null
-                        ? module.getTopLevelBlock()
-                        : new codeanalysis.binding.BoundBlockStatement(new java.util.ArrayList<>());
-                codeanalysis.emitting.Emitter depEmitter = new codeanalysis.emitting.Emitter(topLevel, loweredBodies);
-                depEmitter.setModuleClass(true);
-                byte[] depBytes = depEmitter.emit(module.getClassName());
+                byte[] depBytes = Compilation.emitModule(module);
                 String depPath = module.getClassName() + ".class";
                 java.nio.file.Files.write(java.nio.file.Paths.get(depPath), depBytes);
                 System.out.println("Compiled to " + depPath);
@@ -375,17 +392,19 @@ public class Main {
             codeanalysis.ModuleRegistry registry = new codeanalysis.ModuleRegistry();
             Compilation compilation = new Compilation(tree, registry, absPath);
             Map<VariableSymbol, Object> variables = new HashMap<>();
+            // A compiled main stores its String[] here; the interpreter has no main(String[]).
+            codeanalysis.SiyoRuntime.programArgs = _programArgs;
             EvaluationResult result = compilation.evaluate(variables);
 
             if (result.diagnostics().hasNext()) {
+                // Reported the way run reports them: against the file each was
+                // raised in, so an error in an imported module names that module.
                 DiagnosticBox diagnostics = result.diagnostics();
+                String diagFileName = java.nio.file.Paths.get(path).getFileName().toString();
+                java.util.Set<String> seen = new java.util.LinkedHashSet<>();
                 while (diagnostics.hasNext()) {
-                    Diagnostic diagnostic = diagnostics.next();
-                    var lineIndex = tree.getText().getLineIndex(diagnostic.getSpan().getStart());
-                    var lineNumber = lineIndex + 1;
-                    var line = tree.getText().getLines().get(lineIndex);
-                    var character = diagnostic.getSpan().getStart() - line.getStart() + 1;
-                    System.err.printf("(%d, %d): %s%n", lineNumber, character, diagnostic);
+                    String msg = formatDiagnostic(diagnostics.next(), tree.getText(), diagFileName);
+                    if (seen.add(msg)) System.err.println(msg);
                 }
                 System.exit(1);
             }
@@ -393,6 +412,7 @@ public class Main {
             if (result.getValue() != null) {
                 System.out.println(result.getValue());
             }
+            exitIfTestsFailed();
         } catch (Exception e) {
             e.printStackTrace(System.err);
             System.err.flush();

@@ -1,0 +1,14 @@
+{"ts":"2026-03-01T09:58:12Z","level":"info","service":"api","msg":"server started","port":8080}
+{"ts":"2026-03-01T10:00:01Z","level":"debug","service":"worker","msg":"poll queue","depth":0}
+{"ts":"2026-03-01T10:00:05Z","level":"info","service":"api","msg":"GET /orders 200","ms":12}
+{"ts":"2026-03-01T10:01:17Z","level":"warn","service":"api","msg":"slow query","ms":950}
+{"ts":"2026-03-01T10:02:40Z","level":"error","service":"api","msg":"database timeout","ms":5000}
+{"ts":"2026-03-01T10:02:41Z","level":"error","service":"worker","msg":"database timeout","ms":5000}
+{"ts":"2026-03-01T10:03:00Z","level":"info","service":"web","msg":"render dashboard","ms":48}
+{"ts":"2026-03-01T10:04:22Z","level":"ERROR","service":"web","msg":"template missing: orders.html"}
+{"ts":"2026-03-01T10:05:00Z","level":"error","service":"api","msg":"database timeout","ms":5000}
+{"ts":"2026-03-01T10:06:30Z","level":"warn","service":"worker","msg":"retrying job","attempt":2}
+{"ts":"2026-03-01T10:07:45Z","level":"fatal","service":"worker","msg":"out of memory"}
+{"ts":"2026-03-01T10:08:00Z","level":"info","service":"api","msg":"GET /health 200","ms":1}
+{"ts":"2026-03-01T10:09:13Z","level":"error","service":"web","msg":"template missing: orders.html"}
+{"ts":"2026-03-01T10:10:00Z","level":"info","msg":"cron tick"}

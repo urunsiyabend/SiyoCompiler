@@ -1,0 +1,48 @@
+// Which records a run looks at.
+
+import "cli"
+import "record"
+import "timestamp"
+
+// since and until are timestamp sort keys, "" when not given.
+pub struct Filter {
+    levels: string[],
+    service: string,
+    since: string,
+    until: string,
+    grep: string
+}
+
+// The options' since/until were validated by cli; here they become sort keys.
+pub fn fromOptions(o: Options) -> Filter {
+    Filter {
+        levels: o.levels, service: o.service, grep: o.grep,
+        since: if o.since == "" { "" } else { timestamp.sortKey(o.since) },
+        until: if o.until == "" { "" } else { timestamp.sortKey(o.until) }
+    }
+}
+
+fn levelAllowed(levels: string[], level: string) -> bool {
+    if len(levels) == 0 { return true }
+    for l in levels { if l == level { return true } }
+    false
+}
+
+// Compared by sort key, never as written: "10:00:00.5Z" < "10:00:00Z" as text.
+// since is inclusive and until exclusive; a record without a timestamp fails
+// any time filter rather than silently passing it.
+fn inWindow(f: Filter, key: string) -> bool {
+    if f.since == "" && f.until == "" { return true }
+    if key == "" { return false }
+    if f.since != "" && key < f.since { return false }
+    if f.until != "" && key >= f.until { return false }
+    true
+}
+
+pub fn matches(f: Filter, r: LogRecord) -> bool {
+    if !levelAllowed(f.levels, r.level) { return false }
+    if f.service != "" && r.service != f.service { return false }
+    if !inWindow(f, r.tsKey) { return false }
+    if f.grep != "" && !contains(toLower(r.msg), toLower(f.grep)) { return false }
+    true
+}

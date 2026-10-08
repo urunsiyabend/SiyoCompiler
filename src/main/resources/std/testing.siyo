@@ -1,3 +1,5 @@
+import java "codeanalysis.SiyoRuntime"
+
 mut _beforeHook = fn() {}
 mut _afterHook = fn() {}
 
@@ -53,9 +55,11 @@ pub fn test(name: string, body: fn() -> bool) {
             println("  PASS: " + name)
         } else {
             println("  FAIL: " + name)
+            SiyoRuntime.recordTestFailures(1)
         }
     } catch e {
         println("  FAIL: " + name + " — " + e)
+        SiyoRuntime.recordTestFailures(1)
     }
 }
 
@@ -74,6 +78,7 @@ pub fn run(name: string, tests: fn()[]) {
             failed += 1
         }
     }
+    SiyoRuntime.recordTestFailures(failed)
     mut total = passed + failed
     println("")
     println(toString(passed) + " passed, " + toString(failed) + " failed, " + toString(total) + " total")

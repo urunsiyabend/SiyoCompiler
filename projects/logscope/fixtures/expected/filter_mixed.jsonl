@@ -1,0 +1,5 @@
+{"ts":"2026-03-02T08:00:00Z","level":"info","service":"auth","msg":"login ok","user":"ana"}
+{"ts":"2026-03-02T08:00:03Z","level":"error","service":"auth","msg":"bad token <script>alert(\"x\")</script>"}
+{"ts":"2026-03-02T08:00:10Z","level":"warn","service":"auth","msg":"café & crème: 5 < 6"}
+{"ts":"2026-03-02T08:00:12Z","level":"error","service":"auth","msg":"bad token <script>alert(\"x\")</script>"}
+{"ts":"2026-03-02T08:00:13Z","level":"error","service":"billing","msg":"card declined","amount":12.5}

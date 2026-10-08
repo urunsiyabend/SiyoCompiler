@@ -337,12 +337,23 @@ public class BuiltinFunctions {
             String.class
     );
 
+    /**
+     * The kind of any value, by its Siyo type name: int, long, float, bool,
+     * string, array, map, set, fn, channel, null, a struct's or sum type's
+     * name, or a Java object's simple class name.
+     */
+    public static final FunctionSymbol TYPE_OF = new FunctionSymbol(
+            "typeOf",
+            List.of(new ParameterSymbol("value", Object.class)),
+            String.class
+    );
+
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_LONG, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
                 PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE,
                 MAP_ARRAY, FILTER, REDUCE, FOR_EACH,
-                FIELDS, FIELD, SET_FIELD, TO_MAP, TYPE_NAME);
+                FIELDS, FIELD, SET_FIELD, TO_MAP, TYPE_NAME, TYPE_OF);
     }
 
     public static boolean isBuiltin(FunctionSymbol function) {

@@ -57,6 +57,21 @@ public class ModuleSymbol {
         _topLevelBlock = topLevelBlock;
     }
 
+    /**
+     * The module's own zero-argument init(), or null when it declares none.
+     * A function this module merely imported is not its init.
+     */
+    public FunctionSymbol initFunction() {
+        for (FunctionSymbol function : _functionBodies.keySet()) {
+            String owner = function.getModuleName();
+            boolean own = owner == null || owner.equals(_className);
+            if (own && function.getName().equals("init") && function.getParameters().isEmpty()) {
+                return function;
+            }
+        }
+        return null;
+    }
+
     public String getName() { return _name; }
     public String getClassName() { return _className; }
     public String getFilePath() { return _filePath; }

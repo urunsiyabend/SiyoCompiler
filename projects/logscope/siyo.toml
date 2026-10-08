@@ -1,0 +1,7 @@
+[project]
+name = "logscope"
+version = "0.1.0"
+main = "src/main.siyo"
+
+[dependencies]
+std
