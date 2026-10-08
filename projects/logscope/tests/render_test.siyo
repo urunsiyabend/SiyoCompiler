@@ -1,0 +1,64 @@
+import "std/testing"
+import "std/json"
+import "record"
+import "query"
+import "summary"
+import "render"
+
+fn sample() -> Summary {
+    imut lines: Array<Line> = [
+        Rec(LogRecord { line: 1, ts: "2026-03-01T10:00:00Z", level: "error", service: "api", msg: "bad <b>\"x\"</b> & co", raw: {} }),
+        Rec(LogRecord { line: 2, ts: "2026-03-01T10:01:00Z", level: "info", service: "web", msg: "ok", raw: {} }),
+        Bad(3, "json: expected an object at position 0 ('[')")
+    ]
+    summary.summarize(lines, Filter { levels: [], service: "", since: "", until: "", grep: "" })
+}
+
+fn textListsTotalsLevelsAndGroups() {
+    imut out = render.text(sample(), "app.jsonl")
+    testing.assert(contains(out, "records: 3 read, 2 matched, 1 invalid"), "totals line: " + out)
+    testing.assert(contains(out, "  error  1"), "level count")
+    testing.assert(contains(out, "  1x  bad <b>\"x\"</b> & co"), "error group")
+    testing.assert(contains(out, "  line 3: json: expected an object"), "invalid line")
+}
+
+fn jsonReportRoundTrips() {
+    match json.parse(render.json(sample(), "app.jsonl")) {
+        Parsed(m) => {
+            testing.assertEq(toString(m["file"]), "app.jsonl", "file")
+            testing.assertEq(toString(m["total"]), "3", "total")
+            testing.assertEq(toString(m["invalid"]), "1", "invalid")
+            imut levels: map = m["levels"]
+            testing.assertEq(toString(levels["error"]), "1", "levels.error")
+            imut groups: object[] = m["errorGroups"]
+            imut first: map = groups[0]
+            testing.assertEq(toString(first["message"]), "bad <b>\"x\"</b> & co", "message survives quoting")
+            testing.assertEq(toString(first["services"]), "[api]", "services")
+        },
+        Invalid(why) => testing.assert(false, "report is not JSON: " + why)
+    }
+}
+
+fn htmlEscapesMessage() {
+    imut out = render.html(sample(), "app.jsonl")
+    testing.assert(contains(out, "bad &lt;b&gt;&quot;x&quot;&lt;/b&gt; &amp; co"), "escaped message")
+    testing.assert(!contains(out, "<b>\"x\"</b>"), "no raw message")
+    testing.assert(startsWith(out, "<!DOCTYPE html>"), "doctype")
+}
+
+fn recordLineIsTheOriginalJson() {
+    match record.parseLine(1, "{\"level\":\"info\",\"msg\":\"hi\",\"n\":2}") {
+        Rec(r) => testing.assertEq(render.recordJson(r), "{\"level\":\"info\",\"msg\":\"hi\",\"n\":2}", "jsonl"),
+        Bad(n, why) => testing.assert(false, why),
+        Blank => testing.assert(false, "blank")
+    }
+}
+
+fn main() {
+    testing.run("render", [
+        textListsTotalsLevelsAndGroups,
+        jsonReportRoundTrips,
+        htmlEscapesMessage,
+        recordLineIsTheOriginalJson
+    ])
+}

@@ -1,0 +1,127 @@
+// Turns a Summary into text for the terminal, a JSON report and an HTML report.
+
+import "std/json"
+import "std/html"
+import "std/strings"
+import "record"
+import "summary"
+
+fn widest(counts: Array<Count>) -> int {
+    mut w = 0
+    for c in counts { if len(c.name) > w { w = len(c.name) } }
+    w
+}
+
+fn countLines(title: string, counts: Array<Count>) -> string {
+    mut out = title + ":\n"
+    if len(counts) == 0 { return out + "  (none)\n" }
+    imut w = widest(counts)
+    for c in counts { out = out + "  " + strings.padRight(c.name, w, " ") + "  " + toString(c.count) + "\n" }
+    out
+}
+
+pub fn text(s: Summary, file: string) -> string {
+    mut out = "logscope summary: " + file + "\n"
+    out = out + "records: " + toString(s.total) + " read, " + toString(s.matched) + " matched, "
+        + toString(s.invalid) + " invalid\n\n"
+    out = out + countLines("by level", s.byLevel) + "\n"
+    out = out + countLines("by service", s.byService) + "\n"
+    out = out + "error groups:\n"
+    if len(s.groups) == 0 { out = out + "  (none)\n" }
+    for g in s.groups {
+        out = out + "  " + toString(g.count) + "x  " + g.msg + "\n"
+        out = out + "      services: " + strings.join(g.services, ", ")
+            + "  first: " + g.first + "  last: " + g.last + "\n"
+    }
+    if len(s.bad) > 0 {
+        out = out + "\ninvalid lines:\n"
+        for b in s.bad { out = out + "  line " + toString(b.line) + ": " + b.reason + "\n" }
+    }
+    out
+}
+
+fn countMap(counts: Array<Count>) -> map {
+    mut m: map = {}
+    for c in counts { m[c.name] = c.count }
+    m
+}
+
+pub fn json(s: Summary, file: string) -> string {
+    mut groups: object[] = []
+    for g in s.groups {
+        imut entry: map = {"message": g.msg, "count": g.count, "first": g.first, "last": g.last, "services": g.services}
+        push(groups, entry)
+    }
+    mut bad: object[] = []
+    for b in s.bad {
+        imut entry: map = {"line": b.line, "reason": b.reason}
+        push(bad, entry)
+    }
+    imut report: map = {
+        "file": file,
+        "total": s.total,
+        "matched": s.matched,
+        "invalid": s.invalid,
+        "levels": countMap(s.byLevel),
+        "services": countMap(s.byService),
+        "errorGroups": groups,
+        "invalidLines": bad
+    }
+    json.stringify(report) + "\n"
+}
+
+fn countRows(counts: Array<Count>) -> string {
+    mut out = ""
+    for c in counts {
+        out = out + "<tr><td>" + html.escape(c.name) + "</td><td class=\"n\">" + toString(c.count) + "</td></tr>\n"
+    }
+    out
+}
+
+pub fn html(s: Summary, file: string) -> string {
+    mut out = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>logscope: """ + html.escape(file) + """</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1f2328; }
+table { border-collapse: collapse; margin-bottom: 1.5rem; }
+th, td { border: 1px solid #d0d7de; padding: 0.3rem 0.6rem; text-align: left; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.error { color: #b42318; }
+</style>
+</head>
+<body>
+"""
+    out = out + "<h1>logscope: " + html.escape(file) + "</h1>\n"
+    out = out + "<p>" + toString(s.total) + " records read, " + toString(s.matched) + " matched, "
+        + toString(s.invalid) + " invalid.</p>\n"
+    out = out + "<h2>By level</h2>\n<table>\n<tr><th>level</th><th>count</th></tr>\n" + countRows(s.byLevel) + "</table>\n"
+    out = out + "<h2>By service</h2>\n<table>\n<tr><th>service</th><th>count</th></tr>\n" + countRows(s.byService) + "</table>\n"
+    out = out + "<h2>Error groups</h2>\n"
+    if len(s.groups) == 0 {
+        out = out + "<p>No errors.</p>\n"
+    } else {
+        out = out + "<table>\n<tr><th>count</th><th>message</th><th>services</th><th>first</th><th>last</th></tr>\n"
+        for g in s.groups {
+            out = out + "<tr><td class=\"n\">" + toString(g.count) + "</td><td class=\"error\">" + html.escape(g.msg)
+                + "</td><td>" + html.escape(strings.join(g.services, ", ")) + "</td><td>" + html.escape(g.first)
+                + "</td><td>" + html.escape(g.last) + "</td></tr>\n"
+        }
+        out = out + "</table>\n"
+    }
+    if len(s.bad) > 0 {
+        out = out + "<h2>Invalid lines</h2>\n<table>\n<tr><th>line</th><th>reason</th></tr>\n"
+        for b in s.bad {
+            out = out + "<tr><td class=\"n\">" + toString(b.line) + "</td><td>" + html.escape(b.reason) + "</td></tr>\n"
+        }
+        out = out + "</table>\n"
+    }
+    out + "</body>\n</html>\n"
+}
+
+// The record exactly as it was read, for filter's JSONL output.
+pub fn recordJson(r: LogRecord) -> string {
+    json.stringify(r.raw)
+}

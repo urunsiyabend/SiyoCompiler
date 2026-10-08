@@ -4,14 +4,16 @@ import "cli"
 fn opts(args: string[]) -> Options {
     match cli.parseArgs(args) {
         Opts(o) => o,
-        Usage(why) => { throw "unexpected usage error: " + why }
+        Usage(why) => { throw "unexpected usage error: " + why },
+        Help => { throw "unexpected help" }
     }
 }
 
 fn usageOf(args: string[]) -> string {
     match cli.parseArgs(args) {
         Opts(o) => "",
-        Usage(why) => why
+        Usage(why) => why,
+        Help => "help"
     }
 }
 
@@ -58,6 +60,12 @@ fn missingFileIsUsageError() {
     testing.assertEq(usageOf([]), "missing command", "missing command")
 }
 
+fn helpIsNotAnError() {
+    testing.assertEq(usageOf(["help"]), "help", "help")
+    testing.assertEq(usageOf(["--help"]), "help", "--help")
+    testing.assertEq(usageOf(["-h"]), "help", "-h")
+}
+
 fn main() {
     testing.run("cli", [
         parsesSummaryWithFilters,
@@ -67,6 +75,7 @@ fn main() {
         unknownCommandIsUsageError,
         unknownFlagIsUsageError,
         flagWithoutValueIsUsageError,
-        missingFileIsUsageError
+        missingFileIsUsageError,
+        helpIsNotAnError
     ])
 }
