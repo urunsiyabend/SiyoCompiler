@@ -391,7 +391,7 @@ public class Binder {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
             variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
-        } else if (initializer instanceof BoundIndexExpression) {
+        } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
             if (inherited != null) variableSymbol.setDeclaredTypeName(inherited);
@@ -409,9 +409,9 @@ public class Binder {
             StructSymbol elementStruct = arr.getElements().isEmpty()
                     ? null
                     : _typeResolver.resolveStructType(arr.getElements().get(0));
-            if (elementStruct == null && annotation != null && annotation.getData().endsWith("[]")) {
-                String elementName = annotation.getData().substring(0, annotation.getData().length() - 2);
-                elementStruct = _structTypes.get(elementName);
+            if (elementStruct == null && annotation != null) {
+                String elementName = TypeResolver.elementTypeNameOf(annotation.getData());
+                if (elementName != null) elementStruct = _structTypes.get(elementName);
             }
             if (elementStruct != null) {
                 _typeResolver.trackArrayType(variableSymbol, arr.getElementType(), elementStruct);
@@ -438,6 +438,13 @@ public class Binder {
                 StructSymbol st = _structTypes.get(spawnExpr.getActorTypeName());
                 if (st != null) _typeResolver.trackStructType(variableSymbol, st);
             }
+        } else if (isPopCall(initializer) && initializer.getClassType() == SiyoArray.class) {
+            // An array popped from an array of arrays: imut row = pop(rows)
+            String elementName = TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(initializer));
+            Class<?> elemType = elementName != null ? _typeResolver.lookupType(elementName) : null;
+            StructSymbol elemStruct = elementName != null ? _structTypes.get(elementName) : null;
+            if (elemStruct != null) _typeResolver.trackArrayType(variableSymbol, elemType, elemStruct);
+            else _typeResolver.trackArrayType(variableSymbol, elemType != null ? elemType : Object.class);
         } else if (initializer instanceof BoundCallExpression callExpr2 && callExpr2.getClassType() == SiyoArray.class) {
             // Track element type (and struct identity) for functions returning arrays.
             Class<?> elemType = _typeResolver.resolveArrayElementType(initializer);
@@ -589,17 +596,18 @@ public class Binder {
         return result;
     }
 
+    private static boolean isPopCall(BoundExpression expression) {
+        return expression instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP;
+    }
+
     private BoundExpression bindExpressionWithTypeHint(ExpressionSyntax syntax, codeanalysis.syntax.SyntaxToken typeAnnotation) {
         BoundExpression result = bindExpressionInternal(syntax);
         if (result instanceof BoundArrayLiteralExpression arr && arr.getElements().isEmpty() && typeAnnotation != null) {
             String typeName = typeAnnotation.getData();
-            // Strip [] suffix to get element type
-            Class<?> elemType;
-            if (typeName.endsWith("[]")) {
-                elemType = _typeResolver.lookupType(typeName.substring(0, typeName.length() - 2));
-            } else {
-                elemType = _typeResolver.lookupType(typeName);
-            }
+            // Both T[] and Array<T> name their element; taking Array<T> itself
+            // as the element made ts[0] an array, whatever the array held.
+            String elementName = TypeResolver.elementTypeNameOf(typeName);
+            Class<?> elemType = _typeResolver.lookupType(elementName != null ? elementName : typeName);
             if (elemType != null) {
                 result = new BoundArrayLiteralExpression(new ArrayList<>(), elemType);
             }
@@ -1844,6 +1852,18 @@ public class Binder {
             }
         }
 
+        // push widens to what the array holds, as an assignment to a slot does.
+        if (function == BuiltinFunctions.PUSH && boundArguments.size() == 2) {
+            boundArguments.set(1, widenTo(boundArguments.get(1), slotType(boundArguments.get(0))));
+        }
+
+        // pop is a builtin, so no signature says what it returns: the array does.
+        if (function == BuiltinFunctions.POP && !boundArguments.isEmpty()) {
+            Class<?> elementType = _typeResolver.resolveArrayElementType(boundArguments.get(0));
+            return new BoundCallExpression(function, boundArguments,
+                    elementType == Object.class ? null : elementType);
+        }
+
         return new BoundCallExpression(function, boundArguments,
                 inferGenericResultType(function, boundArguments));
     }
@@ -1905,9 +1925,21 @@ public class Binder {
         }
 
         // Map iteration: for key in map { ... } → for key in map.keys() { ... }
+        // Set iteration: for item in set { ... } → for item in set.values() { ... }
+        // The written type says what the loop variable is: a Map<K, V> walks Ks
+        // and a Set<T> walks Ts. An untyped map or set walks erased values.
+        String walkedTypeName = null;
         if (collection.getClassType() == SiyoMap.class) {
+            walkedTypeName = TypeResolver.mapKeyTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
             collection = new BoundCallExpression(BuiltinFunctions.MAP_KEYS,
                     java.util.List.of(collection));
+        } else if (collection.getClassType() == SiyoSet.class) {
+            walkedTypeName = TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
+            collection = new BoundCallExpression(BuiltinFunctions.SET_VALUES,
+                    java.util.List.of(collection));
+        } else if (collection.getClassType() == Object.class) {
+            // An erased value: what it is to walk it is decided when it runs.
+            collection = new BoundCallExpression(BuiltinFunctions.ITERABLE, java.util.List.of(collection));
         }
 
         int uid = _labelCounter++; // unique id to avoid variable name collisions
@@ -1944,6 +1976,10 @@ public class Binder {
         // Resolve element type from the original collection expression
         Class<?> elementType = _typeResolver.resolveArrayElementType(collection);
         StructSymbol structType = _typeResolver.resolveStructTypeFromCollection(collection);
+        if (walkedTypeName != null && _typeResolver.lookupType(walkedTypeName) != null) {
+            elementType = _typeResolver.lookupType(walkedTypeName);
+            structType = _structTypes.get(walkedTypeName);
+        }
         if (structType != null) {
             _typeResolver.trackArrayType(collectionVar, elementType, structType);
         } else {
@@ -2191,7 +2227,7 @@ public class Binder {
         if (syntax.getTarget() instanceof IndexExpressionSyntax indexSyntax) {
             BoundExpression target = bindExpression(indexSyntax.getTarget());
             BoundExpression index = bindExpression(indexSyntax.getIndex());
-            return new BoundIndexAssignmentExpression(target, index, value);
+            return new BoundIndexAssignmentExpression(target, index, widenTo(value, slotType(target)));
         }
 
         if (syntax.getTarget() instanceof MemberAccessExpressionSyntax memberSyntax) {
@@ -2202,11 +2238,24 @@ public class Binder {
             if (structType != null && !structType.hasField(memberName)) {
                 reportNoSuchField(memberSyntax.getMember().getSpan(), structType, memberName);
             }
+            if (structType != null && structType.hasField(memberName)) {
+                value = widenTo(value, structType.getFieldType(memberName));
+            }
             return new BoundMemberAssignmentExpression(target, memberName, value);
         }
 
         _diagnostics.reportCannotAssign(syntax.getEqualsToken().getSpan(), "expression");
         return value;
+    }
+
+    /** What a container's slot is declared to hold, or Object when nothing says. */
+    private Class<?> slotType(BoundExpression container) {
+        if (container.getClassType() == SiyoMap.class) {
+            Class<?> valueType = _typeResolver.resolveMapValueType(container);
+            return valueType != null ? valueType : Object.class;
+        }
+        return container.getClassType() == SiyoArray.class
+                ? _typeResolver.resolveArrayElementType(container) : Object.class;
     }
 
     /**
@@ -2232,6 +2281,11 @@ public class Binder {
             FieldAssignmentSyntax field = (FieldAssignmentSyntax) node;
             String fieldName = field.getFieldName().getData();
             BoundExpression fieldValue = bindExpression(field.getValue());
+            if (structType.hasField(fieldName)) {
+                // A field widens like a parameter: `r: long` given 0 holds a long,
+                // and reading an Integer back as one failed at run time.
+                fieldValue = widenTo(fieldValue, structType.getFieldType(fieldName));
+            }
             if (!structType.hasField(fieldName)) {
                 reportNoSuchField(field.getFieldName().getSpan(), structType, fieldName);
             }

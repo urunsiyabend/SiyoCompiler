@@ -1399,6 +1399,12 @@ public class Evaluator {
             SiyoMap map = (SiyoMap) arguments[0];
             return map.keys();
         }
+        if (function == BuiltinFunctions.SET_VALUES) {
+            return ((SiyoSet) arguments[0]).values();
+        }
+        if (function == BuiltinFunctions.ITERABLE) {
+            return SiyoRuntime.iterable(arguments[0]);
+        }
         if (function == BuiltinFunctions.NEW_MAP) {
             return new SiyoMap();
         }

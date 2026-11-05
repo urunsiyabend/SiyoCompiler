@@ -2436,6 +2436,19 @@ public class Emitter {
                     "()Lcodeanalysis/SiyoArray;", false);
             return;
         }
+        if (function == BuiltinFunctions.SET_VALUES) {
+            emitCoerceArg(node.getArguments().get(0), SiyoSet.class);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoSet", "values",
+                    "()Lcodeanalysis/SiyoArray;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.ITERABLE) {
+            emitExpression(node.getArguments().get(0));
+            emitBoxIfNeeded(node.getArguments().get(0).getClassType());
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "iterable",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            return;
+        }
         if (function == BuiltinFunctions.NEW_MAP) {
             _mv.visitTypeInsn(NEW, "codeanalysis/SiyoMap");
             _mv.visitInsn(DUP);
@@ -2491,6 +2504,8 @@ public class Emitter {
             _mv.visitInsn(ICONST_1);
             _mv.visitInsn(ISUB);
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "remove", "(I)Ljava/lang/Object;", true);
+            // The binder gave this call the type of what the array holds.
+            emitUnboxIfNeeded(node.getClassType());
             return;
         }
         if (function == BuiltinFunctions.MAP_ARRAY) {

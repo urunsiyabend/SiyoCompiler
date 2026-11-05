@@ -442,6 +442,24 @@ public class SiyoRuntime {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
+    /** What a for loop walks over an erased value: a map's keys, a set's elements, an array itself. */
+    public static Object iterable(Object value) {
+        if (value instanceof SiyoMap map) return map.keys();
+        if (value instanceof SiyoSet set) return set.values();
+        return value;
+    }
+
+    /** Whether {@link Integer#parseInt} reads the whole of s: optional minus, ASCII digits, in range. */
+    public static boolean isInt(String s) {
+        if (s == null || !s.matches("-?[0-9]+")) return false;
+        try {
+            Integer.parseInt(s);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     /**
      * Parses a JSON object, reporting malformed input.
      *

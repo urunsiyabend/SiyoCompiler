@@ -81,6 +81,13 @@ public class TypeResolver {
             StructSymbol owner = resolveStructType(memberExpr.getTarget());
             return owner != null ? owner.getFieldTypeName(memberExpr.getMemberName()) : null;
         }
+        if (expr instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP
+                && !call.getArguments().isEmpty()) {
+            return elementTypeNameOf(declaredTypeNameOf(call.getArguments().get(0)));
+        }
+        if (expr instanceof BoundCallExpression call && call.getFunction().getTypeParameters().isEmpty()) {
+            return call.getFunction().getDeclaredReturnTypeName();
+        }
         return null;
     }
 
@@ -122,6 +129,13 @@ public class TypeResolver {
      * @param typeName The container type as written, or null.
      * @return The element type name, or null when the type names no element.
      */
+    /** The key type a {@code Map<K, V>} is written with, or null for any other name. */
+    public static String mapKeyTypeNameOf(String typeName) {
+        if (!"Map".equals(genericBaseName(typeName))) return null;
+        List<String> arguments = typeArgumentsOf(typeName);
+        return arguments.size() == 2 ? arguments.get(0) : null;
+    }
+
     public static String elementTypeNameOf(String typeName) {
         if (typeName == null) return null;
         if (typeName.endsWith("[]")) return typeName.substring(0, typeName.length() - 2);
@@ -302,6 +316,10 @@ public class TypeResolver {
             return resolveStructTypeFromCollection(indexExpr.getTarget());
         }
         // Call expression returning struct
+        if (target instanceof BoundCallExpression popped && popped.getFunction() == BuiltinFunctions.POP
+                && popped.getClassType() == SiyoStruct.class && !popped.getArguments().isEmpty()) {
+            return resolveStructTypeFromCollection(popped.getArguments().get(0));
+        }
         if (target instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
             // Check return struct name on FunctionSymbol first
             String returnStructName = callExpr.getFunction().getReturnStructName();

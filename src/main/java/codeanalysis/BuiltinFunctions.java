@@ -205,6 +205,20 @@ public class BuiltinFunctions {
             SiyoArray.class
     );
 
+    // Internal builtin: convert set to values array (used by for-in desugaring)
+    public static final FunctionSymbol SET_VALUES = new FunctionSymbol(
+            "$setValues",
+            List.of(new ParameterSymbol("set", SiyoSet.class)),
+            SiyoArray.class
+    );
+
+    // Internal builtin: what a for loop over an erased value walks
+    public static final FunctionSymbol ITERABLE = new FunctionSymbol(
+            "$iterable",
+            List.of(new ParameterSymbol("value", Object.class)),
+            Object.class
+    );
+
     public static final FunctionSymbol NEW_SET = new FunctionSymbol(
             "set",
             List.of(),
@@ -350,7 +364,7 @@ public class BuiltinFunctions {
 
     public static List<FunctionSymbol> getAll() {
         return List.of(LEN, TO_STRING, PARSE_INT, PARSE_LONG, PARSE_FLOAT, TO_INT, TO_INT_LONG, TO_INT_STR, TO_LONG, TO_FLOAT, TO_DOUBLE,
-                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
+                PRINT, PRINTLN, RANGE, PUSH, REMOVE_AT, POP, NEW_MAP, NEW_SET, MAP_KEYS, SET_VALUES, ITERABLE, SORT, CHANNEL, CHANNEL_BUFFERED, SUBSTRING, CONTAINS, INPUT, ERROR, RANDOM,
                 CHR, ORD, INDEX_OF, STARTS_WITH, ENDS_WITH, REPLACE, TRIM, TO_UPPER, TO_LOWER, SPLIT, HTTP_GET, HTTP_POST, CAN_READ, ACTOR_HANDLE,
                 MAP_ARRAY, FILTER, REDUCE, FOR_EACH,
                 FIELDS, FIELD, SET_FIELD, TO_MAP, TYPE_NAME, TYPE_OF);
