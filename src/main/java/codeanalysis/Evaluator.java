@@ -330,7 +330,11 @@ public class Evaluator {
             case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
-            case CallExpression -> evaluateCallExpression((BoundCallExpression) node);
+            case CallExpression -> {
+                BoundCallExpression call = (BoundCallExpression) node;
+                Object value = evaluateCallExpression(call);
+                yield call.getResultTypeOverride() != null ? readAs(call.getResultTypeOverride(), value) : value;
+            }
             case InterfaceCallExpression -> evaluateInterfaceCall((BoundInterfaceCallExpression) node);
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case MapLiteralExpression -> evaluateMapLiteralExpression((codeanalysis.binding.BoundMapLiteralExpression) node);
@@ -966,7 +970,9 @@ public class Evaluator {
                 }
                 var bindings = arm.variant().bindings();
                 for (int i = 0; i < bindings.size(); i++) {
-                    if (bindings.get(i) != null) declareVariable(bindings.get(i), union.get(i));
+                    if (bindings.get(i) != null) {
+                        declareVariable(bindings.get(i), readPayloadAs(bindings.get(i).getType(), union.get(i)));
+                    }
                 }
                 evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
@@ -1295,9 +1301,38 @@ public class Evaluator {
     private Object evaluateMemberAccessExpression(BoundMemberAccessExpression node) throws Exception {
         Object target = evaluateExpression(node.getTarget());
         if (target instanceof SiyoStruct struct) {
-            return struct.getField(node.getMemberName());
+            return readPayloadAs(node.getClassType(), struct.getField(node.getMemberName()));
         }
         throw new Exception("Cannot access member on type: " + target.getClass());
+    }
+
+    /**
+     * An erased value read at a declared number type, widened the way the
+     * compiled backend's unboxing widens it: a Box<float>'s value given 3
+     * reads as 3.0 on both backends.
+     */
+    /**
+     * A payload or field read at the type its declaration, or a generic type
+     * argument, gives it. A value of another kind fails here as the compiled
+     * cast does, rather than passing as the wrong type: an Option<int> built
+     * from a string, or a Box<int> whose value was set through an erased Box.
+     */
+    private static Object readPayloadAs(Class<?> type, Object value) {
+        Object read = readAs(type, value);
+        boolean scalar = type == Integer.class || type == Long.class || type == Double.class
+                || type == Boolean.class || type == String.class;
+        if (scalar && read != null && !type.isInstance(read)) {
+            throw new ClassCastException("class " + read.getClass().getName() + " cannot be cast to class " + type.getName());
+        }
+        return read;
+    }
+
+    private static Object readAs(Class<?> type, Object value) {
+        if (type == Double.class && (value instanceof Integer || value instanceof Long)) {
+            return ((Number) value).doubleValue();
+        }
+        if (type == Long.class && value instanceof Integer i) return i.longValue();
+        return value;
     }
 
     /**

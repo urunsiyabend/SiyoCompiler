@@ -417,8 +417,14 @@ public class Binder {
                 || initializer instanceof BoundMemberAccessExpression
                 || initializer instanceof BoundStructLiteralExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
+            // A field or a literal is followed only for the struct identity it
+            // carries, as in imut its = g.items on a Group<Row>.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
-            if (inherited != null) variableSymbol.setDeclaredTypeName(inherited);
+            boolean followed = !(initializer instanceof BoundMemberAccessExpression)
+                    && !(initializer instanceof BoundStructLiteralExpression);
+            if (inherited != null && (followed || namesADeclaredType(inherited))) {
+                variableSymbol.setDeclaredTypeName(inherited);
+            }
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
@@ -946,6 +952,22 @@ public class Binder {
     private final Map<BoundMatchExpression, BoundMatchExpression> _erasableMatches = new java.util.IdentityHashMap<>();
     private final Map<BoundMatchExpression, String> _mixedArmMessages = new java.util.IdentityHashMap<>();
 
+    /** A number, a bool or a string: a value whose kind a slot cannot quietly change. */
+    private static boolean isScalar(Class<?> type) {
+        return type == Integer.class || type == Long.class || type == Double.class
+                || type == Boolean.class || type == String.class;
+    }
+
+    /** Whether a type name mentions a struct or sum type this file can see. */
+    private boolean namesADeclaredType(String typeName) {
+        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
+            if (!word.isEmpty() && (_structTypes.containsKey(word) || _typeResolver.getUnionTypes().containsKey(word))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String differentArmTypes(Class<?> first, Class<?> other) {
         return "Match arms give different types, " + siyoTypeName(first) + " and " + siyoTypeName(other)
                 + "; they may differ only where the match ends a function returning object";
@@ -1153,7 +1175,11 @@ public class Binder {
             VariableSymbol binding = new VariableSymbol(token.getData(), true, payloadType);
             // The payload's written type is what it holds: T(xs) with T(Array<S>)
             // binds an Array<S>, whose elements are known to be S.
-            if (!payloadTypeName.equals("object")) binding.setDeclaredTypeName(payloadTypeName);
+            // Only where it says which struct or type argument the payload holds:
+            // a plain float[] payload stays as 0.9.0 read it.
+            if (!payloadTypeName.equals("object") && (!typeArguments.isEmpty() || namesADeclaredType(payloadTypeName))) {
+                binding.setDeclaredTypeName(payloadTypeName);
+            }
             bindings.add(binding);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
             if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
@@ -1475,6 +1501,28 @@ public class Binder {
                 values.put(entry.getKey(), value);
             }
             return new BoundStructLiteralExpression(symbol, values, typeName);
+        }
+        // Likewise a generic sum type's payload: Some(2) given as an Option<float>
+        // holds 2.0, so both backends read the same value back.
+        if (expression instanceof BoundUnionLiteralExpression union
+                && !union.getUnionType().getTypeParameters().isEmpty()
+                && union.getUnionType().getName().equals(TypeResolver.genericBaseName(typeName))) {
+            List<String> parameters = union.getUnionType().getTypeParameters();
+            List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
+            if (arguments.size() != parameters.size()) return expression;
+            Map<String, String> bindings = new HashMap<>();
+            for (int i = 0; i < parameters.size(); i++) bindings.put(parameters.get(i), arguments.get(i));
+            codeanalysis.UnionSymbol.Variant variant = union.getUnionType().getVariant(union.getVariantName());
+            if (variant == null) return expression;
+            List<BoundExpression> payload = new ArrayList<>();
+            for (int i = 0; i < union.getArguments().size(); i++) {
+                String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i), parameters, bindings);
+                Class<?> payloadType = _typeResolver.lookupType(payloadTypeName);
+                BoundExpression value = union.getArguments().get(i);
+                if (payloadType != null) value = widenLiteral(widenTo(value, payloadType), payloadTypeName);
+                payload.add(value);
+            }
+            return new BoundUnionLiteralExpression(union.getUnionType(), union.getVariantName(), payload);
         }
         return expression;
     }
@@ -2097,6 +2145,17 @@ public class Binder {
         // push widens to what the array holds, as an assignment to a slot does.
         if (function == BuiltinFunctions.PUSH && boundArguments.size() == 2) {
             boundArguments.set(1, widenTo(boundArguments.get(1), slotType(boundArguments.get(0))));
+            // An array declared to hold one kind of value, by an annotation or a
+            // generic result, cannot be given another: compiled, the element
+            // failed when read back. An array only inferred from a literal is
+            // left as 0.9.0 left it.
+            Class<?> holds = slotType(boundArguments.get(0));
+            Class<?> given = boundArguments.get(1).getClassType();
+            boolean declared = _typeResolver.declaredTypeNameOf(boundArguments.get(0)) != null;
+            if (declared && isScalar(holds) && isScalar(given) && holds != given) {
+                _diagnostics.reportError(syntax.getArguments().get(1).getSpan(),
+                        "push: the array holds " + siyoTypeName(holds) + ", not " + siyoTypeName(given));
+            }
         }
 
         // pop is a builtin, so no signature says what it returns: the array does.
@@ -2523,7 +2582,16 @@ public class Binder {
                 reportNoSuchField(memberSyntax.getMember().getSpan(), structType, memberName);
             }
             if (structType != null && structType.hasField(memberName)) {
-                value = widenTo(value, structType.getFieldType(memberName));
+                Class<?> fieldType = structType.getFieldType(memberName);
+                // A generic struct's field holds what the value's type argument says.
+                if (!structType.getTypeParameters().isEmpty()) {
+                    Class<?> substituted = _typeResolver.lookupType(_typeResolver.fieldTypeNameOf(target, memberName));
+                    if (substituted != null) fieldType = substituted;
+                }
+                value = widenTo(value, fieldType);
+                if (isScalar(fieldType) && isScalar(value.getClassType()) && fieldType != value.getClassType()) {
+                    _diagnostics.reportCannotConvert(syntax.getEqualsToken().getSpan(), value.getClassType(), fieldType);
+                }
             }
             return new BoundMemberAssignmentExpression(target, memberName, value);
         }

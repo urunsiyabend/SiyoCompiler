@@ -394,13 +394,13 @@ class DataKitRegressionTest {
 
     @Test
     void aPayloadWidensToItsDeclaredNumberType() throws Exception {
-        assertBoth("3 3.0 3.0 9000000001", """
+        assertBoth("3 3.0 1.0,2.0 9000000001", """
                 type V = I(long) | F(float) | A(Array<float>)
                 fn show(v: V) -> string {
                     match v {
                         I(n) => toString(n + 1),
                         F(x) => toString(x),
-                        A(xs) => toString(xs[0] + xs[1])
+                        A(xs) => toString(xs[0]) + "," + toString(xs[1])
                     }
                 }
                 fn main() {
@@ -573,5 +573,92 @@ class DataKitRegressionTest {
             assertEquals("97 44 34 120 13 10 121 34 13 10 98 44 34 112 13 113 34 10 233 44 \n111 107 65533 \n18\ncannot read missing.txt",
                     result.stdout(), mode + ": " + result.stderr());
         }
+    }
+
+    // --- Found in review: what the type substitutions must not change ------------
+
+    @Test
+    void aGenericPayloadWidensToItsDeclaredTypeArgument() throws Exception {
+        assertBoth("2.0 0.6666666666666666\nSome(5.0)", """
+                type Option<T> = Some(T) | None
+                fn half(x: int) -> Option<float> { return Some(x) }
+                fn main() {
+                    imut n: Option<float> = Some(2)
+                    match n { Some(v) => print(toString(v) + " "), None => print("none ") }
+                    match half(2) { Some(v) => println(toString(v / 3)), None => println("none") }
+                    imut m: Option<float> = Some(5)
+                    println(toString(m))
+                }
+                """, "GenericPayloadWidens");
+    }
+
+    @Test
+    void aGenericValueOfTheWrongKindFailsTheSameWayOnBothBackends() throws Exception {
+        assertBoth("payload failed\nfield failed", """
+                type Option<T> = Some(T) | None
+                struct Box<T> { value: T }
+                fn find(xs: Array<string>) -> Option<int> {
+                    for x in xs { return Some(x) }
+                    None
+                }
+                fn set(b: Box) { b.value = "s" }
+                fn main() {
+                    try {
+                        match find(["a"]) { Some(i) => println(toString(i + 1)), None => println("none") }
+                    } catch e { println("payload failed") }
+                    imut b = Box { value: 1 }
+                    set(b)
+                    try { println(toString(b.value + 1)) } catch e { println("field failed") }
+                }
+                """, "GenericWrongKind");
+    }
+
+    @Test
+    void anArrayDeclaredByAGenericResultTakesOnlyItsKind() {
+        String message = harness.firstDiagnostic("""
+                fn wrap<T>(x: T) -> Array<T> { [x] }
+                fn main() {
+                    mut xs = wrap(1)
+                    push(xs, "two")
+                }
+                """);
+        assertEquals("push: the array holds int, not string", message);
+    }
+
+    @Test
+    void whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged() throws Exception {
+        // A literal-inferred array, a plain array payload and a field taken into
+        // a variable read as they did in 0.9.0.
+        assertBoth("0 2\na\ntwo", """
+                type V = F(float[]) | I(int[]) | N
+                struct S { items: int[] }
+                fn main() {
+                    imut xs = [1, 2, 3]
+                    match F(xs) { F(ys) => println(toString(ys[0] / 2) + " " + toString(ys[1])), I(zs) => println("i"), N => println("n") }
+                    match I(["a"]) { F(ys) => println("f"), I(zs) => println(toString(zs[0])), N => println("n") }
+                    imut s = S { items: [1] }
+                    imut items = s.items
+                    push(items, "two")
+                    println(toString(items[1]))
+                }
+                """, "ZeroNineUnchanged");
+    }
+
+    @Test
+    void aNumberReturnedFromAnObjectFunctionIsBoxed() throws Exception {
+        assertBoth("3 neg 4", """
+                type V = I(int) | N
+                fn r(n: int) -> object {
+                    if n > 0 { return n }
+                    return "neg"
+                }
+                fn viaArm(v: V) -> object {
+                    match v {
+                        I(n) => { return n + 1 }
+                        _ => "x"
+                    }
+                }
+                fn main() { println(toString(r(3)) + " " + toString(r(-1)) + " " + toString(viaArm(I(3)))) }
+                """, "ObjectReturnBoxed");
     }
 }

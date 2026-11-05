@@ -620,6 +620,11 @@ public class Emitter {
                     }
                 }
             }
+            // A number or bool returned from a function returning object is boxed:
+            // `return n` there failed verification.
+            if (_currentReturnType == Object.class && exprType != null && exprType != Object.class) {
+                emitBoxIfNeeded(exprType);
+            }
             Class<?> retType = _currentReturnType != null ? _currentReturnType : exprType;
             _mv.visitInsn(getReturnInsn(retType));
         } else {
