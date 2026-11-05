@@ -60,26 +60,68 @@ println(show(I(2)))
 
 ### Caught in review
 
-Two rounds of independent review found that G1, G2 and G8 read values at types
-nothing had checked. The result was compiled ClassCastExceptions and
-NullPointerExceptions, and backends disagreeing (`2.0` against `2`), for
-programs 0.9.0 ran consistently. Fixed before release:
+Three rounds of independent review found that G1, G2 and G8 read values at
+types nothing had checked. The result was compiled ClassCastExceptions and
+NullPointerExceptions, and backends disagreeing (`1.0` against `1`), for
+programs 0.9.0 ran consistently. The reproducers were:
 
-- A number or bool payload, and a number result bound through anything but a
-  parameter or an array element, stay erased, as in 0.9.0, since either may
-  hold null.
-- Arguments that disagree erase the type parameter.
-- The interpreter widens and checks erased reads as the compiled casts do.
-- Declared names are set only where they carry struct or generic identity.
-- `push` into a declared array and assignment to a generic field are checked.
-- A number returned from an `object` function is boxed.
+- a missing map key through `get<K, V>(m: Map<K, V>, k: K) -> Array<V>`;
+- an erased or null argument (`both(o, 2.5)` with `o: object`);
+- an erased write into `wrap(1)`;
+- `null` stored through an erased `Box`;
+- an `Opt<Array<int>>` holding a string;
+- reassigning a `Box<Array<float>>` field.
 
-The tests are `aNumberPayloadOfAGenericSumTypeReadsAsItDidInZeroNine`,
-`aGenericValueOfTheWrongKindFailsTheSameWayOnBothBackends`,
-`anArrayDeclaredByAGenericResultTakesOnlyItsKind`,
-`whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged`,
-`aNumberReturnedFromAnObjectFunctionIsBoxed` and
-`aMissingValueThroughAGenericCallOrPayloadReadsAsNullOnBothBackends`.
+The third review also found that annotating an existing int array
+`Array<float>` read `1.0` compiled and `1` interpreted.
+
+A fourth review found that the erasing went too far for generic structs.
+`mk(1.5).value * 2` raised compiled, a `Box<Map<string, int>>` field could not
+be indexed, and a struct array from a generic call that an erased path had
+written to failed compiled only. A type argument naming a struct only through
+an annotation on an erased value (`imut o: Opt<R> = opt(5)`) failed where 0.9.0
+printed `5`.
+
+What shipped is a rule rather than patches:
+
+- **A type argument supplies a name, not a class.** Results, payloads and
+  elements keep 0.9.0's class. A struct name makes member reads possible, and
+  the member read casts.
+- **A generic struct keeps its type arguments.** Every read at a declared type
+  (a field, an element, a map value, a payload) is checked identically on both
+  backends: the interpreter applies the compiled read's widening, null check
+  and kind check.
+- **Uncertain arguments.** An erased, null or disagreeing argument erases the
+  parameter, and a bare type-parameter result keeps 0.9.0's class.
+- **Assignment and annotations.** Generic field assignment widens literals, and
+  a payload literal is checked against an annotation.
+
+The tests, which take the reviewers' cases, are
+`anErasedOrNullArgumentErasesTheTypeParameter`,
+`aGenericStructFieldOfTheWrongKindOrNullFailsAlikeOnBothBackends`,
+`aGenericPayloadOfCollectionsReadsAsInZeroNineAndAStructOneIsChecked`,
+`aGenericResultOverNumbersAndStringsIsErasedAsInZeroNine`,
+`aNumberPayloadOfAGenericSumTypeReadsAsItDidInZeroNine`,
+`whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged` and
+`aMissingValueThroughAGenericCallOrPayloadReadsAsNullOnBothBackends` and
+`aStructNameCarriesIdentityWhileTheValueStaysAsZeroNineHadIt`.
+
+These reproducers sit outside the test suite: the review rounds' 87 cases and 2
+more found while fixing them (89 programs) were rerun on 0.9.0 and the branch, both backends. Each now
+matches 0.9.0. The exceptions are a divergence 0.9.0 itself had identically
+(erased arithmetic, `m["absent"]` on a `Map<string, int>`, a method call on an
+erased struct), a compile-time error for a type-wrong program, and a generic
+struct case 0.9.0 could not parse, where both backends agree.
+
+The same review found `strings.isFloat`'s regular expression quadratic, taking
+about 5 s for 32,000 digits followed by `x`. It is now a single linear pass,
+tested by `isFloatIsLinearOnALongRunOfDigits`. It also found that
+`csv.formatRow([""])` wrote a blank line that read back as nothing, which
+`aLoneEmptyCellRoundTripsAndABlankLineIsMarked` now covers.
+
+Two rounds of these fixes, and the checks above, were each overtaken by the
+next review. Generic substitution in this compiler is name-based, with no
+checked value types behind it, so the safe course was to trust less.
 
 ## DataKit's own bugs, found in testing
 
@@ -90,6 +132,14 @@ The tests are `aNumberPayloadOfAGenericSumTypeReadsAsItDidInZeroNine`,
 | In JSON, an unknown key rejected the first record that had it but not later ones. | Like an unknown CSV column, it is reported once and rejects no row. The data is still invalid. | `unknownColumnsAreTheFilesProblem` |
 | A bound printed as `1.0` for an int column. | Bounds print in the column's type. | `boundsAndValuesAreChecked` |
 | A schema column declared twice was missed when its first declaration was itself invalid. | Names are checked before each column is read. | golden `schema_bad.txt` |
+| **Security.** `--out` checked that the path was free, then wrote it with a truncating, link-following write. A race that swapped in a symbolic link clobbered the link's target on both backends, on the first attempt. | `io.writeNew` creates the file atomically (`CREATE_NEW`) and never opens an existing file or link. The check before it only fails early. | `anOutputPathThatIsALinkIsNeverFollowed`, `writeNewNeverOpensWhatIsAlreadyThere`, the reviewer's `race.py` (24 attempts, 0 clobbered) |
+| Floats were written to 17 decimal places, so `1e-18` and `2e-18` became `0.0`. `transform` wrote zeros, `group` merged them into one group, and `report` counted one distinct value. | `model.plain` moves the digits of the shortest representation that reads back as the float, with no rounding. Group keys use it, with `-0.0` equal to `0.0`. | `floatsSurviveTransformGroupAndReportExactly` (checked bit for bit against Java's `Double`), `plainNeverUsesAnExponent`, `tinyFloatsAreSeparateGroupsAndAnInfiniteSumIsAnError` |
+| Int bounds were held as floats, so `min: 9007199254740993` accepted `9007199254740992`. | A bound keeps its written value, and an integer bound stays an exact int64 `IntV`. | `integerBoundsAreComparedExactly` (checked with `BigInteger`), `integerBoundsAreExact` |
+| A quoted empty record (`""`) was skipped as a blank line, so a required column passed with 0 rows. | `std/csv` marks physically blank lines (`CsvRow.blank`), and only those are skipped. | `everyRejectedRecordIsCountedAndAQuotedEmptyRecordIsChecked`, `aQuotedEmptyRecordIsNotABlankLine` |
+| A JSON record that was not an object was left out of `rows` and `invalidRows` when it came first: `[1]` gave 0 and 0. | Row problems are told apart from header and file problems by place, not by line number. | same, `aJsonRecordThatIsNotAnObjectIsCountedWhereverItIs` |
+| A float sum past the largest float gave `Infinity`, or `null` in JSON, with exit 0. | It is an error, exit 3. | `aFloatSumPastTheLargestFloatIsAnErrorNeverInfinity` |
+| A bound of the other number kind was compared as floats: an int column with `max 9007199254740992.0` accepted 9007199254740993. | `model.compareLongFloat` compares a long with a float exactly: it orders by the rounded long, and recovers an equal float's integer value from its 32- and 16-bit parts. | `aLongAndAFloatCompareExactly`, the fourth review's `imaxf` and `fminI` probes |
+| The README promised every problem but output listed 100. | The README documents the cap, and that JSON's `problemCount` counts every problem. | `problemsBeyondAHundredAreCountedNotListed` |
 
 ## Deferred
 
@@ -103,7 +153,9 @@ The tests are `aNumberPayloadOfAGenericSumTypeReadsAsItDidInZeroNine`,
 | D4 | type rule | `os.exit` is not known to diverge, so a function that calls `fail(...)` on one path still needs a value on that path. This is the same as LogScope D4 for `error`. | Needs a never type. | Unreachable placeholder values after `fail`. |
 | D5 | type rule | `[1, 1.5]` is rejected as a mixed literal, and `Empty { }` is unsupported. Both are known (TaskFlow D7, FUTURE.md). | Not needed. | Not applicable. |
 | D6 | naming | A local variant named like one an import exports, such as `Invalid` beside `std/json`'s `Invalid`, must be written qualified. The diagnostic says so. | A language rule, documented since 0.6.0. | Named `Rejected`. |
-| D8 | type rule | Reassigning a generic struct variable to a literal of other type arguments is not reported; the field read fails on both backends. A struct type parameter named like a struct hides it, as function and sum type parameters already did. | Found in review; the rest of generic struct checking is in place. | Not applicable. |
+| D8 | type rule | Reassigning a generic struct variable to a literal of other type arguments is not reported at compile time; the field read fails on both backends. A struct type parameter named like a struct hides it, as function and sum type parameters already did. A generic call over numbers gives erased values (`wrap(1)`), which a typed variable narrows. | Found in review. The rest of generic struct checking is in place, and trusting number type arguments is what review showed to be unsound here. | `pipeline_test` narrows the ints it sorts. |
+| D9 | ergonomics | Unary minus is not defined for a `long`: `-x` is "Unary operator '-' is not defined for type Long". The same in 0.9.0. | Not needed by DataKit; it belongs with numeric `as`. | `0L - x` in tests. |
+| D10 | parity gap | Arithmetic on an erased value is read at the other operand's type compiled: `o * 2` with `o` an erased `1.5` raises compiled and gives `3.0` interpreted. The same in 0.9.0. A generic struct whose type argument is never known (`Box` written bare, an erased value, or a list mixing `Box<int>` with `Box<string>`) has erased fields and reaches it. A list mixing number kinds joins at the wider kind and does not (`aListOfGenericStructsKeepsTheirTypeArgument`). | Typing erased arithmetic dynamically changes what 0.9.0 programs compute; every place a type argument can be known now carries it. | Fields are read through known type arguments. |
 | D7 | output | Column padding counts UTF-16 units, so a non-ASCII group key misaligns its table row. This is TaskFlow D9 again. | Display width is its own problem. | Only text output is affected. |
 
 A CSV file's bytes are decoded as UTF-8. Invalid bytes become U+FFFD, as in

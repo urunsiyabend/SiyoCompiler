@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,858 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,872 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -43,15 +43,17 @@ println(groups[0].items[0].name)
 and `Map<string, Array<T>>` likewise. Only a bare `-> T` kept its type.
 
 - A call now matches its argument types against the declaration through arrays,
-  maps, sets, generic structs and function types, and substitutes the result.
+  maps, sets, generic structs and function types, and names its result with
+  them: struct and sum type arguments carry through; number, bool and string
+  ones are erased as in 0.9.0 (see the rule below).
 - The same holds for a function from another module, for a module-qualified
   call and for a call written as a method. An imported generic function used to
   lose its type parameters altogether.
 
-**A payload keeps its written type.** With `type R = T(Array<S>) | ...`,
-`T(xs) => xs[0].n` was rejected. A generic sum type's struct, collection or
-string payload is now read at the matched value's type argument, so `Some(r)`
-on an `Option<Row>` binds a `Row`.
+**A payload keeps its written type name.** With `type R = T(Array<S>) | ...`,
+`T(xs) => xs[0].n` was rejected. A payload now carries its written type, and a
+generic sum type's struct argument, so `Some(r) => r.name` on an `Option<Row>`
+reads a `Row`.
 
 ## Type rules
 
@@ -79,32 +81,63 @@ fn jsonValue(v: Value) -> object {
   turned 0.9.0's compile error for `imut x: int = match ... { _ => "no" }` into
   a silent `no1` interpreted.
 
-**Declared types are trusted only where they were checked.** Two rounds of
-review found that the new type substitutions read values at types nothing had
-checked. Programs that 0.9.0 ran consistently crashed compiled, or printed
-`2.0` against `2`. What ships keeps 0.9.0's behaviour for those programs, or
-reports them at compile time:
+**A type argument names a value; it does not change it.** Four rounds of
+independent review found that substituting a value's class from its type
+arguments made programs 0.9.0 ran consistently crash compiled, or print `1.0`
+against `1`. The triggers were:
 
-- **Number and bool payloads.** A generic sum type's number or bool payload
-  stays erased, as in 0.9.0, since `Some(m[k])` may hold null. Narrow it with a
-  typed variable: `imut k: int = v`. Struct, collection and string payloads are
-  read at their type argument.
-- **Number and bool results.** A generic call's number or bool result is
-  unboxed only when its type parameter comes from a parameter or an array
-  element, as in 0.9.0. One bound through a map, such as
-  `get<K, V>(m: Map<K, V>, k: K) -> V`, stays erased, so a missing key reads as
-  null on both backends.
-- **Arguments that disagree.** `both(1, 2.5)` erases `T` rather than taking the
-  first argument's type.
-- **Arrays.** An array declared by an annotation or by a generic result
-  (`wrap(1)` is an `Array<int>`) cannot be given a value of another kind:
-  `push(xs, "two")` is reported. An array only inferred from a literal, a plain
-  `float[]` payload, and a field taken into a variable read as in 0.9.0.
-- **Generic struct fields.** A field is checked on assignment, so `b.value = 2.5`
-  on a `Box<int>` is reported. A value of the wrong kind that reaches a field
-  through an erased `Box` fails when read, on both backends.
-- **Returning a number from a function returning `object`.** `return n` there
-  failed JVM verification in 0.9.0. It is now boxed.
+- a missing map key, or a null or erased argument;
+- a value written through an erased alias;
+- a disagreeing argument;
+- an annotation on an existing array.
+
+What ships is a rule, not a patch per finding:
+
+- **Results, payloads and elements.** A generic call's result, a payload and an
+  array element keep the class 0.9.0 gave them. A struct or sum type argument
+  supplies its name, which is how `keep(rows, p)[0].name`, `g.items[0].name` and
+  `Some(r) => r.name` read members. The member read casts, so a value of
+  another kind fails there on both backends.
+- **Number, bool and string arguments.** Results and payloads built from them
+  are erased as in 0.9.0. `wrap(1)` holds erased values, and `Some(v)` on an
+  `Option<int>` binds an erased `v`.
+- **Uncertain arguments.** An erased argument, `null`, or two that disagree
+  (`both(1, 2.5)`) erase the parameter.
+- **Bare results.** A bare type-parameter result keeps 0.9.0's class:
+  `identity(5) + 1` still adds.
+- **Generic structs keep their type arguments.** This holds for scalars and
+  containers alike: `mk(1.5)` is a `Box<float>`, `[mk(0.5)]` is an
+  `Array<Box<float>>`, and `b.value["a"]` on a `Box<Map<string, int>>` is an
+  int. Every read at a declared type is checked the same way on both backends:
+  a field, an array element or map value, or a payload. The interpreter
+  applies the compiled read's widening, null check and kind check, so a value
+  stored through an erased `Box` fails alike instead of reading wrongly in one.
+- **Field assignment.** Assigning to a generic struct's field is checked and
+  widens a literal as construction does: `b.value = [3, 4]` on a
+  `Box<Array<float>>` holds floats.
+- **A payload is checked against an annotation.** `imut o: Opt<R> = Some("abc")`
+  is reported.
+- **Annotated arrays take only their kind.** An array declared by an annotation
+  cannot be given a value of another kind: `push(xs, "two")` is reported.
+- **Returning a number from a function returning `object`.** This failed JVM
+  verification in 0.9.0, and the value is now boxed.
+
+The interpreter's checked reads also change some of 0.9.0's own divergences.
+Where 0.9.0 already split by backend, because an element or value read at a
+declared number type was null or of another kind (an `Array<int>` holding 2.5,
+a `Map<string, int>` value that is null), the interpreter now fails as compiled
+code always did. An independent sweep of 840 generated programs found no change
+to compiled output and no new split. In 446 of them, which 0.9.0 already split,
+the interpreter now follows compiled. `m["absent"] == null` is still true on
+both. A list of generic structs (`[Box { value: 1 }, Box { value: 2.5 }]`) is an
+`Array<Box<float>>`: number kinds join at the wider one. Arithmetic on an erased value still
+follows 0.9.0's rule: compiled, it is read at the other operand's type, so
+`o * 2` with `o` an erased `1.5` raises compiled and gives `3.0` interpreted. A
+generic struct whose type argument is erased (never known) reaches that rule.
+
+`DataKitRegressionTest` runs the reviewers' reproducers on both backends. Each
+reads as it did in 0.9.0, or, for a type-wrong program or a new feature, fails
+the same way on both or is reported at compile time.
 
 ## Standard library
 
@@ -113,7 +146,16 @@ reports them at compile time:
 - `csv.parse(text)` follows RFC 4180 and gives `Table(rows)` or
   `BadCsv("line N: ...")`. Each `CsvRow` carries the line it starts on, which a
   quoted line break makes differ from its position.
-- `csv.formatRow(cells)` quotes only what needs it.
+- `csv.formatRow(cells)` quotes only what needs it, and writes a lone empty
+  cell as `""` so it reads back.
+- `CsvRow.blank` marks a line with nothing on it. A quoted `""` is a record,
+  not a blank line.
+
+**`io.writeNew(path, content)`** creates a file that must not exist,
+atomically. An existing file, or a symbolic link even if dangling, is never
+opened. Checking that a path is free and then writing it can be raced into
+clobbering whatever a link points at, and DataKit's `--out` did exactly that
+until review.
 
 **`io.readText(path)`** returns a file exactly as written. `io.readFile` reads
 lines and joins them with `"\n"`, so a CR inside a quoted CSV field came back as
@@ -123,7 +165,8 @@ LF. DataKit's oracle caught that. `readFile` is unchanged.
 the number reads: `formatFloat(2.675, 2)` is `2.68`.
 
 **`strings.isFloat(s)`** says whether `s` is a finite decimal number and
-nothing else. `parseFloat` answers `0.0` for what it cannot read, and accepts
+nothing else, in one linear pass. A first version used a regular expression
+that took seconds on a long run of digits. `parseFloat` answers `0.0` for what it cannot read, and accepts
 `NaN`, `Infinity` and `1f`.
 
 ---
@@ -139,7 +182,8 @@ Found by DataKit and left for later (see PAIN_POINTS.md):
   one name collide, and the error messages are confusing. Module-qualified type
   names are the fix.
 - **Small gaps:**
-  - `toFloat` does not take a `long`. Numeric `as` is planned.
+  - `toFloat` does not take a `long`, and unary minus is not defined for a
+  `long` (`-x`): write `0L - x`. Numeric `as` is planned.
   - `=> return x` is not a match arm. Write `=> { return x }`.
   - `1e20` is not a float literal.
   - `os.exit` and `error` are not known to diverge.
