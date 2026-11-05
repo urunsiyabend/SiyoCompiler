@@ -1,0 +1,1 @@
+{"valid":false,"rows":0,"validRows":0,"invalidRows":0,"problemCount":1,"problems":[{"row":0,"place":"file","column":null,"message":"malformed CSV: line 2: a quoted field is not closed"}]}

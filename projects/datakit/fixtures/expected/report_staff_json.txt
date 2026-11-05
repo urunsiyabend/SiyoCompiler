@@ -1,0 +1,23 @@
+report for staff: 7 rows
+
+id (int): 7 present, 0 missing, 7 distinct
+  min 1  max 7  sum 28  mean 4.00
+
+name (string): 7 present, 0 missing, 7 distinct
+  1x Ada Lovelace
+  1x Grace Hopper
+  1x Linus
+
+dept (string): 7 present, 0 missing, 3 distinct
+  3x eng
+  2x ops
+  2x sales
+
+salary (float): 6 present, 1 missing, 6 distinct
+  min 3900.75  max 9100.00  sum 37951.50  mean 6325.25
+
+start (date): 6 present, 1 missing, 6 distinct
+  earliest 2017-07-15  latest 2023-06-01
+
+remote (bool): 6 present, 1 missing, 2 distinct
+  true 3  false 3

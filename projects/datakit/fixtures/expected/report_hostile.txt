@@ -1,0 +1,23 @@
+report for staff: 3 rows
+
+id (int): 3 present, 0 missing, 3 distinct
+  min 1  max 3  sum 6  mean 2.00
+
+name (string): 3 present, 0 missing, 3 distinct
+  1x bell\u0007 esc\u001b[31m red
+  1x c1 \u009b x
+  1x rtl \u202egnp.exe
+
+dept (string): 3 present, 0 missing, 3 distinct
+  1x eng
+  1x ops
+  1x sales
+
+salary (float): 3 present, 0 missing, 3 distinct
+  min 1.00  max 3.00  sum 6.00  mean 2.00
+
+start (date): 2 present, 1 missing, 2 distinct
+  earliest 2020-01-01  latest 2020-01-02
+
+remote (bool): 2 present, 1 missing, 2 distinct
+  true 1  false 1

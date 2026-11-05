@@ -1,0 +1,15 @@
+datakit: fixtures/adversarial/bad_schema.json: unknown field "extra"
+datakit: fixtures/adversarial/bad_schema.json: "name" must be a string
+datakit: fixtures/adversarial/bad_schema.json: "unknown" must be "reject" or "ignore"
+datakit: fixtures/adversarial/bad_schema.json: columns[0]: "type" must be int, float, string, bool or date
+datakit: fixtures/adversarial/bad_schema.json: columns[1]: "min" is greater than "max"
+datakit: fixtures/adversarial/bad_schema.json: columns[2]: column "a" is declared twice
+datakit: fixtures/adversarial/bad_schema.json: columns[3]: "values" applies only to a string column
+datakit: fixtures/adversarial/bad_schema.json: columns[4]: a column needs a non-empty "name"
+datakit: fixtures/adversarial/bad_schema.json: columns[4]: "required" must be true or false
+datakit: fixtures/adversarial/bad_schema.json: columns[5]: "values" is empty, so no value could pass
+datakit: fixtures/adversarial/bad_schema.json: columns[6]: unknown field "colour"
+datakit: fixtures/adversarial/bad_schema.json: columns[6]: a column needs a non-empty "name"
+datakit: fixtures/adversarial/bad_schema.json: columns[6]: "min" must be a number, got string
+datakit: fixtures/adversarial/bad_schema.json: columns[7]: a column must be an object, got int
+datakit: the schema is invalid, nothing was checked

@@ -1,0 +1,10 @@
+record 2, id: must be an integer, got string
+record 2, salary: must be a number, got string
+record 2, start: must be a string, got int
+record 2, remote: must be true or false, got string
+record 3, id: must be an integer, got float
+record 3, name: must be a string, got array
+record 3, dept: is required
+record 4: a record must be an object, got string
+record 5, extra: the schema has no such column
+invalid: 9 problems, 3 of 6 rows rejected

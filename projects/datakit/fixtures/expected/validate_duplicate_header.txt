@@ -1,0 +1,2 @@
+line 1, dept: the header names this column twice
+invalid: 1 problem, 0 of 1 rows rejected
