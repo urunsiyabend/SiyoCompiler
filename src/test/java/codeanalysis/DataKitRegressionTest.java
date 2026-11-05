@@ -275,4 +275,56 @@ class DataKitRegressionTest {
             assertEquals(0, result.exitCode(), mode);
         }
     }
+
+    // --- G3, G4: float formatting and recognising a float ----------------------
+
+    @Test
+    void formatFloatRoundsHalfUpFromTheDecimalForm() throws Exception {
+        assertBoth("0.67 2.68 10.00 -2 0.0 0.00 3 1.50 Infinity -Infinity NaN 123456789.1235 0.10000000000000000",
+                """
+                import "std/strings"
+                fn main() {
+                    imut zero = 0.0
+                    imut xs = [strings.formatFloat(2.0 / 3.0, 2), strings.formatFloat(2.675, 2),
+                               strings.formatFloat(9.995, 2), strings.formatFloat(-1.5, 0),
+                               strings.formatFloat(-0.0, 1), strings.formatFloat(-0.001, 2),
+                               strings.formatFloat(3, 0), strings.formatFloat(1.5, 2),
+                               strings.formatFloat(1.0 / zero, 2), strings.formatFloat(-1.0 / zero, 2),
+                               strings.formatFloat(zero / zero, 2), strings.formatFloat(123456789.12345, 4),
+                               strings.formatFloat(0.1, 17)]
+                    println(strings.join(xs, " "))
+                }
+                """, "FormatFloat");
+    }
+
+    @Test
+    void formatFloatRejectsADigitCountOutOfRange() throws Exception {
+        assertBoth("formatFloat: digits must be between 0 and 17, got 18\nformatFloat: digits must be between 0 and 17, got -1",
+                """
+                import "std/strings"
+                fn main() {
+                    try { println(strings.formatFloat(1.0, 18)) } catch e { println(e) }
+                    try { println(strings.formatFloat(1.0, -1)) } catch e { println(e) }
+                }
+                """, "FormatFloatRange");
+    }
+
+    @Test
+    void isFloatAcceptsOnlyAFiniteDecimal() throws Exception {
+        assertBoth("yes: 1 -2.5 1e3 .5 -0 2. 1E-7 007.5\nno: | 1|1 |NaN|Infinity|-Infinity|1f|1d|0x1p3|1e|1.2.3|+1|-|.|e5|1e999|1,5",
+                """
+                import "std/strings"
+                fn main() {
+                    imut good = ["1", "-2.5", "1e3", ".5", "-0", "2.", "1E-7", "007.5"]
+                    imut bad = ["", " 1", "1 ", "NaN", "Infinity", "-Infinity", "1f", "1d", "0x1p3", "1e",
+                                "1.2.3", "+1", "-", ".", "e5", "1e999", "1,5"]
+                    mut yes: string[] = []
+                    for g in good { if strings.isFloat(g) { push(yes, g) } }
+                    mut no: string[] = []
+                    for b in bad { if !strings.isFloat(b) { push(no, b) } }
+                    println("yes: " + strings.join(yes, " "))
+                    println("no: " + strings.join(no, "|"))
+                }
+                """, "IsFloat");
+    }
 }

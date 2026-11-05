@@ -465,6 +465,37 @@ public class SiyoRuntime {
         }
     }
 
+    private static final java.util.regex.Pattern DECIMAL =
+            java.util.regex.Pattern.compile("-?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?");
+
+    /**
+     * Whether s is a finite decimal number, in plain or exponent form, with
+     * nothing around it. {@link Double#parseDouble} also reads {@code NaN},
+     * {@code Infinity}, {@code 0x1p3}, {@code 1f} and surrounding whitespace,
+     * none of which a data file means as a number.
+     */
+    public static boolean isFloat(String s) {
+        if (s == null || !DECIMAL.matcher(s).matches()) return false;
+        return Double.isFinite(Double.parseDouble(s));
+    }
+
+    /**
+     * A float written with exactly {@code digits} decimals, rounding half up
+     * from its shortest decimal form, so 2.675 is {@code 2.68} as it reads
+     * rather than {@code 2.67} as it is stored. Negative zero is written as
+     * zero; NaN and the infinities as Java names them.
+     */
+    public static String formatFloat(double value, int digits) {
+        if (digits < 0 || digits > 17) {
+            throw new SiyoThrow("formatFloat: digits must be between 0 and 17, got " + digits);
+        }
+        if (!Double.isFinite(value)) return Double.toString(value);
+        java.math.BigDecimal rounded = new java.math.BigDecimal(Double.toString(value))
+                .setScale(digits, java.math.RoundingMode.HALF_UP);
+        if (rounded.signum() == 0) rounded = rounded.abs();
+        return rounded.toPlainString();
+    }
+
     /**
      * Parses a JSON object, reporting malformed input.
      *
