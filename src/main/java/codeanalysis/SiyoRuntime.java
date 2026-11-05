@@ -475,9 +475,6 @@ public class SiyoRuntime {
         }
     }
 
-    private static final java.util.regex.Pattern DECIMAL =
-            java.util.regex.Pattern.compile("-?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?");
-
     /**
      * Whether s is a finite decimal number, in plain or exponent form, with
      * nothing around it. {@link Double#parseDouble} also reads {@code NaN},
@@ -485,7 +482,27 @@ public class SiyoRuntime {
      * none of which a data file means as a number.
      */
     public static boolean isFloat(String s) {
-        if (s == null || !DECIMAL.matcher(s).matches()) return false;
+        // One pass over -?(digits[.digits?] | .digits)([eE][+-]?digits)?: a
+        // backtracking pattern took seconds on a long run of digits that failed.
+        if (s == null) return false;
+        int i = 0, n = s.length();
+        if (i < n && s.charAt(i) == '-') i++;
+        int whole = 0;
+        while (i < n && isAsciiDigit(s.charAt(i))) { i++; whole++; }
+        int fraction = 0;
+        if (i < n && s.charAt(i) == '.') {
+            i++;
+            while (i < n && isAsciiDigit(s.charAt(i))) { i++; fraction++; }
+        }
+        if (whole == 0 && fraction == 0) return false;
+        if (i < n && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) {
+            i++;
+            if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;
+            int exponent = 0;
+            while (i < n && isAsciiDigit(s.charAt(i))) { i++; exponent++; }
+            if (exponent == 0) return false;
+        }
+        if (i != n) return false;
         return Double.isFinite(Double.parseDouble(s));
     }
 
@@ -515,6 +532,10 @@ public class SiyoRuntime {
      * the position of the first thing it could not read.</p>
      *
      * @param s The JSON text.
+    private static boolean isAsciiDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
      * @return The parsed object.
      */
     public static SiyoMap jsonParseStrict(String s) {
