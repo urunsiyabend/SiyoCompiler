@@ -2015,8 +2015,8 @@ public class Binder {
                     elementType == Object.class ? null : elementType);
         }
 
-        return new BoundCallExpression(function, boundArguments,
-                inferGenericResultType(function, boundArguments));
+        GenericResult generic = inferGenericResultType(function, boundArguments);
+        return new BoundCallExpression(function, boundArguments, generic.type(), generic.typeName());
     }
 
     /**
@@ -2032,38 +2032,61 @@ public class Binder {
      * @param arguments The bound arguments.
      * @return The call's type, or null when the declared return type stands.
      */
-    private Class<?> inferGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
-        if (function.getTypeParameters().isEmpty()) return null;
+    private GenericResult inferGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
+        if (function.getTypeParameters().isEmpty()) return GenericResult.NONE;
         String returnTypeName = function.getDeclaredReturnTypeName();
-        if (returnTypeName == null) return null;
+        if (returnTypeName == null) return GenericResult.NONE;
 
-        Map<String, Class<?>> bindings = new HashMap<>();
+        List<String> typeParameters = function.getTypeParameters();
+        Map<String, String> bindings = new HashMap<>();
         for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
-            String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
-            if (parameterTypeName == null) continue;
-            Class<?> argumentType = arguments.get(i).getClassType();
-            if (function.getTypeParameters().contains(parameterTypeName)) {
-                bindings.putIfAbsent(parameterTypeName, argumentType);
-                continue;
-            }
-            // T[] and Array<T>: the parameter names the container, the
-            // argument's element type says what T is.
-            String elementName = TypeResolver.elementTypeNameOf(parameterTypeName);
-            if (elementName != null && function.getTypeParameters().contains(elementName)) {
-                Class<?> elementType = _typeResolver.resolveArrayElementType(arguments.get(i));
-                if (elementType != null) bindings.putIfAbsent(elementName, elementType);
-            }
+            TypeResolver.unify(function.getParameters().get(i).getDeclaredTypeName(),
+                    typeNameOf(arguments.get(i)), typeParameters, bindings);
         }
+        if (!TypeResolver.mentionsAny(returnTypeName, typeParameters)) return GenericResult.NONE;
 
-        if (function.getTypeParameters().contains(returnTypeName)) {
-            Class<?> bound = bindings.get(returnTypeName);
-            return bound == null || bound == Object.class ? null : bound;
+        String resultTypeName = TypeResolver.substitute(returnTypeName, typeParameters, bindings);
+        Class<?> resultType = _typeResolver.lookupType(resultTypeName);
+        if (resultType == Object.class) resultType = null;
+        // A result that is still erased is left to the declared return type.
+        return new GenericResult(resultType, resultTypeName.equals("object") ? null : resultTypeName);
+    }
+
+    /** What a generic call produces: its type, and that type written out. */
+    private record GenericResult(Class<?> type, String typeName) {
+        static final GenericResult NONE = new GenericResult(null, null);
+    }
+
+    /**
+     * The type of an expression written out as a type name, with its type
+     * arguments when they are known, so it can be matched against a generic
+     * declaration: {@code Array<Row>}, {@code int}, {@code fn(Row)->bool}.
+     *
+     * @param expr The expression.
+     * @return The type name, or null when nothing is known about it.
+     */
+    private String typeNameOf(BoundExpression expr) {
+        String declared = _typeResolver.declaredTypeNameOf(expr);
+        if (declared != null) return declared;
+        if (expr instanceof BoundLambdaExpression lambda) return signatureNameOf(lambda);
+        Class<?> type = expr.getClassType();
+        if (type == SiyoStruct.class) {
+            StructSymbol struct = _typeResolver.resolveStructType(expr);
+            return struct != null ? struct.getName() : null;
         }
-        String returnElementName = TypeResolver.elementTypeNameOf(returnTypeName);
-        if (returnElementName != null && function.getTypeParameters().contains(returnElementName)) {
-            return SiyoArray.class;
+        if (type == codeanalysis.SiyoUnion.class) {
+            codeanalysis.UnionSymbol union = _typeResolver.resolveUnionType(expr);
+            return union != null ? union.getName() : null;
         }
-        return null;
+        if (type == SiyoArray.class) {
+            StructSymbol struct = _typeResolver.resolveStructTypeFromCollection(expr);
+            if (struct != null) return "Array<" + struct.getName() + ">";
+            Class<?> elementType = _typeResolver.resolveArrayElementType(expr);
+            return elementType == null || elementType == Object.class
+                    ? null : "Array<" + siyoTypeName(elementType) + ">";
+        }
+        if (type == null || type == Object.class) return null;
+        return siyoTypeName(type);
     }
 
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {

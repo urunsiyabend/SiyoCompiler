@@ -85,6 +85,9 @@ public class TypeResolver {
                 && !call.getArguments().isEmpty()) {
             return elementTypeNameOf(declaredTypeNameOf(call.getArguments().get(0)));
         }
+        if (expr instanceof BoundCallExpression generic && generic.getResultTypeName() != null) {
+            return generic.getResultTypeName();
+        }
         if (expr instanceof BoundCallExpression call && call.getFunction().getTypeParameters().isEmpty()) {
             return call.getFunction().getDeclaredReturnTypeName();
         }
@@ -141,6 +144,115 @@ public class TypeResolver {
         if (!"Map".equals(genericBaseName(typeName))) return null;
         List<String> arguments = typeArgumentsOf(typeName);
         return arguments.size() == 2 ? arguments : null;
+    }
+
+    /**
+     * A type name in the one spelling generic code is matched in: {@code T[]}
+     * is written {@code Array<T>}. A function type and an array of them are
+     * left as they are, since their brackets belong to the signature.
+     *
+     * @param typeName The type name as written.
+     * @return The same type, spelled with type arguments.
+     */
+    public static String canonicalTypeName(String typeName) {
+        if (typeName == null) return null;
+        typeName = typeName.trim();
+        if (typeName.startsWith("fn")) return typeName;
+        if (typeName.endsWith("[]")) {
+            return "Array<" + canonicalTypeName(typeName.substring(0, typeName.length() - 2)) + ">";
+        }
+        String base = genericBaseName(typeName);
+        if (base == null) return typeName;
+        List<String> canonical = new java.util.ArrayList<>();
+        for (String argument : typeArgumentsOf(typeName)) canonical.add(canonicalTypeName(argument));
+        return base + "<" + String.join(",", canonical) + ">";
+    }
+
+    /**
+     * Matches a type written over type parameters against the type an argument
+     * actually has, recording what each parameter stands for.
+     *
+     * <p>{@code Array<T>} against {@code Array<Row>} binds {@code T} to
+     * {@code Row}; {@code fn(T) -> string} against a lambda's
+     * {@code fn(Row) -> string} does too. The first binding of a parameter
+     * stands, and an erased {@code object} binds nothing, so a later argument
+     * that knows more still can.
+     *
+     * @param parameterTypeName The type as the generic declaration wrote it.
+     * @param argumentTypeName  The type of the value given for it.
+     * @param typeParameters    The declaration's type parameters.
+     * @param bindings          Where each parameter's type is recorded.
+     */
+    public static void unify(String parameterTypeName, String argumentTypeName,
+                             java.util.Collection<String> typeParameters, Map<String, String> bindings) {
+        if (parameterTypeName == null || argumentTypeName == null) return;
+        String parameter = canonicalTypeName(parameterTypeName);
+        String argument = canonicalTypeName(argumentTypeName);
+        if (typeParameters.contains(parameter)) {
+            if (!argument.equals("object") && !argument.equals("any")) bindings.putIfAbsent(parameter, argument);
+            return;
+        }
+        if (codeanalysis.FunctionTypeSignature.isSignature(parameter)) {
+            var expected = codeanalysis.FunctionTypeSignature.parse(parameter);
+            var actual = codeanalysis.FunctionTypeSignature.parse(argument);
+            if (expected == null || actual == null
+                    || expected.getParameterCount() != actual.getParameterCount()) return;
+            for (int i = 0; i < expected.getParameterCount(); i++) {
+                unify(expected.getParameterTypeNames().get(i), actual.getParameterTypeNames().get(i),
+                        typeParameters, bindings);
+            }
+            unify(expected.getReturnTypeName(), actual.getReturnTypeName(), typeParameters, bindings);
+            return;
+        }
+        String base = genericBaseName(parameter);
+        if (base == null || !base.equals(genericBaseName(argument))) return;
+        List<String> expectedArguments = typeArgumentsOf(parameter);
+        List<String> actualArguments = typeArgumentsOf(argument);
+        if (expectedArguments.size() != actualArguments.size()) return;
+        for (int i = 0; i < expectedArguments.size(); i++) {
+            unify(expectedArguments.get(i), actualArguments.get(i), typeParameters, bindings);
+        }
+    }
+
+    /**
+     * Writes a type name with its type parameters replaced by what they were
+     * bound to. A parameter with no binding is erased to {@code object}.
+     *
+     * @param typeName       The type as the generic declaration wrote it.
+     * @param typeParameters The declaration's type parameters.
+     * @param bindings       What each parameter stands for.
+     * @return The type with every parameter replaced.
+     */
+    public static String substitute(String typeName, java.util.Collection<String> typeParameters,
+                                    Map<String, String> bindings) {
+        if (typeName == null) return null;
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < typeName.length()) {
+            char c = typeName.charAt(i);
+            if (Character.isJavaIdentifierStart(c)) {
+                int start = i;
+                while (i < typeName.length() && Character.isJavaIdentifierPart(typeName.charAt(i))) i++;
+                String word = typeName.substring(start, i);
+                out.append(typeParameters.contains(word) ? bindings.getOrDefault(word, "object") : word);
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Whether a type name mentions any of the given type parameters.
+     *
+     * @param typeName       The type name.
+     * @param typeParameters The type parameters.
+     * @return True when one of them appears in it.
+     */
+    public static boolean mentionsAny(String typeName, java.util.Collection<String> typeParameters) {
+        if (typeName == null || typeParameters.isEmpty()) return false;
+        return !substitute(typeName, typeParameters, Map.of()).equals(typeName);
     }
 
     public static String elementTypeNameOf(String typeName) {
@@ -274,6 +386,11 @@ public class TypeResolver {
             if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
                 return resolveArrayElementType(callExpr.getArguments().get(0));
             }
+            // A generic call: keep(rows, p) is an Array<Row>.
+            if (callExpr.getResultTypeName() != null) {
+                Class<?> elemType = lookupElementType(callExpr.getResultTypeName());
+                if (elemType != null) return elemType;
+            }
             Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
             if (returnElementType != null) return returnElementType;
         }
@@ -327,6 +444,11 @@ public class TypeResolver {
                 && popped.getClassType() == SiyoStruct.class && !popped.getArguments().isEmpty()) {
             return resolveStructTypeFromCollection(popped.getArguments().get(0));
         }
+        if (target instanceof BoundCallExpression generic && generic.getClassType() == SiyoStruct.class
+                && generic.getResultTypeName() != null) {
+            StructSymbol st = _structTypes.get(erasedTypeName(generic.getResultTypeName()));
+            if (st != null) return st;
+        }
         if (target instanceof BoundCallExpression callExpr && callExpr.getClassType() == SiyoStruct.class) {
             // Check return struct name on FunctionSymbol first
             String returnStructName = callExpr.getFunction().getReturnStructName();
@@ -354,6 +476,11 @@ public class TypeResolver {
         if (collection instanceof BoundVariableExpression varExpr) {
             StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
+        }
+        if (collection instanceof BoundCallExpression generic && generic.getResultTypeName() != null) {
+            String elementName = elementTypeNameOf(generic.getResultTypeName());
+            StructSymbol elemStruct = elementName != null ? _structTypes.get(erasedTypeName(elementName)) : null;
+            if (elemStruct != null) return elemStruct;
         }
         if (collection instanceof BoundCallExpression callExpr) {
             String structName = callExpr.getFunction().getReturnElementStructName();

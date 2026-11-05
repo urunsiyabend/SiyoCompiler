@@ -19,6 +19,7 @@ public class BoundCallExpression extends BoundExpression {
     private final FunctionSymbol _function;
     private final List<BoundExpression> _arguments;
     private final Class<?> _resultType;
+    private final String _resultTypeName;
 
     /**
      * Constructs a new instance of the BoundCallExpression class.
@@ -43,9 +44,45 @@ public class BoundCallExpression extends BoundExpression {
      * @param resultType The call's type, or null to use the function's own.
      */
     public BoundCallExpression(FunctionSymbol function, List<BoundExpression> arguments, Class<?> resultType) {
+        this(function, arguments, resultType, null);
+    }
+
+    /**
+     * Constructs a call whose value has a more precise written type than the
+     * function's declared one: {@code keep(rows, p)} is an {@code Array<Row>}
+     * where {@code keep} declares {@code Array<T>}.
+     *
+     * @param function       The function symbol being called.
+     * @param arguments      The list of bound argument expressions.
+     * @param resultType     The call's type, or null to use the function's own.
+     * @param resultTypeName The call's type as written with its type arguments, or null.
+     */
+    public BoundCallExpression(FunctionSymbol function, List<BoundExpression> arguments, Class<?> resultType,
+                               String resultTypeName) {
         _function = function;
         _arguments = arguments;
         _resultType = resultType;
+        _resultTypeName = resultTypeName;
+    }
+
+    /**
+     * The precise type this call was given when it was bound, or null when the
+     * function's own return type stands.
+     *
+     * @return The result type override.
+     */
+    public Class<?> getResultTypeOverride() {
+        return _resultType;
+    }
+
+    /**
+     * The call's type written out with the type arguments its generic function
+     * was called at, or null when the function's declared return type name stands.
+     *
+     * @return The result type name.
+     */
+    public String getResultTypeName() {
+        return _resultTypeName;
     }
 
     /**
