@@ -252,7 +252,28 @@ with JSON and HTML reports — and fixing what it hit. See
 
 ---
 
-## 0.9.0 — Tooling & Generic Data (Next)
+## 0.9.0 — Dogfooding: TaskFlow (Released)
+
+Writing a second real CLI — `projects/taskflow`, a dependency planner over JSON
+task files — and fixing what it hit. See `RELEASE_NOTES_0.9.0.md` and
+`projects/taskflow/PAIN_POINTS.md`.
+
+- **Interpreter correctness.** A recursive call has its own locals, `break` and
+  `continue` leave a `try`, `return` from an arm stops there, a declared `long`
+  does not wrap, and a stack overflow can be caught.
+- **Declared types hold.** `Array<T>` with an empty literal, `pop`, a call's and a
+  loop variable's generic type, numbers stored at a declared type, `else if` as a
+  value, void arms, a typed slot compared to null.
+- **Additions.** `for` over a set, a map literal as a tail value, interpolating any
+  value, `json.parseValue`, `strings.isInt`.
+- **JSON.** The parser follows RFC 8259, rejects duplicate keys and limits nesting;
+  `stringify` writes structs and sets as data.
+- **Performance.** `io.readFile`, `strings.join` and `strings.repeat` are linear.
+- 2,377 tests pass, up from 2,243
+
+---
+
+## 0.10.0 — Tooling & Generic Data (Next)
 
 ### Generics
 - Generic structs: `struct Box<T> { value: T }`
@@ -264,7 +285,6 @@ with JSON and HTML reports — and fixing what it hit. See
 
 ### Ergonomics
 - A struct literal with no fields: `Empty { }`
-- A map literal as a function body's tail value
 - Numeric conversion with `as`: `n as float`
 
 ### Tooling
