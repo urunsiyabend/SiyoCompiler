@@ -1276,7 +1276,7 @@ public class Emitter {
                 }
 
                 emitMatchArmPreStatements(arm.preStatements());
-                emitExpression(arm.body());
+                emitArmValue(arm.body(), node.getClassType());
                 _mv.visitJumpInsn(GOTO, endLabel);
                 _mv.visitLabel(nextArm);
                 continue;
@@ -1293,7 +1293,7 @@ public class Emitter {
 
             // Match: emit pre-statements (lowered) then body, jump to end
             emitMatchArmPreStatements(arm.preStatements());
-            emitExpression(arm.body());
+            emitArmValue(arm.body(), node.getClassType());
             _mv.visitJumpInsn(GOTO, endLabel);
             _mv.visitLabel(nextArm);
         }
@@ -1304,7 +1304,7 @@ public class Emitter {
         // where the caller reads an int is not a well-typed frame.
         if (defaultArm != null) {
             emitMatchArmPreStatements(defaultArm.preStatements());
-            emitExpression(defaultArm.body());
+            emitArmValue(defaultArm.body(), node.getClassType());
         } else if (node.getClassType() != null) {
             emitNeutralValue(node.getClassType());
         }
@@ -1318,6 +1318,16 @@ public class Emitter {
      *
      * @param type The match's result type.
      */
+
+    /**
+     * An arm's value, boxed when the match is an erased value: a match whose
+     * arms give an int and a string is an object, and each arm has to leave
+     * one on the stack.
+     */
+    private void emitArmValue(BoundExpression body, Class<?> matchType) {
+        emitExpression(body);
+        if (matchType == Object.class && body.getClassType() != null) emitBoxIfNeeded(body.getClassType());
+    }
     private void emitNeutralValue(Class<?> type) {
         if (type == Integer.class || type == Boolean.class) {
             _mv.visitInsn(ICONST_0);

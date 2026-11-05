@@ -276,6 +276,140 @@ class DataKitRegressionTest {
         }
     }
 
+    // --- G8: a sum type's payload keeps its written type --------------------------
+
+    @Test
+    void aPayloadKeepsItsWrittenGenericType() throws Exception {
+        assertBoth("a\nb\nc\na", """
+                struct S { n: string }
+                type R = T(Array<S>) | One(S) | Many(Map<string, Array<S>>)
+                fn mk(k: int) -> R {
+                    if k == 0 { T([S { n: "a" }]) } else if k == 1 { One(S { n: "b" }) }
+                    else { Many({"k": [S { n: "c" }]}) }
+                }
+                fn main() {
+                    match mk(0) { T(xs) => println(xs[0].n), One(s) => println(s.n), Many(m) => println("m") }
+                    match mk(1) { T(xs) => println("t"), One(s) => println(s.n), Many(m) => println("m") }
+                    match mk(2) { T(xs) => println("t"), One(s) => println(s.n), Many(m) => println(m["k"][0].n) }
+                    match mk(0) { T(xs) => { for x in xs { println(x.n) } }, One(s) => println(s.n), Many(m) => println("m") }
+                }
+                """, "PayloadGenericType");
+    }
+
+    @Test
+    void aGenericSumTypesPayloadIsReadAtItsTypeArgument() throws Exception {
+        assertBoth("found b 5\n3\nnone", ROWS + """
+                type Option<T> = Some(T) | None
+                fn find(rs: Array<Row>, name: string) -> Option<Row> {
+                    for r in rs { if r.name == name { return Some(r) } }
+                    None
+                }
+                fn main() {
+                    match find(rows(), "b") { Some(r) => println("found " + r.name + " " + toString(r.salary)), None => println("none") }
+                    imut n: Option<int> = Some(2)
+                    match n { Some(v) => println(toString(v + 1)), None => println("none") }
+                    match find(rows(), "zz") { Some(r) => println(r.name), None => println("none") }
+                }
+                """, "GenericPayload");
+    }
+
+    // --- G9: a signature may name a type declared further down -----------------
+
+    @Test
+    void aSignatureMayNameATypeDeclaredLaterInTheFile() throws Exception {
+        assertBoth("2\n1\nk", """
+                fn pick(k: int) -> Opt { if k > 0 { Yes(k) } else { No } }
+                fn later() -> Later { Later { n: 1 } }
+                fn boxes() -> Array<Later> { [later()] }
+                fn find(xs: Array<Later>) -> Maybe<Later> { if len(xs) > 0 { Got(xs[0]) } else { Nothing } }
+                fn named(s: Shape) -> string { s.name() }
+                type Opt = Yes(int) | No
+                type Maybe<T> = Got(T) | Nothing
+                struct Later { n: int }
+                interface Shape { fn name() -> string }
+                struct K { id: int }
+                impl Shape for K { fn name(self) -> string { "k" } }
+                fn main() {
+                    match pick(2) { Yes(v) => println(toString(v)), No => println("no") }
+                    match find(boxes()) { Got(b) => println(toString(b.n)), Nothing => println("none") }
+                    println(named(K { id: 1 }))
+                }
+                """, "TypesDeclaredLater");
+    }
+
+    // --- G10: a match ending a function returning object may mix value types -----
+
+    @Test
+    void aMatchEndingAnObjectFunctionMayGiveValuesOfDifferentTypes() throws Exception {
+        assertBoth("int 1, string a, null null, float 2.5, bool true", """
+                type V = I(int) | S(string) | F(float) | B(bool) | M
+                fn conv(v: V) -> object {
+                    match v {
+                        I(n) => n,
+                        S(s) => s,
+                        F(x) => x,
+                        B(b) => b,
+                        M => null
+                    }
+                }
+                fn show(v: V) -> string { typeOf(conv(v)) + " " + toString(conv(v)) }
+                fn main() {
+                    println(show(I(1)) + ", " + show(S("a")) + ", " + show(M) + ", " + show(F(2.5)) + ", " + show(B(true)))
+                }
+                """, "ObjectTailMatch");
+    }
+
+    @Test
+    void armsOfDifferentTypesAreStillRejectedWhereATypeIsDeclared() {
+        String asInt = harness.firstDiagnostic("""
+                fn pick(k: int) -> int {
+                    match k {
+                        1 => 1,
+                        _ => "no"
+                    }
+                }
+                fn main() { println(toString(pick(2))) }
+                """);
+        assertEquals("Match arms give different types, int and string; they may differ only where the match ends a function returning object", asInt);
+        String asVariable = harness.firstDiagnostic("""
+                fn main() {
+                    imut x: int = match 2 { 1 => 1, _ => "no" }
+                    println(toString(x + 1))
+                }
+                """);
+        assertEquals("Match arms give different types, int and string; they may differ only where the match ends a function returning object", asVariable);
+        String voidBesideValue = harness.firstDiagnostic("""
+                fn conv(k: int) -> object {
+                    match k {
+                        1 => 1,
+                        _ => println("no")
+                    }
+                }
+                fn main() { println(toString(conv(1))) }
+                """);
+        assertEquals("All match arms must return the same type; cannot mix void and value arms", voidBesideValue);
+    }
+
+    // --- G13: a payload widens as a parameter does ------------------------------
+
+    @Test
+    void aPayloadWidensToItsDeclaredNumberType() throws Exception {
+        assertBoth("3 3.0 3.0 9000000001", """
+                type V = I(long) | F(float) | A(Array<float>)
+                fn show(v: V) -> string {
+                    match v {
+                        I(n) => toString(n + 1),
+                        F(x) => toString(x),
+                        A(xs) => toString(xs[0] + xs[1])
+                    }
+                }
+                fn main() {
+                    imut big = I(9000000000)
+                    println(show(I(2)) + " " + show(F(3)) + " " + show(A([1, 2])) + " " + show(big))
+                }
+                """, "PayloadWidens");
+    }
+
     // --- G3, G4: float formatting and recognising a float ----------------------
 
     @Test

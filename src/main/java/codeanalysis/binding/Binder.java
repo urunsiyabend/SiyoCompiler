@@ -191,6 +191,21 @@ public class Binder {
         _scope = new BoundScope(_scope);
         _moduleHandler.setScope(_scope);
 
+        // Every type this block declares is known by kind before any is
+        // registered, so a signature may name one written further down:
+        // fn s() -> Later above struct Later returned null.
+        for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
+                _typeResolver.declareAhead(structSyntax.getIdentifier().getData(), SiyoStruct.class);
+            } else if (statementSyntax instanceof ActorDeclarationSyntax actorSyntax) {
+                _typeResolver.declareAhead(actorSyntax.getIdentifier().getData(), SiyoStruct.class);
+            } else if (statementSyntax instanceof TypeDeclarationSyntax typeSyntax) {
+                _typeResolver.declareAhead(typeSyntax.getIdentifier().getData(), codeanalysis.SiyoUnion.class);
+            } else if (statementSyntax instanceof InterfaceDeclarationSyntax interfaceSyntax) {
+                _typeResolver.declareAhead(interfaceSyntax.getIdentifier().getData(), SiyoStruct.class);
+            }
+        }
+
         // First pass: process imports, register function/struct/enum declarations
         List<ImplDeclarationSyntax> pendingImplementors = new ArrayList<>();
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
@@ -921,6 +936,21 @@ public class Binder {
      * they first disagree. Such a match is fine run for its effects, and an
      * error if a function turns out to return it.
      */
+    /**
+     * The value-producing form of a match whose arms give values of different
+     * types. It is used only where the match ends a function that returns
+     * {@code object}: there an erased value is what was asked for, as in a
+     * function turning a sum type into JSON values. Anywhere else the arms
+     * still have to agree, or a string would be read back as an int.
+     */
+    private final Map<BoundMatchExpression, BoundMatchExpression> _erasableMatches = new java.util.IdentityHashMap<>();
+    private final Map<BoundMatchExpression, String> _mixedArmMessages = new java.util.IdentityHashMap<>();
+
+    private static String differentArmTypes(Class<?> first, Class<?> other) {
+        return "Match arms give different types, " + siyoTypeName(first) + " and " + siyoTypeName(other)
+                + "; they may differ only where the match ends a function returning object";
+    }
+
     private final Map<BoundMatchExpression, codeanalysis.text.TextSpan> _mixedArmMatches =
             new java.util.IdentityHashMap<>();
 
@@ -945,6 +975,8 @@ public class Binder {
         Class<?> resultType = null;
         boolean resultTypeInitialized = false;
         codeanalysis.text.TextSpan mismatch = null;
+        boolean everyArmHasAValue = true;
+        String mismatchMessage = MIXED_ARMS;
         for (MatchArmSyntax arm : syntax.getArms()) {
             if (arm.isDefault()) hasDefault = true;
 
@@ -953,7 +985,7 @@ public class Binder {
             BoundMatchExpression.BoundVariantPattern variant = null;
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
-                variant = bindVariantPattern(arm, targetUnion);
+                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target));
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -986,6 +1018,7 @@ public class Binder {
             }
 
             Class<?> bodyType = body.getClassType();
+            if (bodyType == null && !diverges(preStatements, body)) everyArmHasAValue = false;
             if (diverges(preStatements, body)) {
                 // An arm that throws or returns never produces a value, so it
                 // takes no part in deciding what the match evaluates to.
@@ -994,10 +1027,13 @@ public class Binder {
                 resultType = bodyType;
                 resultTypeInitialized = true;
             } else if (resultType != bodyType) {
+                String why = resultType != null && bodyType != null
+                        ? differentArmTypes(resultType, bodyType) : MIXED_ARMS;
                 if (valueUsed) {
-                    _diagnostics.reportError(arm.getBody().getSpan(), MIXED_ARMS);
+                    _diagnostics.reportError(arm.getBody().getSpan(), why);
                 } else if (mismatch == null) {
                     mismatch = arm.getBody().getSpan();
+                    mismatchMessage = why;
                 }
             }
             arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(),
@@ -1029,6 +1065,10 @@ public class Binder {
             }
             BoundMatchExpression statementMatch = new BoundMatchExpression(target, discarded, null);
             _mixedArmMatches.put(statementMatch, mismatch);
+            _mixedArmMessages.put(statementMatch, mismatchMessage);
+            if (everyArmHasAValue) {
+                _erasableMatches.put(statementMatch, new BoundMatchExpression(target, arms, Object.class));
+            }
             return statementMatch;
         }
         if (!resultTypeInitialized) resultType = Object.class;
@@ -1044,7 +1084,8 @@ public class Binder {
      * @return The bound pattern, or null when the pattern was rejected.
      */
     private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
-                                                                       codeanalysis.UnionSymbol targetUnion) {
+                                                                       codeanalysis.UnionSymbol targetUnion,
+                                                                       String targetTypeName) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1084,6 +1125,17 @@ public class Binder {
             return null;
         }
 
+        // A generic sum type's payload is read at the type arguments the matched
+        // value carries: Some(r) on an Option<Row> binds a Row.
+        List<String> typeParameters = union.getTypeParameters();
+        Map<String, String> typeArguments = new HashMap<>();
+        if (targetTypeName != null && union.getName().equals(TypeResolver.genericBaseName(targetTypeName))) {
+            List<String> arguments = TypeResolver.typeArgumentsOf(targetTypeName);
+            for (int i = 0; i < arguments.size() && i < typeParameters.size(); i++) {
+                typeArguments.put(typeParameters.get(i), arguments.get(i));
+            }
+        }
+
         List<VariableSymbol> bindings = new ArrayList<>();
         for (int i = 0; i < bindingTokens.size(); i++) {
             codeanalysis.syntax.SyntaxToken token = bindingTokens.get(i);
@@ -1091,9 +1143,18 @@ public class Binder {
                 bindings.add(null); // the pattern discarded this slot
                 continue;
             }
-            VariableSymbol binding = new VariableSymbol(token.getData(), true, variant.getPayloadTypes().get(i));
+            String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i),
+                    typeParameters, typeArguments);
+            Class<?> payloadType = variant.getPayloadTypes().get(i);
+            if (payloadType == Object.class && !typeArguments.isEmpty()) {
+                Class<?> known = _typeResolver.lookupType(payloadTypeName);
+                if (known != null) payloadType = known;
+            }
+            VariableSymbol binding = new VariableSymbol(token.getData(), true, payloadType);
+            // The payload's written type is what it holds: T(xs) with T(Array<S>)
+            // binds an Array<S>, whose elements are known to be S.
+            if (!payloadTypeName.equals("object")) binding.setDeclaredTypeName(payloadTypeName);
             bindings.add(binding);
-            String payloadTypeName = variant.getPayloadTypeNames().get(i);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
             if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
             codeanalysis.UnionSymbol payloadUnion = _typeResolver.getUnionTypes().get(payloadTypeName);
@@ -1505,6 +1566,13 @@ public class Binder {
             _diagnostics.reportWrongVariantPayloadCount(span, union.getName(), variantName,
                     variant.size(), payload.size());
             return new BoundLiteralExpression(0);
+        }
+        // A payload widens as a parameter does: I(2) holds a long when I
+        // carries one, and F([1, 2]) a float array.
+        payload = new ArrayList<>(payload);
+        for (int i = 0; i < payload.size(); i++) {
+            Class<?> declared = variant.getPayloadTypes().get(i);
+            payload.set(i, widenLiteral(widenTo(payload.get(i), declared), variant.getPayloadTypeNames().get(i)));
         }
         for (int i = 0; i < payload.size(); i++) {
             Class<?> declared = variant.getPayloadTypes().get(i);
@@ -3534,8 +3602,13 @@ public class Binder {
         if (statement instanceof BoundExpressionStatement expressionStatement) {
             BoundExpression value = expressionStatement.getExpression();
             // A match whose arms disagree has no value to return.
+            if (value instanceof BoundMatchExpression match && returnType == Object.class
+                    && _erasableMatches.containsKey(match)) {
+                return new BoundReturnStatement(_erasableMatches.get(match));
+            }
             if (value instanceof BoundMatchExpression match && _mixedArmMatches.containsKey(match)) {
-                _diagnostics.reportError(_mixedArmMatches.get(match), MIXED_ARMS);
+                _diagnostics.reportError(_mixedArmMatches.get(match),
+                        _mixedArmMessages.getOrDefault(match, MIXED_ARMS));
                 return null;
             }
             // An assignment used as a statement is a side effect, not a value,

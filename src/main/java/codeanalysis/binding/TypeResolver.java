@@ -18,6 +18,9 @@ public class TypeResolver {
     private final Map<String, InterfaceSymbol> _interfaceTypes = new HashMap<>();
     private final Map<VariableSymbol, InterfaceSymbol> _variableInterfaces = new HashMap<>();
     private final java.util.Set<String> _typeParameters = new java.util.LinkedHashSet<>();
+    // Types a file declares, known by kind before each declaration is registered,
+    // so a signature may name a struct or sum type written further down.
+    private final Map<String, Class<?>> _declaredAhead = new java.util.HashMap<>();
 
     public TypeResolver(Map<String, StructSymbol> structTypes, Map<String, UnionSymbol> unionTypes) {
         _structTypes = structTypes;
@@ -722,7 +725,7 @@ public class TypeResolver {
                     // A value of an interface type is a struct at run time;
                     // which struct is what the call site discovers.
                     : _interfaceTypes.containsKey(name) ? SiyoStruct.class
-                    : null;
+                    : _declaredAhead.get(name);
         };
         if (builtin != null) return builtin;
         // Imported Java classes are represented as Object in Siyo function ABI,
@@ -814,6 +817,17 @@ public class TypeResolver {
      */
     public java.util.Set<String> getTypeParameters() {
         return _typeParameters;
+    }
+
+    /**
+     * Records a type a file declares, before its declaration is registered:
+     * a function above {@code struct Later} may return a {@code Later}.
+     *
+     * @param name The type's name.
+     * @param kind What a value of it is at run time.
+     */
+    public void declareAhead(String name, Class<?> kind) {
+        if (name != null) _declaredAhead.putIfAbsent(name, kind);
     }
 
     // --- Accessors ---
