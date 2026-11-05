@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,872 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,878 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -122,6 +122,19 @@ What ships is a rule, not a patch per finding:
 - **Returning a number from a function returning `object`.** This failed JVM
   verification in 0.9.0, and the value is now boxed.
 
+A generic struct's type argument also survives:
+
+- a plain alias (`imut c = b`);
+- `filter`;
+- an imported generic call;
+- a field taken into a local;
+- a bare `-> T` bound through a `Box<T>` parameter.
+
+A value returned from a function or lambda declaring a type is checked by the
+interpreter as the compiled return cast checks it, so a `Box<T>` function
+returning an erased string fails on both backends. An actor's method is left
+as 0.9.0 had it.
+
 The interpreter's checked reads also change some of 0.9.0's own divergences.
 Where 0.9.0 already split by backend, because an element or value read at a
 declared number type was null or of another kind (an `Array<int>` holding 2.5,
@@ -129,7 +142,10 @@ a `Map<string, int>` value that is null), the interpreter now fails as compiled
 code always did. An independent sweep of 840 generated programs found no change
 to compiled output and no new split. In 446 of them, which 0.9.0 already split,
 the interpreter now follows compiled. `m["absent"] == null` is still true on
-both. A list of generic structs (`[Box { value: 1 }, Box { value: 2.5 }]`) is an
+both. Not every inherited split is closed: `wrap_mutate` (a string pushed into
+an int array through an erased alias), erased arithmetic such as
+`keep([1.5])[0] * 2`, and a member write to a non-struct value still differ by
+backend, exactly as in 0.9.0. A list of generic structs (`[Box { value: 1 }, Box { value: 2.5 }]`) is an
 `Array<Box<float>>`: number kinds join at the wider one. Arithmetic on an erased value still
 follows 0.9.0's rule: compiled, it is read at the other operand's type, so
 `o * 2` with `o` an erased `1.5` raises compiled and gives `3.0` interpreted. A
@@ -152,8 +168,10 @@ the same way on both or is reported at compile time.
   not a blank line.
 
 **`io.writeNew(path, content)`** creates a file that must not exist,
-atomically. An existing file, or a symbolic link even if dangling, is never
-opened. Checking that a path is free and then writing it can be raced into
+exclusively. An existing file, or a symbolic link even if dangling, is never
+opened. Exclusive creation is not atomic publication: a write that fails
+part-way leaves the partial file it created. It is never removed by name, since
+the path may by then hold another process's file. Checking that a path is free and then writing it can be raced into
 clobbering whatever a link points at, and DataKit's `--out` did exactly that
 until review.
 

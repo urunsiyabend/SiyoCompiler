@@ -106,12 +106,78 @@ The tests, which take the reviewers' cases, are
 `aMissingValueThroughAGenericCallOrPayloadReadsAsNullOnBothBackends` and
 `aStructNameCarriesIdentityWhileTheValueStaysAsZeroNineHadIt`.
 
-These reproducers sit outside the test suite: the review rounds' 87 cases and 2
-more found while fixing them (89 programs) were rerun on 0.9.0 and the branch, both backends. Each now
-matches 0.9.0. The exceptions are a divergence 0.9.0 itself had identically
-(erased arithmetic, `m["absent"]` on a `Map<string, int>`, a method call on an
-erased struct), a compile-time error for a type-wrong program, and a generic
-struct case 0.9.0 could not parse, where both backends agree.
+These reproducers sit outside the test suite: the review rounds' cases and the
+ones found while fixing them were rerun on 0.9.0 and the branch, both backends.
+Not every old probe is closed. Every one either:
+
+- matches 0.9.0;
+- is a compile-time error for a type-wrong program;
+- is a generic struct case 0.9.0 could not parse, where both backends agree;
+- or is a split between backends inherited from 0.9.0 and still unresolved.
+
+The inherited splits are:
+
+- `wrap_mutate`, which pushes a string into an int array through an erased
+  alias;
+- erased arithmetic (D10): `keep([1.5])[0] * 2`, a generic map's float value
+  times an int, `o1`;
+- a member write to a non-struct value: `array_generic_struct_badwrite`,
+  `payload_bad_target_assignment`;
+- a method called on an erased struct;
+- the `r7` set reads.
+
+The interpreter now follows the compiled backend at a checked read, which
+changes some of these. `direct_map_null` (a missing key through a generic
+`get`) now fails on both backends, where 0.9.0 failed compiled only.
+
+### Re-review at 328a5c7
+
+- **A generic struct's known type argument was lost.** This happened through a
+  plain alias (`imut c = b`), through `filter`, and through an imported
+  generic call with an alias, so `c.value * 2` raised compiled and gave `3.0`
+  interpreted. The fix:
+  - an alias now carries a name that mentions a generic struct, and nothing
+    else 0.9.0 would not have known;
+  - `filter` passes its argument's generic struct name through;
+  - an element of a generic struct's field (`first(b.value)` on a
+    `Box<Array<float>>`) feeds 0.9.0's bare-`T` inference.
+
+  Tested by `aGenericStructsTypeArgumentSurvivesAnAliasFilterAndFieldElement` and
+  `anImportedGenericStructKeepsItsArgumentThroughAnAlias`.
+
+  The follow-up review found two more paths:
+  - a bare `-> T` bound through a generic struct argument
+    (`fn g<T>(b: Box<T>) -> T` given a `Box<float>`);
+  - a local taken from a generic struct's field (`imut v = b.value`).
+
+  A third path came up as well: a map literal as a struct's value
+  (`Box { value: {"x": 1.5} }`), which inferred only `Box<map>`. It now gives
+  `Box<Map<string,float>>`, with number kinds joined at the wider one.
+
+  All three now carry the argument (`aMapLiteralGivesAGenericStructItsMapType`). A parameter written `Box<T>` also no longer
+  renames an argument literal to `Box<T>`. Tested by
+  `aGenericStructsArgumentReachesABareResultAndAFieldLocal`.
+- **The interpreter skipped a value's declared return shape.** For
+  `fn wrong<T>(x: T) -> Box<T>` returning an erased string, `len(wrong(1))`
+  was `failed` compiled and `3` interpreted. The interpreter now applies the
+  compiled return cast, under its condition (an erased value returned from a
+  function declaring a type). It also checks a generic call's result read as
+  the compiled unboxing reads it. Tested by
+  `aValueOfTheWrongShapeFailsAtADeclaredReturnOnBothBackends`. This also turns
+  0.9.0's split for `fn f() -> int` returning an erased string into a failure
+  on both backends. A lambda's declared return is checked the same way
+  (`aLambdasDeclaredReturnIsCheckedOnBothBackendsButNotAnActorsMethod`).
+
+  An actor's method is left unchecked, as in 0.9.0. A failed check there ended
+  the method silently, so the interpreted caller waited forever. Compiled, these
+  programs fail to verify, as they did in 0.9.0.
+- **Security: `io.writeNew` could delete someone else's file.** When a write
+  failed, it deleted the path by name. If the file it created had been renamed
+  aside, that deleted whatever another process had put at the path since. The
+  reviewer's `siyo-failure-cleanup.py`, rerun, replaced the file during a write
+  that exceeded RLIMIT_FSIZE; the replacement survived in all 4 attempts on
+  both backends. Creation is exclusive, but publishing the whole content is not
+  atomic: a failed write leaves the partial file it created.
 
 The same review found `strings.isFloat`'s regular expression quadratic, taking
 about 5 s for 32,000 digits followed by `x`. It is now a single linear pass,
@@ -155,7 +221,7 @@ checked value types behind it, so the safe course was to trust less.
 | D6 | naming | A local variant named like one an import exports, such as `Invalid` beside `std/json`'s `Invalid`, must be written qualified. The diagnostic says so. | A language rule, documented since 0.6.0. | Named `Rejected`. |
 | D8 | type rule | Reassigning a generic struct variable to a literal of other type arguments is not reported at compile time; the field read fails on both backends. A struct type parameter named like a struct hides it, as function and sum type parameters already did. A generic call over numbers gives erased values (`wrap(1)`), which a typed variable narrows. | Found in review. The rest of generic struct checking is in place, and trusting number type arguments is what review showed to be unsound here. | `pipeline_test` narrows the ints it sorts. |
 | D9 | ergonomics | Unary minus is not defined for a `long`: `-x` is "Unary operator '-' is not defined for type Long". The same in 0.9.0. | Not needed by DataKit; it belongs with numeric `as`. | `0L - x` in tests. |
-| D10 | parity gap | Arithmetic on an erased value is read at the other operand's type compiled: `o * 2` with `o` an erased `1.5` raises compiled and gives `3.0` interpreted. The same in 0.9.0. A generic struct whose type argument is never known (`Box` written bare, an erased value, or a list mixing `Box<int>` with `Box<string>`) has erased fields and reaches it. A list mixing number kinds joins at the wider kind and does not (`aListOfGenericStructsKeepsTheirTypeArgument`). | Typing erased arithmetic dynamically changes what 0.9.0 programs compute; every place a type argument can be known now carries it. | Fields are read through known type arguments. |
+| D10 | parity gap | Arithmetic on an erased value is read at the other operand's type compiled: `o * 2` with `o` an erased `1.5` raises compiled and gives `3.0` interpreted. The same in 0.9.0. A generic struct whose type argument is never known (`Box` written bare, an erased value, or a list mixing `Box<int>` with `Box<string>`) has erased fields and reaches it. A list mixing number kinds joins at the wider kind and does not (`aListOfGenericStructsKeepsTheirTypeArgument`). | Typing erased arithmetic dynamically changes what 0.9.0 programs compute. A generic struct's type argument is carried where it is written, inferred from a literal, returned by a generic call, aliased, filtered or listed; a plain generic function over numbers (`keep([1.5])`) is erased as in 0.9.0 and reaches the rule as 0.9.0 did. | Fields are read through known type arguments. |
 | D7 | output | Column padding counts UTF-16 units, so a non-ASCII group key misaligns its table row. This is TaskFlow D9 again. | Display width is its own problem. | Only text output is affected. |
 
 A CSV file's bytes are decoded as UTF-8. Invalid bytes become U+FFFD, as in

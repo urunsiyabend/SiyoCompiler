@@ -492,7 +492,10 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
   same way on both backends: a null, or a value of another kind put there
   through an erased path, fails rather than reading as the wrong thing. A field
   assigned on a generic struct is checked, and a literal is widened as at
-  construction
+  construction. A generic struct's type arguments follow it through a plain
+  alias, `filter`, a list literal and another module's generic call
+- A value returned from a function declaring a type is checked on both backends:
+  an erased value of another shape fails at the return
 - A payload widens to its declared number type as a parameter does
 - A signature may name a struct, sum type or interface declared further down
   the file
@@ -775,9 +778,9 @@ io.copyFile(src, dst)       // binary-safe file copy
 io.mkdir(path)
 io.delete(path)
 io.eprintln(msg)            // writes a line to standard error
-io.writeNew(path, content)  // create a file that must not exist, atomically: an existing
+io.writeNew(path, content)  // create a file that must not exist, exclusively: an existing
                             // file or symbolic link is never opened; raises "exists: PATH"
-                            // or "cannot write: PATH"
+                            // or "cannot write: PATH"; a failed write leaves its partial file
 io.readText(path)           // the file exactly as written (UTF-8, line endings kept);
                             // readFile reads lines and joins them with "\n"
 ```
