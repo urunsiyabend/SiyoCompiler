@@ -1,0 +1,14 @@
+{
+  "project": "release-0.9",
+  "tasks": [
+    {"id": "design", "title": "Write the design", "status": "done", "priority": 5, "estimate": 4, "owner": "ada"},
+    {"id": "parser", "title": "Parser changes", "status": "done", "estimate": 8, "deps": ["design"], "owner": "ada"},
+    {"id": "binder", "title": "Binder changes", "status": "doing", "estimate": 6, "deps": ["parser"], "owner": "grace"},
+    {"id": "emitter", "title": "Emitter changes", "estimate": 10, "deps": ["binder"], "owner": "grace"},
+    {"id": "stdlib", "title": "Standard library", "priority": 3, "estimate": 5, "deps": ["design"]},
+    {"id": "docs", "title": "Write the docs", "estimate": 3, "deps": ["stdlib"]},
+    {"id": "tests", "title": "Regression tests", "priority": 9, "estimate": 4, "deps": ["binder", "stdlib"]},
+    {"id": "notes", "title": "Release notes", "priority": -1, "estimate": 1, "deps": ["docs", "tests", "emitter"]},
+    {"id": "ship", "title": "Tag the release", "priority": 1, "estimate": 1, "deps": ["notes"]}
+  ]
+}

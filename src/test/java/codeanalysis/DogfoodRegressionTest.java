@@ -526,7 +526,7 @@ class DogfoodRegressionTest {
         return java.nio.file.Path.of(name + ".siyo").toAbsolutePath().toString();
     }
 
-    private String interpret(String source, String name) throws Exception {
+    String interpret(String source, String name) throws Exception {
         PrintStream oldOut = System.out;
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         System.setOut(new PrintStream(output));
@@ -543,7 +543,7 @@ class DogfoodRegressionTest {
         return output.toString().trim();
     }
 
-    private String run(String source, String className) throws Exception {
+    String run(String source, String className) throws Exception {
         SyntaxTree tree = SyntaxTree.parse(source);
         ModuleRegistry registry = new ModuleRegistry();
         Compilation compilation = new Compilation(tree, registry, sourcePath(className));

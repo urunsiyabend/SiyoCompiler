@@ -442,6 +442,29 @@ public class SiyoRuntime {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
+    /** A value read at a declared long: a long, or an int that was never widened. */
+    public static long unboxLong(Object value) {
+        return value instanceof Integer i ? i : (Long) value;
+    }
+
+    /** What a for loop walks over an erased value: a map's keys, a set's elements, an array itself. */
+    public static Object iterable(Object value) {
+        if (value instanceof SiyoMap map) return map.keys();
+        if (value instanceof SiyoSet set) return set.values();
+        return value;
+    }
+
+    /** Whether {@link Integer#parseInt} reads the whole of s: optional minus, ASCII digits, in range. */
+    public static boolean isInt(String s) {
+        if (s == null || !s.matches("-?[0-9]+")) return false;
+        try {
+            Integer.parseInt(s);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     /**
      * Parses a JSON object, reporting malformed input.
      *
@@ -455,13 +478,36 @@ public class SiyoRuntime {
      */
     public static SiyoMap jsonParseStrict(String s) {
         if (s == null) throw new RuntimeException("json: no input");
-        int[] pos = {0};
+        int[] pos = {startOfJson(s)};
         skipWs(s, pos);
         if (pos[0] >= s.length()) throw jsonError("json: empty input", s, pos[0]);
         if (s.charAt(pos[0]) != '{') {
             throw jsonError("json: expected an object", s, pos[0]);
         }
-        SiyoMap parsed = parseJsonObject(s, pos);
+        return (SiyoMap) parseJsonDocument(s, pos);
+    }
+
+    /**
+     * Parses any JSON document: an array or a scalar as well as an object.
+     *
+     * @param s The JSON text.
+     * @return The parsed value, null for the document {@code null}.
+     */
+    public static Object jsonParseValue(String s) {
+        if (s == null) throw new RuntimeException("json: no input");
+        int[] pos = {startOfJson(s)};
+        skipWs(s, pos);
+        if (pos[0] >= s.length()) throw jsonError("json: empty input", s, pos[0]);
+        return parseJsonDocument(s, pos);
+    }
+
+    /** A byte order mark, which a Windows editor may put first, is not part of the document. */
+    private static int startOfJson(String s) {
+        return s.startsWith("\uFEFF") ? 1 : 0;
+    }
+
+    private static Object parseJsonDocument(String s, int[] pos) {
+        Object parsed = parseJsonValue(s, pos, 0);
         skipWs(s, pos);
         if (pos[0] < s.length()) {
             throw jsonError("json: unexpected trailing input", s, pos[0]);
@@ -493,10 +539,22 @@ public class SiyoRuntime {
      * @return The exception to throw.
      */
     private static RuntimeException jsonError(String message, String s, int pos) {
-        if (pos < s.length()) {
-            return new RuntimeException(message + " at position " + pos + " ('" + s.charAt(pos) + "')");
+        int line = 1;
+        int column = 1;
+        for (int i = 0; i < pos && i < s.length(); i++) {
+            if (s.charAt(i) == '\n') {
+                line++;
+                column = 1;
+            } else {
+                column++;
+            }
         }
-        return new RuntimeException(message + " at position " + pos + " (end of input)");
+        // A one-line document has no use for a line number; a task file does.
+        String where = " at position " + pos + (line > 1 ? ", line " + line + ", column " + column : "");
+        if (pos >= s.length()) return new RuntimeException(message + where + " (end of input)");
+        char c = s.charAt(pos);
+        String shown = c < 0x20 ? String.format("\\u%04x", (int) c) : String.valueOf(c);
+        return new RuntimeException(message + where + " ('" + shown + "')");
     }
 
     private static void skipWs(String s, int[] pos) {
@@ -515,6 +573,7 @@ public class SiyoRuntime {
         while (pos[0] < s.length()) {
             char c = s.charAt(pos[0]);
             if (c == '"') { pos[0]++; return sb.toString(); }
+            if (c < 0x20) throw jsonError("json: raw control character in a string", s, pos[0]);
             if (c == '\\') {
                 pos[0]++;
                 if (pos[0] >= s.length()) break;
@@ -533,11 +592,12 @@ public class SiyoRuntime {
                             throw jsonError("json: truncated unicode escape", s, pos[0]);
                         }
                         String hex = s.substring(pos[0] + 1, pos[0] + 5);
-                        try {
-                            sb.append((char) Integer.parseInt(hex, 16));
-                        } catch (NumberFormatException e) {
-                            throw jsonError("json: bad unicode escape", s, pos[0]);
+                        for (int i = 0; i < hex.length(); i++) {
+                            if (Character.digit(hex.charAt(i), 16) < 0 || hex.charAt(i) > 'f') {
+                                throw jsonError("json: bad unicode escape", s, pos[0]);
+                            }
                         }
+                        sb.append((char) Integer.parseInt(hex, 16));
                         pos[0] += 4;
                     }
                     default -> throw jsonError("json: unknown escape '\\" + esc + "'", s, pos[0]);
@@ -550,13 +610,18 @@ public class SiyoRuntime {
         throw jsonError("json: unterminated string", s, pos[0]);
     }
 
-    private static Object parseJsonValue(String s, int[] pos) {
+    /** How deep a document may nest. A recursive parser would otherwise overflow the stack on hostile input. */
+    private static final int JSON_MAX_DEPTH = 512;
+
+    private static Object parseJsonValue(String s, int[] pos, int depth) {
         skipWs(s, pos);
         if (pos[0] >= s.length()) throw jsonError("json: expected a value", s, pos[0]);
         char c = s.charAt(pos[0]);
         if (c == '"') return parseJsonString(s, pos);
-        if (c == '{') return parseJsonObject(s, pos);
-        if (c == '[') return parseJsonArray(s, pos);
+        if (c == '{' || c == '[') {
+            if (depth >= JSON_MAX_DEPTH) throw jsonError("json: nested too deeply", s, pos[0]);
+            return c == '{' ? parseJsonObject(s, pos, depth + 1) : parseJsonArray(s, pos, depth + 1);
+        }
         if (s.startsWith("true", pos[0])) { pos[0] += 4; return Boolean.TRUE; }
         if (s.startsWith("false", pos[0])) { pos[0] += 5; return Boolean.FALSE; }
         if (s.startsWith("null", pos[0])) { pos[0] += 4; return null; }
@@ -574,15 +639,18 @@ public class SiyoRuntime {
         int start = pos[0];
         if (pos[0] < s.length() && s.charAt(pos[0]) == '-') pos[0]++;
         int digitsStart = pos[0];
-        while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+        skipJsonDigits(s, pos);
         if (pos[0] == digitsStart) throw jsonError("json: expected a value", s, start);
+        if (s.charAt(digitsStart) == '0' && pos[0] > digitsStart + 1) {
+            throw jsonError("json: a number has no leading zero", s, digitsStart);
+        }
 
         boolean isDecimal = false;
         if (pos[0] < s.length() && s.charAt(pos[0]) == '.') {
             isDecimal = true;
             pos[0]++;
             int fracStart = pos[0];
-            while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+            skipJsonDigits(s, pos);
             if (pos[0] == fracStart) throw jsonError("json: expected a digit", s, pos[0]);
         }
         if (pos[0] < s.length() && (s.charAt(pos[0]) == 'e' || s.charAt(pos[0]) == 'E')) {
@@ -590,7 +658,7 @@ public class SiyoRuntime {
             pos[0]++;
             if (pos[0] < s.length() && (s.charAt(pos[0]) == '+' || s.charAt(pos[0]) == '-')) pos[0]++;
             int expStart = pos[0];
-            while (pos[0] < s.length() && Character.isDigit(s.charAt(pos[0]))) pos[0]++;
+            skipJsonDigits(s, pos);
             if (pos[0] == expStart) throw jsonError("json: expected an exponent", s, pos[0]);
         }
 
@@ -599,24 +667,38 @@ public class SiyoRuntime {
         try {
             return Integer.parseInt(text);
         } catch (NumberFormatException e) {
-            return Long.parseLong(text);
+            try {
+                return Long.parseLong(text);
+            } catch (NumberFormatException tooLong) {
+                // Valid JSON, just wider than a long: the nearest float, as any
+                // other JSON reader would give.
+                return Double.parseDouble(text);
+            }
         }
     }
 
-    private static SiyoMap parseJsonObject(String s, int[] pos) {
+    private static void skipJsonDigits(String s, int[] pos) {
+        while (pos[0] < s.length() && s.charAt(pos[0]) >= '0' && s.charAt(pos[0]) <= '9') pos[0]++;
+    }
+
+    private static SiyoMap parseJsonObject(String s, int[] pos, int depth) {
         pos[0]++; // skip '{'
         SiyoMap m = new SiyoMap();
         skipWs(s, pos);
         if (pos[0] < s.length() && s.charAt(pos[0]) == '}') { pos[0]++; return m; }
         while (true) {
             skipWs(s, pos);
+            int keyStart = pos[0];
             String key = parseJsonString(s, pos);
+            // RFC 8259 leaves a repeated name undefined; keeping the last would
+            // silently drop data the author wrote.
+            if (m.has(key)) throw jsonError("json: duplicate key \"" + key + "\"", s, keyStart);
             skipWs(s, pos);
             if (pos[0] >= s.length() || s.charAt(pos[0]) != ':') {
                 throw jsonError("json: expected ':' after a key", s, pos[0]);
             }
             pos[0]++; // skip ':'
-            m.set(key, parseJsonValue(s, pos));
+            m.set(key, parseJsonValue(s, pos, depth));
             skipWs(s, pos);
             if (pos[0] >= s.length()) throw jsonError("json: unterminated object", s, pos[0]);
             char c = s.charAt(pos[0]);
@@ -626,7 +708,7 @@ public class SiyoRuntime {
         }
     }
 
-    private static SiyoArray parseJsonArray(String s, int[] pos) {
+    private static SiyoArray parseJsonArray(String s, int[] pos, int depth) {
         pos[0]++; // skip '['
         java.util.List<Object> elements = new java.util.ArrayList<>();
         skipWs(s, pos);
@@ -635,7 +717,7 @@ public class SiyoRuntime {
             return new SiyoArray(elements, Object.class);
         }
         while (true) {
-            elements.add(parseJsonValue(s, pos));
+            elements.add(parseJsonValue(s, pos, depth));
             skipWs(s, pos);
             if (pos[0] >= s.length()) throw jsonError("json: unterminated array", s, pos[0]);
             char c = s.charAt(pos[0]);
@@ -685,6 +767,10 @@ public class SiyoRuntime {
             sb.append(']');
             return sb.toString();
         }
+        // A struct is its fields and a set its elements, rather than the way
+        // they print; nothing can read that text back.
+        if (obj instanceof SiyoObject || obj instanceof SiyoStruct) return jsonStringify(structToMap(obj));
+        if (obj instanceof SiyoSet set) return jsonStringify(set.values());
         // A string, or any other value written as its text.
         return '"' + jsonEscapeStr(obj.toString()) + '"';
     }

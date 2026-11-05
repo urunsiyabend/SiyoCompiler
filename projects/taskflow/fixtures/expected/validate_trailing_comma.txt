@@ -1,0 +1,2 @@
+fixtures/adversarial/trailing_comma.json: json: expected a string at position 37, line 2, column 14 ('}')
+invalid: 1 problem

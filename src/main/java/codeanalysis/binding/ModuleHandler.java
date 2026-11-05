@@ -650,6 +650,17 @@ public class ModuleHandler {
 
     public void registerFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
+        _scope.tryDeclareFunction(functionSymbolFor(syntax, name));
+    }
+
+    /**
+     * Builds the symbol for a declared function from its signature.
+     *
+     * @param syntax     The declaration.
+     * @param symbolName The name the symbol is known by.
+     * @return The symbol, not yet declared in any scope.
+     */
+    FunctionSymbol functionSymbolFor(FunctionDeclarationSyntax syntax, String symbolName) {
 
         // A type parameter stands for a type while the signature is read, so
         // `T` resolves here rather than being reported as an unknown type.
@@ -671,7 +682,7 @@ public class ModuleHandler {
             returnType = _typeResolver.lookupType(syntax.getTypeClause().getIdentifier().getData());
         }
 
-        FunctionSymbol function = new FunctionSymbol(name, parameters, returnType);
+        FunctionSymbol function = new FunctionSymbol(symbolName, parameters, returnType);
         function.setOriginModule(_filePath);
         function.setTypeParameters(syntax.getTypeParameters());
         if (syntax.getTypeClause() != null) {
@@ -692,7 +703,7 @@ public class ModuleHandler {
                 if (_structTypes.containsKey(elementName)) function.setReturnElementStructName(elementName);
             }
         }
-        _scope.tryDeclareFunction(function);
+        return function;
     }
 
     public void registerStructDeclaration(StructDeclarationSyntax syntax) {

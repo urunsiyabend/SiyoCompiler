@@ -1,0 +1,8 @@
+{
+  "project": "storefront",
+  "dependencies": [
+    {"task": "admin", "needs": ["api", "auth"]},
+    {"task": "e2e", "needs": ["api", "ui"]},
+    {"task": "launch", "needs": ["e2e", "admin", "beta"]}
+  ]
+}

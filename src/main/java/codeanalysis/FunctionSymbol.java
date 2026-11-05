@@ -33,6 +33,40 @@ public class FunctionSymbol {
         _moduleName = moduleName;
     }
 
+    /** Sets a nested function's unique symbol name apart from the name it was written with. */
+    public static final String NESTED_MARK = "$nested$";
+
+    private codeanalysis.text.TextSpan _declarationSpan;
+
+    /** Where a nested function was declared, or null for any other function. */
+    public codeanalysis.text.TextSpan getDeclarationSpan() { return _declarationSpan; }
+
+    public void setDeclarationSpan(codeanalysis.text.TextSpan span) { _declarationSpan = span; }
+
+    /** The name as written, for messages. */
+    public String getWrittenName() {
+        int mark = _name.indexOf(NESTED_MARK);
+        return mark < 0 ? _name : _name.substring(0, mark);
+    }
+
+    /** Why this function cannot be compiled yet, or null when it can. */
+    public String uncompiledCapture() {
+        if (_capturedLocals.isEmpty()) return null;
+        return "Function '" + getWrittenName() + "' uses '" + _capturedLocals.iterator().next().getName()
+                + "' from the function around it, which is not compiled yet; siyoc interpret runs it";
+    }
+
+    private final java.util.Set<VariableSymbol> _capturedLocals = new java.util.LinkedHashSet<>();
+
+    /**
+     * The enclosing function's variables a function declared inside it reads or
+     * writes, empty for a top-level function. A reference to the function shares
+     * this set, because it may be bound before the body has been.
+     *
+     * @return The captured variables.
+     */
+    public java.util.Set<VariableSymbol> getCapturedLocals() { return _capturedLocals; }
+
     private java.util.List<String> _typeParameters = java.util.List.of();
     private String _returnTypeName;
 

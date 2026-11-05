@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.8.0-green" alt="v0.8.0">
+  <img src="https://img.shields.io/badge/version-0.9.0-green" alt="v0.9.0">
   <img src="https://img.shields.io/badge/tests-2243%20passing-brightgreen" alt="Tests">
 </p>
 
@@ -204,7 +204,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.8.0"
+version = "0.9.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -254,8 +254,9 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 
 The repository includes 29 example programs and several multi-file projects
 under `projects/`, among them [LogScope](projects/logscope/README.md), a JSONL
-log summariser with JSON and HTML reports that is tested end to end on both
-backends:
+log summariser with JSON and HTML reports, and
+[TaskFlow](projects/taskflow/README.md), a dependency planner over JSON task files.
+Both are tested end to end on both backends:
 
 | Category | Examples |
 |----------|---------|
@@ -318,18 +319,19 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2243 tests across 38 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope end-to-end run, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2743 tests across 41 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
+- **[RELEASE_NOTES_0.9.0.md](RELEASE_NOTES_0.9.0.md)** — What changed in 0.9.0, and why
 - **[RELEASE_NOTES_0.8.0.md](RELEASE_NOTES_0.8.0.md)** — What changed in 0.8.0, and why
 - **[RELEASE_NOTES_0.7.0.md](RELEASE_NOTES_0.7.0.md)** — What changed in 0.7.0, and why
 - **[RELEASE_NOTES_0.6.0.md](RELEASE_NOTES_0.6.0.md)** — What changed in 0.6.0, and why
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.8.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.9.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.8.0)
+## Known limitations (0.9.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
@@ -340,13 +342,21 @@ These are tracked for future releases — see [FUTURE.md](FUTURE.md):
   parameter.
 - `as` casts a Java object; it does not convert between numeric types. Widening
   is implicit and narrowing is written with `toInt`.
-- A struct literal with no fields (`Empty { }`) is not recognised, and a map
-  literal written as a function body's tail value (`fn f() -> map { {"a": 1} }`)
-  is read as a block.
+- A struct literal with no fields (`Empty { }`) is not recognised.
 - A type annotation cannot be module-qualified (`-> cli.Options`); imported
   types are written unqualified.
 - A mixed array literal is rejected even when annotated `object[]`, and
   `error(msg)` is not treated as diverging the way `throw` is.
+- Recursion depth differs by backend on the default stack: about 10,000 calls
+  compiled, under 1,000 interpreted. Both raise a catchable `StackOverflowError`;
+  a program whose depth comes from its input should keep its own stack.
+- A `try` expression used as an operand (`"x" + try { ... } catch e { ... }`) fails
+  verification compiled. Assign it to a variable first.
+- Closure conversion has gaps compiled: a `fn` in a function that uses that function's
+  locals is reported as not compiled yet, any loop around `scope { spawn { } }` is an
+  internal compiler error, and a lambda reading a top-level `mut`, capturing `self`,
+  capturing a `mut` parameter or walking an `imut` captured map or set fails at load or run time.
+  All work interpreted.
 - No package manager, formatter, or LSP server.
 
 ## Contributing

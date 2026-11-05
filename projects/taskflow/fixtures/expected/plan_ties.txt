@@ -1,0 +1,13 @@
+batch 1:
+  n (2h)
+  q (0h)
+batch 2:
+  a (2h)
+  m (2h)
+batch 3:
+  z (2h)
+  end2 (3h)
+batch 4:
+  end1 (3h)
+remaining: 14h
+critical path (5h): a -> end1

@@ -1,0 +1,3 @@
+fixtures/adversarial/wrong_sections.json: tasks: must be an array, got string
+fixtures/adversarial/wrong_sections.json: dependencies: must be an array, got map
+invalid: 2 problems

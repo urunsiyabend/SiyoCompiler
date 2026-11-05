@@ -1,0 +1,38 @@
+// A binary min-heap of ints. Holds task ranks while a plan is being built, so a
+// wide graph does not resort its whole ready list for every batch.
+
+pub fn insert(h: Array<int>, v: int) {
+    push(h, v)
+    mut i = len(h) - 1
+    while i > 0 {
+        imut up = (i - 1) / 2
+        if h[up] <= h[i] { break }
+        imut tmp = h[up]
+        h[up] = h[i]
+        h[i] = tmp
+        i = up
+    }
+}
+
+// Takes the smallest value out. The heap must not be empty.
+pub fn take(h: Array<int>) -> int {
+    imut smallest = h[0]
+    imut last = pop(h)
+    imut n = len(h)
+    if n == 0 { return smallest }
+    h[0] = last
+    mut i = 0
+    while true {
+        mut least = i
+        imut l = 2 * i + 1
+        imut r = l + 1
+        if l < n && h[l] < h[least] { least = l }
+        if r < n && h[r] < h[least] { least = r }
+        if least == i { break }
+        imut tmp = h[i]
+        h[i] = h[least]
+        h[least] = tmp
+        i = least
+    }
+    smallest
+}

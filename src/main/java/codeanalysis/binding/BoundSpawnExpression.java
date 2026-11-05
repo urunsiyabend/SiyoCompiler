@@ -15,6 +15,13 @@ public class BoundSpawnExpression extends BoundExpression {
     }
 
     public BoundBlockStatement getBody() { return _body; }
+
+    /** {@code spawn Box.new(x)}: built from an expression, evaluated by whoever spawns it. */
+    public boolean isExpressionForm() { return _expressionForm; }
+
+    public void setExpressionForm(boolean expressionForm) { _expressionForm = expressionForm; }
+
+    private boolean _expressionForm;
     public Set<VariableSymbol> getCapturedVariables() { return _capturedVariables; }
 
     @Override

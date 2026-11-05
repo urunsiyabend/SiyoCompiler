@@ -1,0 +1,188 @@
+// The dependency graph over task indexes, and what can be asked of it.
+
+import "model"
+
+pub struct Graph {
+    ids: Array<string>,
+    index: Map<string, int>,
+    deps: Array<Array<int>>,        // what each task needs
+    dependents: Array<Array<int>>   // what needs each task
+}
+
+// Tasks are sorted by id, so a smaller index is a smaller id and no comparison
+// below needs to look at a string.
+pub fn build(tasks: Array<Task>) -> Graph {
+    mut ids: Array<string> = []
+    mut index: Map<string, int> = {}
+    mut deps: Array<Array<int>> = []
+    mut dependents: Array<Array<int>> = []
+    for t in tasks {
+        index[t.id] = len(ids)
+        push(ids, t.id)
+        push(deps, [])
+        push(dependents, [])
+    }
+    mut i = 0
+    for t in tasks {
+        for d in t.deps {
+            imut j = index[d]
+            push(deps[i], j)
+            push(dependents[j], i)
+        }
+        i += 1
+    }
+    Graph { ids: ids, index: index, deps: deps, dependents: dependents }
+}
+
+struct Tarjan {
+    g: Graph,
+    next: int,
+    order: Array<int>,
+    low: Array<int>,
+    onStack: Array<bool>,
+    stack: Array<int>,
+    groups: Array<Array<int>>
+}
+
+fn enter(s: Tarjan, v: int) {
+    s.order[v] = s.next
+    s.low[v] = s.next
+    s.next = s.next + 1
+    push(s.stack, v)
+    s.onStack[v] = true
+}
+
+// v's walk is finished. If nothing it reaches gets back above it, v and what
+// remains above it on the stack are one group.
+fn leave(s: Tarjan, v: int) {
+    if s.low[v] != s.order[v] { return }
+    mut group: Array<int> = []
+    mut w = pop(s.stack)
+    s.onStack[w] = false
+    push(group, w)
+    while w != v {
+        w = pop(s.stack)
+        s.onStack[w] = false
+        push(group, w)
+    }
+    push(s.groups, group)
+}
+
+// Tarjan's algorithm with its own stack. How deep this goes is decided by the
+// input, so a chain of 100,000 tasks must not depend on the size of the call
+// stack (see PAIN_POINTS.md, D1).
+fn walkFrom(s: Tarjan, root: int) {
+    mut path: Array<int> = [root]    // the tasks being walked
+    mut edges: Array<int> = [0]      // how far each of them has got
+    enter(s, root)
+    while len(path) > 0 {
+        imut top = len(path) - 1
+        imut v = path[top]
+        imut deps = s.g.deps[v]
+        if edges[top] < len(deps) {
+            imut w = deps[edges[top]]
+            edges[top] = edges[top] + 1
+            if s.order[w] < 0 {
+                enter(s, w)
+                push(path, w)
+                push(edges, 0)
+            } else if s.onStack[w] && s.order[w] < s.low[v] {
+                s.low[v] = s.order[w]
+            }
+        } else {
+            leave(s, v)
+            pop(path)
+            pop(edges)
+            if len(path) > 0 {
+                imut parent = path[len(path) - 1]
+                if s.low[v] < s.low[parent] { s.low[parent] = s.low[v] }
+            }
+        }
+    }
+}
+
+// One concrete cycle through a strongly connected group: the shortest from its
+// smallest id back to itself, trying smaller ids first, so the same graph always
+// names the same cycle.
+fn cycleThrough(g: Graph, group: Array<int>) -> Array<string> {
+    mut inGroup: Set<int> = #{}
+    mut start = group[0]
+    for v in group {
+        inGroup.add(v)
+        if v < start { start = v }
+    }
+    mut cameFrom: Map<int, int> = {}
+    mut queue: Array<int> = [start]
+    mut head = 0
+    mut last = -1
+    while last < 0 {
+        imut v = queue[head]
+        head += 1
+        for w in g.deps[v] {
+            if w == start {
+                last = v
+                break
+            }
+            if inGroup.has(w) && !cameFrom.has(w) {
+                cameFrom[w] = v
+                push(queue, w)
+            }
+        }
+    }
+    mut backwards: Array<int> = [start, last]
+    mut at = last
+    while at != start {
+        at = cameFrom[at]
+        push(backwards, at)
+    }
+    mut names: Array<string> = []
+    while len(backwards) > 0 { push(names, g.ids[pop(backwards)]) }
+    names
+}
+
+// The dependency cycles of the graph: one for each strongly connected group of
+// more than one task, and one for each task that needs itself. Ordered by name.
+pub fn cycles(g: Graph) -> Array<Array<string>> {
+    imut n = len(g.ids)
+    imut s = Tarjan { g: g, next: 0, order: [], low: [], onStack: [], stack: [], groups: [] }
+    for mut i = 0 i < n i = i + 1 {
+        push(s.order, -1)
+        push(s.low, -1)
+        push(s.onStack, false)
+    }
+    for mut v = 0 v < n v = v + 1 {
+        if s.order[v] < 0 { walkFrom(s, v) }
+    }
+    mut result: Array<Array<string>> = []
+    for group in s.groups {
+        if len(group) > 1 || hasSelfLoop(g, group[0]) { push(result, cycleThrough(g, group)) }
+    }
+    sort(result, fn(a: Array<string>, b: Array<string>) -> int {
+        if a[0] < b[0] { -1 } else if a[0] > b[0] { 1 } else { 0 }
+    })
+    result
+}
+
+fn hasSelfLoop(g: Graph, v: int) -> bool {
+    for w in g.deps[v] { if w == v { return true } }
+    false
+}
+
+// Everything `start` needs, directly or not, itself included. A task in `stops`
+// is counted but not looked through.
+pub fn closure(g: Graph, start: int, stops: Set<int>) -> Set<int> {
+    mut seen: Set<int> = #{}
+    mut stack: Array<int> = [start]
+    seen.add(start)
+    while len(stack) > 0 {
+        imut v = pop(stack)
+        if stops.has(v) { continue }
+        for w in g.deps[v] {
+            if !seen.has(w) {
+                seen.add(w)
+                push(stack, w)
+            }
+        }
+    }
+    seen
+}

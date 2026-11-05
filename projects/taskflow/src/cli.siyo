@@ -1,0 +1,78 @@
+// Command-line parsing: argv in, Options or a usage error out.
+
+import "std/strings"
+
+pub struct Options {
+    command: string,
+    files: string[],
+    json: bool,
+    workers: int,
+    target: string,
+    hasTarget: bool
+}
+
+pub type Parsed = Opts(Options) | Usage(string) | Help
+
+pub fn usage() -> string {
+    """usage: taskflow <command> <file.json>... [options]
+
+commands:
+  validate  check the files; list every problem and dependency cycle
+  cycles    list the dependency cycles only
+  plan      print a deterministic execution plan, batch by batch
+  status    print progress: what is done, ready, running, blocked, failed
+
+options:
+  --json        print a JSON report instead of text
+  --workers N   plan: at most N tasks in a batch (default: no limit)
+  --target ID   plan: only what task ID needs, and ID itself
+
+a file holds {"project": name, "tasks": [...], "dependencies": [...]}, or just
+an array of tasks; several files are merged. See README.md for the fields.
+
+exit codes: 0 ok, 1 usage error, 2 a file cannot be read, 3 invalid input"""
+}
+
+fn isCommand(name: string) -> bool {
+    name == "validate" || name == "cycles" || name == "plan" || name == "status"
+}
+
+pub fn parseArgs(args: string[]) -> Parsed {
+    if len(args) == 0 { return Usage("no command given") }
+    imut command = args[0]
+    if command == "help" || command == "--help" || command == "-h" { return Help }
+    if !isCommand(command) { return Usage("unknown command '" + command + "'") }
+    mut files: string[] = []
+    mut asJson = false
+    mut workers = 0
+    mut target = ""
+    mut hasTarget = false
+    mut i = 1
+    while i < len(args) {
+        imut a = args[i]
+        i += 1
+        if a == "--json" {
+            asJson = true
+        } else if a == "--workers" || a == "--target" {
+            if command != "plan" { return Usage(a + " only applies to plan") }
+            if i >= len(args) || startsWith(args[i], "--") { return Usage(a + " needs a value") }
+            imut value = args[i]
+            i += 1
+            if a == "--target" {
+                target = value
+                hasTarget = true
+            } else {
+                if !strings.isInt(value) || parseInt(value) < 1 {
+                    return Usage("--workers needs a positive integer, got '" + value + "'")
+                }
+                workers = parseInt(value)
+            }
+        } else if startsWith(a, "-") {
+            return Usage("unknown flag '" + a + "'")
+        } else {
+            push(files, a)
+        }
+    }
+    if len(files) == 0 { return Usage(command + " needs at least one file") }
+    Opts(Options { command: command, files: files, json: asJson, workers: workers, target: target, hasTarget: hasTarget })
+}

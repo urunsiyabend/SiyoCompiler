@@ -327,6 +327,12 @@ public class Emitter {
     private void emitFunction(ClassWriter cw, FunctionSymbol function, BoundBlockStatement body, String className) {
         if (BuiltinFunctions.isBuiltin(function)) return;
         if (function.getModuleName() != null) return;
+        // Closure conversion for a named function is not done yet. Emitting one
+        // anyway would read a global of the same name, if there is one, silently.
+        if (function.uncompiledCapture() != null) {
+            _diagnostics.reportError(function.getDeclarationSpan(), function.uncompiledCapture());
+            return;
+        }
 
         String methodName = function.getName().replace('.', '$');
         String descriptor = getFunctionDescriptor(function);
@@ -365,7 +371,7 @@ public class Emitter {
             // user gets a located diagnostic naming the function, not a stack
             // trace from inside the compiler.
             _diagnostics.reportInternalCompilerError(currentSpan(),
-                    "function '" + function.getName() + "'", describeFailure(e));
+                    "function '" + function.getWrittenName() + "'", describeFailure(e));
             return;
         }
         _mv.visitEnd();
@@ -379,7 +385,8 @@ public class Emitter {
             boolean isLast = (i == statements.size() - 1);
 
             // For the last expression statement in a non-void function, emit as return
-            if (isLast && function.getReturnType() != null && stmt instanceof BoundExpressionStatement exprStmt) {
+            if (isLast && function.getReturnType() != null && stmt instanceof BoundExpressionStatement exprStmt
+                    && exprStmt.getExpression().getClassType() != null) {
                 emitExpression(exprStmt.getExpression());
                 // Coerce expression type to match declared return type
                 Class<?> exprType = exprStmt.getExpression().getClassType();
@@ -711,10 +718,7 @@ public class Emitter {
 
     private boolean isCapturedVar(VariableSymbol var) {
         if (_spawnCapturedVars == null) return false;
-        for (VariableSymbol cv : _spawnCapturedVars) {
-            if (cv.getName().equals(var.getName())) return true;
-        }
-        return false;
+        return _spawnCapturedVars.contains(var);
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {
@@ -1698,16 +1702,10 @@ public class Emitter {
     // ========== Lambda/Spawn Method Emission ==========
 
     private void collectLambdasAndSpawns(BoundNode node) {
-        if (node instanceof BoundLambdaExpression lambda) {
-            if (!_lambdas.contains(lambda)) _lambdas.add(lambda);
-            collectLambdasAndSpawns(lambda.getBody());
-        }
-        if (node instanceof BoundSpawnExpression spawn) {
-            if (!_spawns.contains(spawn)) _spawns.add(spawn);
-            collectLambdasAndSpawns(spawn.getBody());
-        }
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectLambdasAndSpawns(it.next());
+        if (node instanceof BoundLambdaExpression lambda && !_lambdas.contains(lambda)) _lambdas.add(lambda);
+        if (node instanceof BoundSpawnExpression spawn && !_spawns.contains(spawn)) _spawns.add(spawn);
+        for (BoundNode operand : BoundOperands.of(node)) {
+            collectLambdasAndSpawns(operand);
         }
     }
 
@@ -2436,6 +2434,19 @@ public class Emitter {
                     "()Lcodeanalysis/SiyoArray;", false);
             return;
         }
+        if (function == BuiltinFunctions.SET_VALUES) {
+            emitCoerceArg(node.getArguments().get(0), SiyoSet.class);
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "codeanalysis/SiyoSet", "values",
+                    "()Lcodeanalysis/SiyoArray;", false);
+            return;
+        }
+        if (function == BuiltinFunctions.ITERABLE) {
+            emitExpression(node.getArguments().get(0));
+            emitBoxIfNeeded(node.getArguments().get(0).getClassType());
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "iterable",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            return;
+        }
         if (function == BuiltinFunctions.NEW_MAP) {
             _mv.visitTypeInsn(NEW, "codeanalysis/SiyoMap");
             _mv.visitInsn(DUP);
@@ -2491,6 +2502,8 @@ public class Emitter {
             _mv.visitInsn(ICONST_1);
             _mv.visitInsn(ISUB);
             _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/List", "remove", "(I)Ljava/lang/Object;", true);
+            // The binder gave this call the type of what the array holds.
+            emitUnboxIfNeeded(node.getClassType());
             return;
         }
         if (function == BuiltinFunctions.MAP_ARRAY) {
@@ -2967,11 +2980,13 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/Boolean");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Boolean", "booleanValue", "()Z", false);
         } else if (type == Long.class) {
-            _mv.visitTypeInsn(CHECKCAST, "java/lang/Long");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Long", "longValue", "()J", false);
+            // An erased container may hold an int that was never widened, such
+            // as one added to a Set<long>. A float is still an error, not truncated.
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "unboxLong",
+                    "(Ljava/lang/Object;)J", false);
         } else if (type == Double.class) {
-            _mv.visitTypeInsn(CHECKCAST, "java/lang/Double");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Double", "doubleValue", "()D", false);
+            _mv.visitTypeInsn(CHECKCAST, "java/lang/Number");
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "doubleValue", "()D", false);
         } else if (type == String.class) {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
         } else if (type != null && type != Object.class) {

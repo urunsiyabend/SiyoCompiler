@@ -11,6 +11,17 @@ pub fn parse(text: string) -> Json {
     }
 }
 
+// A parse of any document: an array or a scalar as well as an object.
+pub type JsonValue = Document(object) | Malformed(string)
+
+pub fn parseValue(text: string) -> JsonValue {
+    try {
+        Document(SiyoRuntime.jsonParseValue(text))
+    } catch e {
+        Malformed(e)
+    }
+}
+
 pub fn parseOrEmpty(text: string) -> map {
     return SiyoRuntime.jsonParse(text)
 }

@@ -1,0 +1,114 @@
+// TaskFlow: validate task files, find dependency cycles, plan and report.
+//
+//   siyoc run validate fixtures/release.json
+//   siyoc run plan     fixtures/release.json --workers 2
+//   siyoc run status   fixtures/release.json --json
+
+import "std/io"
+import "std/os"
+import "cli"
+import "model"
+import "loader"
+import "graph"
+import "plan"
+import "report"
+import "status"
+
+imut EXIT_USAGE = 1
+imut EXIT_UNREADABLE = 2
+imut EXIT_INVALID = 3
+
+fn fail(code: int, msg: string) {
+    io.eprintln("taskflow: " + model.safe(msg))
+    os.exit(code)
+}
+
+fn validate(o: Options, p: Project, cycles: Array<Array<string>>) {
+    if o.json {
+        println(report.validateJson(p, cycles))
+    } else {
+        print(report.validateText(p, cycles))
+    }
+    if len(p.problems) + len(cycles) > 0 { os.exit(EXIT_INVALID) }
+}
+
+fn showCycles(o: Options, p: Project, cycles: Array<Array<string>>) {
+    if o.json {
+        println(report.cyclesJson(p, cycles))
+    } else {
+        print(report.cyclesText(p, cycles))
+    }
+    if len(p.problems) + len(cycles) > 0 { os.exit(EXIT_INVALID) }
+}
+
+// plan and status cannot say anything true about input that does not validate.
+fn requireValid(p: Project, cycles: Array<Array<string>>) {
+    if len(p.problems) + len(cycles) > 0 {
+        io.eprintln(report.problemsText(p.problems, cycles) + "taskflow: invalid input, nothing planned")
+        os.exit(EXIT_INVALID)
+    }
+}
+
+fn showPlan(o: Options, p: Project, g: Graph) {
+    if o.hasTarget && !p.byId.has(o.target) {
+        fail(EXIT_INVALID, "unknown target task \"" + o.target + "\"")
+    }
+    imut pl = plan.build(p.tasks, g, o.workers, if o.hasTarget { o.target } else { "" })
+    if o.json {
+        println(report.planJson(p.name, pl))
+    } else {
+        print(report.planText(p.name, pl))
+    }
+}
+
+fn showStatus(o: Options, p: Project, g: Graph) {
+    imut s = status.compute(p, g)
+    if o.json {
+        println(report.statusJson(s))
+    } else {
+        print(report.statusText(s))
+    }
+}
+
+fn execute(o: Options, p: Project) {
+    imut g = graph.build(knownDepsOnly(p))
+    imut cycles = graph.cycles(g)
+    if o.command == "validate" {
+        validate(o, p, cycles)
+    } else if o.command == "cycles" {
+        showCycles(o, p, cycles)
+    } else {
+        requireValid(p, cycles)
+        if o.command == "plan" { showPlan(o, p, g) } else { showStatus(o, p, g) }
+    }
+}
+
+// A dependency on a missing task is already a reported problem, and must not
+// stop the cycles among the rest from being found in the same run.
+fn knownDepsOnly(p: Project) -> Array<Task> {
+    mut result: Array<Task> = []
+    for t in p.tasks {
+        mut deps: Array<string> = []
+        for d in t.deps { if p.byId.has(d) { push(deps, d) } }
+        push(result, Task { id: t.id, title: t.title, status: t.status, priority: t.priority,
+                            estimate: t.estimate, owner: t.owner, deps: deps, source: t.source })
+    }
+    result
+}
+
+fn main() {
+    match cli.parseArgs(os.args()) {
+        Help => println(cli.usage()),
+        Usage(why) => {
+            io.eprintln("taskflow: " + model.safe(why))
+            io.eprintln(cli.usage())
+            os.exit(EXIT_USAGE)
+        },
+        Opts(o) => {
+            match loader.load(o.files) {
+                Unreadable(why) => fail(EXIT_UNREADABLE, why),
+                Ok(p) => execute(o, p)
+            }
+        }
+    }
+}

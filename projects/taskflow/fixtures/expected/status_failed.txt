@@ -1,0 +1,21 @@
+7 tasks, 14% done
+  done   1
+  doing  1
+  todo   3
+  failed 2
+hours: 1 done, 6 left
+running:
+  leaf (1h)
+ready:
+  after-done (1h)
+  free (1h)
+failed:
+  root1 (1h)
+  root2 (1h)
+blocked:
+  leaf by root1, root2
+  mid by root1
+critical path (1h): after-done
+warning: done-after-failure is done but needs root1, which is failed
+warning: leaf is running but needs mid, which is todo
+warning: leaf is running but needs root2, which is failed

@@ -1,0 +1,176 @@
+// A deterministic execution plan over the tasks that still have to run.
+
+import "model"
+import "graph"
+import "heap"
+
+pub struct Blocked { id: string, by: Array<string> }
+
+pub struct Plan {
+    batches: Array<Array<Task>>,   // what can run together, in order
+    failed: Array<Task>,           // failed, and in the plan's scope
+    blocked: Array<Blocked>,       // cannot run: a task they need failed
+    remaining: long,               // hours across the batches
+    critical: Array<Task>,         // the longest chain of remaining work
+    criticalHours: long
+}
+
+// Doing comes first, then the higher priority, then the smaller id: the order
+// a tie is always broken in. Sorts `order` and returns each task's rank.
+fn ranks(tasks: Array<Task>, order: Array<int>) -> Map<int, int> {
+    sort(order, fn(x: int, y: int) -> int {
+        imut a = tasks[x]
+        imut b = tasks[y]
+        if a.status != b.status && (a.status == "doing" || b.status == "doing") {
+            if a.status == "doing" { -1 } else { 1 }
+        } else if a.priority != b.priority {
+            if a.priority > b.priority { -1 } else { 1 }
+        } else if a.id < b.id { -1 } else if a.id > b.id { 1 } else { 0 }
+    })
+    mut result: Map<int, int> = {}
+    mut r = 0
+    for v in order {
+        result[v] = r
+        r += 1
+    }
+    result
+}
+
+fn waiting(status: string) -> bool { status == "todo" || status == "doing" }
+
+// A task is blocked when something it needs failed, or is itself blocked. The
+// tasks named are the failed ones it waits on: a failure stops at the first
+// failed task, since nothing can be said about what that task would have needed.
+fn findBlocked(tasks: Array<Task>, g: Graph, inPlan: Set<int>) -> Map<int, Set<string>> {
+    mut causes: Map<int, Set<string>> = {}
+    mut stack: Array<int> = []
+    mut i = 0
+    for t in tasks {
+        if t.status == "failed" && inPlan.has(i) { push(stack, i) }
+        i += 1
+    }
+    while len(stack) > 0 {
+        imut v = pop(stack)
+        imut root: Set<string> = if tasks[v].status == "failed" { #{tasks[v].id} } else { causes[v] }
+        for w in g.dependents[v] {
+            if !inPlan.has(w) || !waiting(tasks[w].status) { continue }
+            if !causes.has(w) { causes[w] = #{} }
+            mut grew = false
+            for name in root {
+                if !causes[w].has(name) {
+                    causes[w].add(name)
+                    grew = true
+                }
+            }
+            if grew { push(stack, w) }
+        }
+    }
+    causes
+}
+
+fn sortedText(xs: Array<string>) {
+    sort(xs, fn(a: string, b: string) -> int { if a < b { -1 } else if a > b { 1 } else { 0 } })
+}
+
+// The longest chain, in hours, through what will run. `topo` lists the tasks so
+// that a task comes after everything it needs. A tie goes to the smaller rank.
+fn longestChain(tasks: Array<Task>, g: Graph, topo: Array<int>, rank: Map<int, int>, plan: Plan) {
+    mut best: Map<int, long> = {}
+    mut prev: Map<int, int> = {}
+    mut end = -1
+    for v in topo {
+        mut from = -1
+        mut hours: long = 0
+        for d in g.deps[v] {
+            if best.has(d) && (from < 0 || best[d] > hours || (best[d] == hours && rank[d] < rank[from])) {
+                from = d
+                hours = best[d]
+            }
+        }
+        best[v] = hours + tasks[v].estimate
+        prev[v] = from
+        if end < 0 || best[v] > best[end] || (best[v] == best[end] && rank[v] < rank[end]) { end = v }
+    }
+    if end < 0 { return }
+    plan.criticalHours = best[end]
+    mut chain: Array<Task> = []
+    mut at = end
+    while at >= 0 {
+        push(chain, tasks[at])
+        at = prev[at]
+    }
+    while len(chain) > 0 { push(plan.critical, pop(chain)) }
+}
+
+// `workers` caps a batch (0: no cap). `target` restricts the plan to what that
+// task needs ("": everything). The graph must be free of cycles.
+pub fn build(tasks: Array<Task>, g: Graph, workers: int, target: string) -> Plan {
+    mut inPlan: Set<int> = #{}
+    if target != "" {
+        // Work already done needs nothing further to be done first.
+        mut finished: Set<int> = #{}
+        for mut d = 0 d < len(tasks) d = d + 1 {
+            if tasks[d].status == "done" { finished.add(d) }
+        }
+        inPlan = graph.closure(g, g.index[target], finished)
+    } else {
+        for mut i = 0 i < len(tasks) i = i + 1 { inPlan.add(i) }
+    }
+    imut causes = findBlocked(tasks, g, inPlan)
+
+    mut runnable: Array<int> = []
+    mut i = 0
+    for t in tasks {
+        if inPlan.has(i) && waiting(t.status) && !causes.has(i) { push(runnable, i) }
+        i += 1
+    }
+    imut rank = ranks(tasks, runnable)
+    mut byRank: Map<int, int> = {}
+    for v in runnable { byRank[rank[v]] = v }
+
+    mut pending: Map<int, int> = {}
+    mut ready: Array<int> = []
+    for v in runnable {
+        mut count = 0
+        for d in g.deps[v] { if rank.has(d) { count += 1 } }
+        pending[v] = count
+        if count == 0 { heap.insert(ready, rank[v]) }
+    }
+
+    imut plan = Plan { batches: [], failed: [], blocked: [], remaining: 0, critical: [], criticalHours: 0 }
+    mut topo: Array<int> = []
+    while len(ready) > 0 {
+        mut batch: Array<Task> = []
+        mut started: Array<int> = []
+        while len(ready) > 0 && (workers == 0 || len(batch) < workers) {
+            imut v = byRank[heap.take(ready)]
+            push(batch, tasks[v])
+            push(started, v)
+            plan.remaining = plan.remaining + tasks[v].estimate
+        }
+        for v in started {
+            push(topo, v)
+            for w in g.dependents[v] {
+                if rank.has(w) {
+                    pending[w] = pending[w] - 1
+                    if pending[w] == 0 { heap.insert(ready, rank[w]) }
+                }
+            }
+        }
+        push(plan.batches, batch)
+    }
+    longestChain(tasks, g, topo, rank, plan)
+
+    mut j = 0
+    for t in tasks {
+        if t.status == "failed" && inPlan.has(j) { push(plan.failed, t) }
+        if causes.has(j) {
+            mut by: Array<string> = []
+            for name in causes[j] { push(by, name) }
+            sortedText(by)
+            push(plan.blocked, Blocked { id: t.id, by: by })
+        }
+        j += 1
+    }
+    plan
+}

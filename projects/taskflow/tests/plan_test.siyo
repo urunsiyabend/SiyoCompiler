@@ -1,0 +1,98 @@
+import "std/testing"
+import "model"
+import "plan"
+import "helpers"
+
+fn planIs(text: string, workers: int, target: string, want: string, what: string) {
+    testing.assertEq(helpers.shape(helpers.planOf(text, workers, target)), want, what)
+}
+
+fn dependenciesComeFirst() {
+    planIs("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\"}]", 0, "", "c | b | a", "chain")
+}
+
+fn priorityThenIdOrdersABatch() {
+    planIs("[{\"id\": \"z\", \"priority\": 2}, {\"id\": \"m\"}, {\"id\": \"a\"}, {\"id\": \"n\", \"priority\": -1}]", 0, "", "z,a,m,n", "ties")
+}
+
+fn runningWorkComesFirst() {
+    planIs("[{\"id\": \"a\", \"priority\": 9}, {\"id\": \"z\", \"status\": \"doing\", \"priority\": -9}]", 0, "", "z,a", "doing")
+}
+
+fn workersCapABatchAndKeepTheOrder() {
+    planIs("[{\"id\": \"a\"}, {\"id\": \"b\"}, {\"id\": \"c\"}, {\"id\": \"d\", \"deps\": [\"a\"], \"priority\": 5}]", 2, "", "a,b | d,c", "unlocked work outranks")
+}
+
+fn doneWorkSatisfiesADependency() {
+    planIs("[{\"id\": \"a\", \"status\": \"done\"}, {\"id\": \"b\", \"deps\": [\"a\"]}]", 0, "", "b", "done")
+}
+
+fn nothingLeftIsAnEmptyPlan() {
+    imut pl = helpers.planOf("[{\"id\": \"a\", \"status\": \"done\"}]", 0, "")
+    testing.assertEq(toString(len(pl.batches)), "0", "no batches")
+    testing.assertEq(toString(pl.remaining), "0", "no hours")
+    testing.assertEq(toString(len(pl.critical)), "0", "no chain")
+}
+
+fn aFailedTaskBlocksWhatFollows() {
+    imut pl = helpers.planOf("[{\"id\": \"f\", \"status\": \"failed\"}, {\"id\": \"g\", \"status\": \"failed\"}, {\"id\": \"m\", \"deps\": [\"f\"]}, {\"id\": \"n\", \"deps\": [\"m\", \"g\"]}, {\"id\": \"o\"}]", 0, "")
+    testing.assertEq(helpers.shape(pl), "o", "only the free task runs")
+    testing.assertEq(toString(len(pl.blocked)), "2", "two blocked")
+    testing.assertEq(pl.blocked[0].id + toString(pl.blocked[0].by), "m[f]", "root named")
+    testing.assertEq(pl.blocked[1].id + toString(pl.blocked[1].by), "n[f, g]", "all roots")
+}
+
+fn aDoneTaskStopsAFailureSpreading() {
+    imut pl = helpers.planOf("[{\"id\": \"f\", \"status\": \"failed\"}, {\"id\": \"d\", \"status\": \"done\", \"deps\": [\"f\"]}, {\"id\": \"x\", \"deps\": [\"d\"]}]", 0, "")
+    testing.assertEq(helpers.shape(pl), "x", "x runs")
+    testing.assertEq(toString(len(pl.blocked)), "0", "nothing blocked")
+}
+
+fn aTargetLimitsThePlan() {
+    imut text = "[{\"id\": \"a\"}, {\"id\": \"b\", \"deps\": [\"a\"]}, {\"id\": \"c\", \"deps\": [\"b\"]}, {\"id\": \"other\"}, {\"id\": \"f\", \"status\": \"failed\"}, {\"id\": \"g\", \"deps\": [\"f\"]}]"
+    planIs(text, 0, "b", "a | b", "only what b needs")
+    imut pl = helpers.planOf(text, 0, "b")
+    testing.assertEq(toString(len(pl.blocked)), "0", "failures elsewhere do not show")
+}
+
+fn aTargetDoesNotLookThroughDoneWork() {
+    imut text = "[{\"id\": \"x\"}, {\"id\": \"d\", \"status\": \"done\", \"deps\": [\"x\"]}, {\"id\": \"t\", \"deps\": [\"d\"]}]"
+    planIs(text, 0, "t", "t", "x is not needed")
+}
+
+fn aFailedTargetSaysSo() {
+    imut pl = helpers.planOf("[{\"id\": \"f\", \"status\": \"failed\"}, {\"id\": \"g\", \"status\": \"failed\"}]", 0, "f")
+    testing.assertEq(toString(len(pl.batches)), "0", "nothing runs")
+    testing.assertEq(toString(len(pl.failed)), "1", "only f is in scope")
+    testing.assertEq(pl.failed[0].id, "f", "named")
+}
+
+fn theCriticalPathIsTheLongestByHours() {
+    imut pl = helpers.planOf("[{\"id\": \"a\", \"estimate\": 1}, {\"id\": \"b\", \"estimate\": 5}, {\"id\": \"c\", \"estimate\": 1, \"deps\": [\"a\", \"b\"]}, {\"id\": \"d\", \"estimate\": 2, \"deps\": [\"a\"]}]", 0, "")
+    testing.assertEq(toString(pl.criticalHours), "6", "b then c")
+    testing.assertEq(pl.critical[0].id + pl.critical[1].id, "bc", "chain")
+    testing.assertEq(toString(pl.remaining), "9", "total")
+}
+
+fn aCriticalPathIgnoresWorkAlreadyDone() {
+    imut pl = helpers.planOf("[{\"id\": \"a\", \"status\": \"done\", \"estimate\": 99}, {\"id\": \"b\", \"estimate\": 2, \"deps\": [\"a\"]}]", 0, "")
+    testing.assertEq(toString(pl.criticalHours), "2", "only b")
+}
+
+fn hoursDoNotOverflowAnInt() {
+    mut tasks = "["
+    for mut i = 0 i < 3000 i = i + 1 {
+        if i > 0 { tasks = tasks + "," }
+        tasks = tasks + "{\"id\": \"t" + toString(i) + "\", \"estimate\": 1000000}"
+    }
+    imut pl = helpers.planOf(tasks + "]", 0, "")
+    testing.assertEq(toString(pl.remaining), "3000000000", "fits a long")
+}
+
+fn main() {
+    testing.run("plan", [dependenciesComeFirst, priorityThenIdOrdersABatch, runningWorkComesFirst,
+        workersCapABatchAndKeepTheOrder, doneWorkSatisfiesADependency, nothingLeftIsAnEmptyPlan,
+        aFailedTaskBlocksWhatFollows, aDoneTaskStopsAFailureSpreading, aTargetLimitsThePlan,
+        aTargetDoesNotLookThroughDoneWork, aFailedTargetSaysSo,
+        theCriticalPathIsTheLongestByHours, aCriticalPathIgnoresWorkAlreadyDone, hoursDoNotOverflowAnInt])
+}

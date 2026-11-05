@@ -57,7 +57,15 @@ public class BoundScope {
      * Rejects exact duplicates (same name AND same param count AND same param types).
      */
     public boolean tryDeclareFunction(FunctionSymbol functionSymbol) {
-        List<FunctionSymbol> overloads = _functions.get(functionSymbol.getName());
+        return tryDeclareFunction(functionSymbol.getName(), functionSymbol);
+    }
+
+    /**
+     * Declares a function under the name it is called by, which for a function
+     * nested in another differs from the symbol's own unique name.
+     */
+    public boolean tryDeclareFunction(String name, FunctionSymbol functionSymbol) {
+        List<FunctionSymbol> overloads = _functions.get(name);
         if (overloads != null) {
             // Check for exact duplicate (same param count AND same param types)
             for (FunctionSymbol existing : overloads) {
@@ -76,7 +84,7 @@ public class BoundScope {
         } else {
             overloads = new ArrayList<>();
             overloads.add(functionSymbol);
-            _functions.put(functionSymbol.getName(), overloads);
+            _functions.put(name, overloads);
         }
         return true;
     }

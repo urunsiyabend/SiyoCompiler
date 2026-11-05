@@ -1,0 +1,20 @@
+{"project": 7, "extra": true, "tasks": [
+  {"id": "ok", "dep": ["typo"]},
+  {"id": "ok"},
+  {"title": "no id"},
+  {"id": ""},
+  {"id": 12},
+  17,
+  null,
+  {"id": "status", "status": "DONE"},
+  {"id": "types", "title": 1, "owner": [], "priority": "high", "estimate": 1.5},
+  {"id": "range", "priority": 1000001, "estimate": -1},
+  {"id": "big", "priority": 99999999999, "estimate": 123456789012345678901234567890},
+  {"id": "deps1", "deps": "ok"},
+  {"id": "deps2", "deps": ["ok", "ok", 3, null, "ghost"]}
+], "dependencies": [
+  {"task": "ghost2", "needs": ["ok"]},
+  {"needs": ["ok"]},
+  {"task": "ok", "needs": "status", "why": "because"},
+  5
+]}

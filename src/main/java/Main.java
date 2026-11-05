@@ -20,7 +20,7 @@ import codeanalysis.syntax.SyntaxTree;
  * @version 1.0
  */
 public class Main {
-    private static final String VERSION = "0.8.0";
+    private static final String VERSION = "0.9.0";
 
     public static void main(String[] args) {
         useUtf8Output();
@@ -239,6 +239,7 @@ public class Main {
     }
 
     private static void compileAndRun(String path) {
+        requireSourceFile(path);
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
             loadOwningProject(absPath);
@@ -338,6 +339,7 @@ public class Main {
     }
 
     private static void compileFile(String path) {
+        requireSourceFile(path);
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
             loadOwningProject(absPath);
@@ -383,7 +385,17 @@ public class Main {
         }
     }
 
+    /** A missing source file is the user's mistake, not a stack trace. */
+    private static void requireSourceFile(String path) {
+        java.nio.file.Path file = java.nio.file.Paths.get(path);
+        if (!java.nio.file.Files.isReadable(file) || java.nio.file.Files.isDirectory(file)) {
+            System.err.println("siyoc: cannot read " + path);
+            System.exit(1);
+        }
+    }
+
     private static void runFile(String path) {
+        requireSourceFile(path);
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
             loadOwningProject(absPath);

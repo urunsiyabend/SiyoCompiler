@@ -64,6 +64,7 @@ public class Evaluator {
             }
 
             BoundStatement s = block.getStatements().get(index);
+            try {
             switch (s.getType()) {
                 case VariableDeclaration -> {
                     evaluateVariableDeclaration((BoundVariableDeclaration) s);
@@ -75,13 +76,13 @@ public class Evaluator {
                 }
                 case GotoStatement -> {
                     BoundGotoStatement gs = (BoundGotoStatement) s;
-                    index = labelToIndex.get(gs.getLabel());
+                    index = jumpTarget(labelToIndex, gs.getLabel());
                 }
                 case ConditionalGotoStatement -> {
                     BoundConditionalGotoStatement cgs = (BoundConditionalGotoStatement) s;
                     boolean condition = (boolean) evaluateExpression(cgs.getCondition());
                     if (condition == cgs.getJumpIfTrue()) {
-                        index = labelToIndex.get(cgs.getLabel());
+                        index = jumpTarget(labelToIndex, cgs.getLabel());
                     }
                     else {
                         index++;
@@ -108,9 +109,37 @@ public class Evaluator {
                 }
                 default -> throw new Exception("Unexpected node: " + s.getType());
             };
+            } catch (BlockExit exit) {
+                if (exit.label == null) break;
+                Integer target = labelToIndex.get(exit.label);
+                if (target == null) throw exit;
+                index = target;
+            }
         }
 
         return _lastValue;
+    }
+
+    /**
+     * Leaves the expression being evaluated when a block nested in it — a
+     * match arm, a try body — returns, or jumps to a label of an enclosing
+     * block. An Error, so that a Siyo try on the way out does not take it for
+     * something the program raised: a break inside a try used to surface as a
+     * NullPointerException, which the program's own catch then handled.
+     */
+    private static final class BlockExit extends Error {
+        final LabelSymbol label;
+
+        BlockExit(LabelSymbol label) {
+            super(null, null, false, false);
+            this.label = label;
+        }
+    }
+
+    private static int jumpTarget(HashMap<LabelSymbol, Integer> labelToIndex, LabelSymbol label) {
+        Integer target = labelToIndex.get(label);
+        if (target == null) throw new BlockExit(label);
+        return target;
     }
 
     /**
@@ -192,8 +221,23 @@ public class Evaluator {
      */
     private void evaluateVariableDeclaration(BoundVariableDeclaration node) throws Exception {
         Object value = evaluateExpression(node.getInitializer());
-        assignVariable(node.getVariable(), value);
+        declareVariable(node.getVariable(), value);
         _lastValue = value;
+    }
+
+    /**
+     * Brings a local into being in the current frame, whatever a caller holds
+     * under the same symbol: each call of a recursive function has its own.
+     *
+     * @param variable The variable symbol.
+     * @param value    The value it starts with.
+     */
+    private void declareVariable(VariableSymbol variable, Object value) {
+        if (!_callStack.isEmpty() && variable.getOwnerClass() == null && !_globals.containsKey(variable)) {
+            _callStack.peek().getLocals().put(variable, variable.isCell() ? new Object[]{value} : value);
+            return;
+        }
+        assignVariable(variable, value);
     }
 
     /**
@@ -219,7 +263,9 @@ public class Evaluator {
 
     /**
      * Stores a value under a variable, in the current frame when the variable
-     * is local to it and in the globals otherwise.
+     * is local to it and in the globals otherwise. A function declared inside
+     * another reaches its parent's locals on the frame below it: the parent's
+     * own when called by name, a closure's captures when called through one.
      *
      * @param variable The variable.
      * @param value    The value to store.
@@ -230,6 +276,11 @@ public class Evaluator {
             // Check if it's a local variable (including parameters)
             if (frame.getLocals().containsKey(variable) || isParameter(variable, frame.getFunction())) {
                 frame.getLocals().put(variable, value);
+                return;
+            }
+            if (variable.getOwnerClass() == null && !_globals.containsKey(variable)) {
+                StackFrame owner = enclosingFrameHolding(variable);
+                (owner != null ? owner : frame).getLocals().put(variable, value);
                 return;
             }
         }
@@ -243,11 +294,7 @@ public class Evaluator {
      * @return The cell, or null when the variable has no storage yet.
      */
     private Object[] findCell(VariableSymbol variable) {
-        if (!_callStack.isEmpty()) {
-            StackFrame frame = _callStack.peek();
-            if (frame.getLocals().get(variable) instanceof Object[] cell) return cell;
-        }
-        return _globals.get(canonical(variable)) instanceof Object[] cell ? cell : null;
+        return lookupStorage(variable) instanceof Object[] cell ? cell : null;
     }
 
     /**
@@ -353,8 +400,21 @@ public class Evaluator {
             if (frame.getLocals().containsKey(variable)) {
                 return frame.getLocals().get(variable);
             }
+            if (variable.getOwnerClass() == null && !_globals.containsKey(variable)) {
+                StackFrame owner = enclosingFrameHolding(variable);
+                if (owner != null) return owner.getLocals().get(variable);
+            }
         }
         return _globals.get(canonical(variable));
+    }
+
+    /** The nearest frame below the current one that holds a variable, or null. */
+    private StackFrame enclosingFrameHolding(VariableSymbol variable) {
+        for (int i = _callStack.size() - 2; i >= 0; i--) {
+            StackFrame frame = _callStack.get(i);
+            if (frame.getLocals().containsKey(variable)) return frame;
+        }
+        return null;
     }
 
     /**
@@ -412,27 +472,27 @@ public class Evaluator {
             case Addition -> {
                 if (left instanceof String || right instanceof String)
                     yield String.valueOf(left) + String.valueOf(right);
-                if (left instanceof Double l && right instanceof Double r) yield l + r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() + ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) + toLong(right);
                 yield (int) left + (int) right;
             }
             case Subtraction -> {
-                if (left instanceof Double l && right instanceof Double r) yield l - r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() - ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) - toLong(right);
                 yield (int) left - (int) right;
             }
             case Multiplication -> {
-                if (left instanceof Double l && right instanceof Double r) yield l * r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() * ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) * toLong(right);
                 yield (int) left * (int) right;
             }
             case Division -> {
-                if (left instanceof Double l && right instanceof Double r) yield l / r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() / ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) / toLong(right);
                 yield (int) left / (int) right;
             }
             case Modulo -> {
-                if (left instanceof Double l && right instanceof Double r) yield l % r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() % ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) % toLong(right);
                 yield (int) left % (int) right;
             }
@@ -443,29 +503,29 @@ public class Evaluator {
             case RightShift -> (int) left >> (int) right;
             case LogicalAnd -> (boolean) left && (boolean) right;
             case LogicalOr -> (boolean) left || (boolean) right;
-            case Equals -> java.util.Objects.equals(left, right);
-            case NotEquals -> !java.util.Objects.equals(left, right);
+            case Equals -> valuesEqual(left, right);
+            case NotEquals -> !valuesEqual(left, right);
             case LessThan -> {
                 if (left instanceof String l && right instanceof String r) yield l.compareTo(r) < 0;
-                if (left instanceof Double l && right instanceof Double r) yield l < r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() < ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) < toLong(right);
                 yield (int) left < (int) right;
             }
             case LessOrEqualsThan -> {
                 if (left instanceof String l && right instanceof String r) yield l.compareTo(r) <= 0;
-                if (left instanceof Double l && right instanceof Double r) yield l <= r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() <= ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) <= toLong(right);
                 yield (int) left <= (int) right;
             }
             case GreaterThan -> {
                 if (left instanceof String l && right instanceof String r) yield l.compareTo(r) > 0;
-                if (left instanceof Double l && right instanceof Double r) yield l > r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() > ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) > toLong(right);
                 yield (int) left > (int) right;
             }
             case GreaterOrEqualsThen -> {
                 if (left instanceof String l && right instanceof String r) yield l.compareTo(r) >= 0;
-                if (left instanceof Double l && right instanceof Double r) yield l >= r;
+                if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() >= ((Number) right).doubleValue();
                 if (hasLong) yield toLong(left) >= toLong(right);
                 yield (int) left >= (int) right;
             }
@@ -604,9 +664,9 @@ public class Evaluator {
         try {
             BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
             evaluateBlock(tryBlock);
-        } catch (Exception e) {
+        } catch (Exception | StackOverflowError e) {
             // Bind whatever was raised: a thrown payload, else the Java message
-            assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
+            declareVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
         }
@@ -856,8 +916,8 @@ public class Evaluator {
             BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
             evaluateBlock(tryBlock);
             return _lastValue;
-        } catch (Exception e) {
-            assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
+        } catch (Exception | StackOverflowError e) {
+            declareVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
             return _lastValue;
@@ -880,6 +940,15 @@ public class Evaluator {
         return value;
     }
 
+    /** Numbers compare by value as compiled ones do: {@code 5L == 5}, {@code 0.0 == -0.0}, and NaN equals nothing. */
+    private static boolean valuesEqual(Object left, Object right) {
+        if (left instanceof Number l && right instanceof Number r) {
+            if (l instanceof Double || r instanceof Double) return l.doubleValue() == r.doubleValue();
+            return l.longValue() == r.longValue();
+        }
+        return java.util.Objects.equals(left, right);
+    }
+
     private static long toLong(Object val) {
         if (val instanceof Long l) return l;
         if (val instanceof Integer i) return (long) i;
@@ -897,7 +966,7 @@ public class Evaluator {
                 }
                 var bindings = arm.variant().bindings();
                 for (int i = 0; i < bindings.size(); i++) {
-                    if (bindings.get(i) != null) assignVariable(bindings.get(i), union.get(i));
+                    if (bindings.get(i) != null) declareVariable(bindings.get(i), union.get(i));
                 }
                 evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
@@ -929,6 +998,9 @@ public class Evaluator {
         BoundBlockStatement lowered = _loweredArms.computeIfAbsent(preStatements,
                 pre -> codeanalysis.lowering.Lowerer.lower(new BoundBlockStatement(new java.util.ArrayList<>(pre))));
         evaluateBlock(lowered);
+        // A return inside the arm: neither the arm's tail nor whatever
+        // expression the match sits in may run.
+        if (_returnTriggered) throw new BlockExit(null);
     }
 
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {
@@ -1095,9 +1167,18 @@ public class Evaluator {
         for (VariableSymbol var : node.getCapturedVariables()) {
             // A cell is captured as itself, so a write on either side is shared;
             // everything else is captured by value.
-            capturedVars.put(var, var.isCell() ? lookupStorage(var) : lookupVariable(var));
+            capturedVars.put(var, var.isCell() ? cellOf(var) : lookupVariable(var));
         }
         return new SiyoClosure(node.getParameters(), node.getBody(), capturedVars, node.getReturnType());
+    }
+
+    /** The cell holding a captured variable. A parameter is passed bare, so it gets one on first capture. */
+    private Object cellOf(VariableSymbol variable) {
+        Object storage = lookupStorage(variable);
+        if (storage instanceof Object[]) return storage;
+        Object[] cell = {storage};
+        storeVariable(variable, cell);
+        return cell;
     }
 
     private Object siyoArrayToJavaArray(SiyoArray arr, Class<?> componentType) {
@@ -1398,6 +1479,12 @@ public class Evaluator {
         if (function == BuiltinFunctions.MAP_KEYS) {
             SiyoMap map = (SiyoMap) arguments[0];
             return map.keys();
+        }
+        if (function == BuiltinFunctions.SET_VALUES) {
+            return ((SiyoSet) arguments[0]).values();
+        }
+        if (function == BuiltinFunctions.ITERABLE) {
+            return SiyoRuntime.iterable(arguments[0]);
         }
         if (function == BuiltinFunctions.NEW_MAP) {
             return new SiyoMap();

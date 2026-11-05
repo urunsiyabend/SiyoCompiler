@@ -1,0 +1,265 @@
+// JSON files in, a merged and validated Project out. Every problem in every
+// file is collected: a user fixes a task file once, not once per message.
+
+import "std/io"
+import "std/json"
+import "model"
+
+pub type Loaded = Ok(Project) | Unreadable(string)
+
+imut MAX_PRIORITY = 1000000
+imut MAX_ESTIMATE = 1000000
+
+struct Builder {
+    name: string,
+    nameFrom: string,
+    tasks: Array<Task>,
+    byId: Map<string, Task>,
+    problems: Array<Problem>,
+    declared: Array<Edge>,
+    edges: Array<Edge>
+}
+
+// A dependency declared in a "dependencies" section, resolved after every file
+// has been read since its task may live in a later file. `declared` holds one per
+// entry with no `needs`, so naming a missing task is an error even with no edges.
+struct Edge { task: string, needs: string, place: string }
+
+fn report(b: Builder, place: string, what: string) {
+    push(b.problems, model.problem(place, what))
+}
+
+// A field that is absent or null reads as its fallback; one of the wrong kind
+// is reported, and reads as the fallback too so that the rest can be checked.
+fn textField(b: Builder, m: map, key: string, fallback: string, place: string) -> string {
+    imut kind = typeOf(m[key])
+    if kind == "null" { return fallback }
+    if kind != "string" {
+        report(b, place, "\"" + key + "\" must be a string, got " + kind)
+        return fallback
+    }
+    toString(m[key])
+}
+
+fn intField(b: Builder, m: map, key: string, fallback: int, low: int, high: int, place: string) -> int {
+    imut kind = typeOf(m[key])
+    if kind == "null" { return fallback }
+    imut range = toString(low) + " and " + toString(high)
+    if kind == "long" {
+        report(b, place, "\"" + key + "\" must be between " + range + ", got " + toString(m[key]))
+        return fallback
+    }
+    if kind != "int" {
+        report(b, place, "\"" + key + "\" must be an integer, got " + kind)
+        return fallback
+    }
+    imut n: int = m[key]
+    if n < low || n > high {
+        report(b, place, "\"" + key + "\" must be between " + range + ", got " + toString(n))
+        return fallback
+    }
+    n
+}
+
+// A list of task ids. Wrong entries are reported and dropped; a repeat is
+// reported too, as it usually means one of the two was meant to be another task.
+fn idList(b: Builder, m: map, key: string, place: string) -> Array<string> {
+    mut result: Array<string> = []
+    imut kind = typeOf(m[key])
+    if kind == "null" { return result }
+    if kind != "array" {
+        report(b, place, "\"" + key + "\" must be an array of task ids, got " + kind)
+        return result
+    }
+    imut raw: object[] = m[key]
+    mut seen: Set<string> = #{}
+    mut i = 0
+    for entry in raw {
+        imut entryPlace = place + "." + key + "[" + toString(i) + "]"
+        i += 1
+        if typeOf(entry) != "string" {
+            report(b, entryPlace, "must be a task id, got " + typeOf(entry))
+            continue
+        }
+        imut id = toString(entry)
+        if seen.has(id) {
+            report(b, entryPlace, "repeats \"" + id + "\"")
+            continue
+        }
+        seen.add(id)
+        push(result, id)
+    }
+    result
+}
+
+fn checkKnownFields(b: Builder, m: map, known: string[], place: string) {
+    for k in m {
+        mut found = false
+        for name in known { if name == k { found = true } }
+        if !found { report(b, place, "unknown field \"" + toString(k) + "\"") }
+    }
+}
+
+fn addTask(b: Builder, raw: object, file: string, place: string) {
+    if typeOf(raw) != "map" {
+        report(b, place, "a task must be an object, got " + typeOf(raw))
+        return
+    }
+    imut m: map = raw
+    checkKnownFields(b, m, ["id", "title", "status", "priority", "estimate", "owner", "deps"], place)
+    imut id = textField(b, m, "id", "", place)
+    if trim(id) == "" { report(b, place, "a task needs a non-empty \"id\"") }
+    imut status = textField(b, m, "status", "todo", place)
+    if !model.isStatus(status) {
+        report(b, place, "\"status\" must be todo, doing, done or failed, got \"" + status + "\"")
+    }
+    imut task = Task {
+        id: id,
+        title: textField(b, m, "title", id, place),
+        status: if model.isStatus(status) { status } else { "todo" },
+        priority: intField(b, m, "priority", 0, 0 - MAX_PRIORITY, MAX_PRIORITY, place),
+        estimate: intField(b, m, "estimate", 1, 0, MAX_ESTIMATE, place),
+        owner: textField(b, m, "owner", "", place),
+        deps: idList(b, m, "deps", place),
+        source: file
+    }
+    if trim(id) == "" { return }
+    if b.byId.has(id) {
+        report(b, place, "duplicate task id \"" + id + "\", already declared in " + b.byId[id].source)
+        return
+    }
+    b.byId[id] = task
+    push(b.tasks, task)
+}
+
+fn addDependencies(b: Builder, raw: object, place: string) {
+    if typeOf(raw) != "array" {
+        report(b, place, "must be an array, got " + typeOf(raw))
+        return
+    }
+    imut entries: object[] = raw
+    mut i = 0
+    for entry in entries {
+        imut where = place + "[" + toString(i) + "]"
+        i += 1
+        if typeOf(entry) != "map" {
+            report(b, where, "a dependency must be an object, got " + typeOf(entry))
+            continue
+        }
+        imut m: map = entry
+        checkKnownFields(b, m, ["task", "needs"], where)
+        imut task = textField(b, m, "task", "", where)
+        if trim(task) == "" { report(b, where, "a dependency needs a non-empty \"task\"") }
+        imut needs = idList(b, m, "needs", where)
+        if trim(task) == "" { continue }
+        push(b.declared, Edge { task: task, needs: "", place: where })
+        for need in needs {
+            push(b.edges, Edge { task: task, needs: need, place: where })
+        }
+    }
+}
+
+fn addTasks(b: Builder, raw: object, file: string, place: string) {
+    if typeOf(raw) != "array" {
+        report(b, place, "must be an array, got " + typeOf(raw))
+        return
+    }
+    imut entries: object[] = raw
+    mut i = 0
+    for entry in entries {
+        addTask(b, entry, file, place + "[" + toString(i) + "]")
+        i += 1
+    }
+}
+
+fn addObject(b: Builder, m: map, file: string) {
+    checkKnownFields(b, m, ["project", "tasks", "dependencies"], file)
+    imut name = textField(b, m, "project", "", file)
+    if name != "" {
+        if b.name != "" && b.name != name {
+            report(b, file, "project \"" + name + "\" differs from \"" + b.name + "\" in " + b.nameFrom)
+        } else {
+            b.name = name
+            b.nameFrom = file
+        }
+    }
+    if typeOf(m["tasks"]) != "null" { addTasks(b, m["tasks"], file, file + ": tasks") }
+    if typeOf(m["dependencies"]) != "null" { addDependencies(b, m["dependencies"], file + ": dependencies") }
+}
+
+fn addFile(b: Builder, file: string, text: string) {
+    match json.parseValue(text) {
+        Malformed(why) => report(b, file, why),
+        Document(doc) => {
+            imut kind = typeOf(doc)
+            if kind == "map" {
+                addObject(b, doc, file)
+            } else if kind == "array" {
+                addTasks(b, doc, file, file + ": tasks")
+            } else {
+                report(b, file, "a task file must hold an object or an array, got " + kind)
+            }
+        }
+    }
+}
+
+fn byText(x: string, y: string) -> int {
+    if x < y { -1 } else if x > y { 1 } else { 0 }
+}
+
+// A dependency section's edges join the task's own list without repeating one,
+// and every dependency must point at a task that exists. Tasks and their
+// dependencies are sorted first, so these reports do not depend on input order.
+fn resolve(b: Builder) {
+    mut known: Map<string, Set<string>> = {}
+    for e in b.declared {
+        if !b.byId.has(e.task) { report(b, e.place, "unknown task \"" + e.task + "\"") }
+    }
+    for e in b.edges {
+        if !b.byId.has(e.task) { continue }
+        imut task = b.byId[e.task]
+        if !known.has(e.task) {
+            mut seen: Set<string> = #{}
+            for d in task.deps { seen.add(d) }
+            known[e.task] = seen
+        }
+        if !known[e.task].has(e.needs) {
+            known[e.task].add(e.needs)
+            push(task.deps, e.needs)
+        }
+    }
+    sort(b.tasks, fn(x: Task, y: Task) -> int { byText(x.id, y.id) })
+    for t in b.tasks {
+        sort(t.deps, fn(x: string, y: string) -> int { byText(x, y) })
+        for d in t.deps {
+            if !b.byId.has(d) {
+                report(b, t.source + ": task \"" + t.id + "\"", "depends on unknown task \"" + d + "\"")
+            }
+        }
+    }
+}
+
+// Merges documents, each with the name it is reported under, in the order given.
+pub fn assemble(names: string[], texts: string[]) -> Project {
+    imut b = Builder { name: "", nameFrom: "", tasks: [], byId: {}, problems: [], declared: [], edges: [] }
+    for mut i = 0 i < len(names) i = i + 1 { addFile(b, names[i], texts[i]) }
+    resolve(b)
+    Project { name: b.name, tasks: b.tasks, byId: b.byId, problems: b.problems }
+}
+
+// Files are read in sorted order, so every message, including which of two
+// duplicates came first, is the same however the files were listed.
+pub fn load(paths: string[]) -> Loaded {
+    mut ordered: string[] = []
+    for p in paths { push(ordered, p) }
+    sort(ordered, fn(x: string, y: string) -> int { byText(x, y) })
+    mut texts: string[] = []
+    for p in ordered {
+        try {
+            push(texts, io.readFile(p))
+        } catch e {
+            return Unreadable("cannot read " + p)
+        }
+    }
+    Ok(assemble(ordered, texts))
+}

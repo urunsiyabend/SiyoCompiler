@@ -1,0 +1,15 @@
+plan for storefront
+batch 1:
+  beta (2h)  Beta programme
+  api (8h)  HTTP API  @lin
+batch 2:
+  ui (13h)  Web UI  @noor
+batch 3:
+  e2e (4h)  End-to-end suite
+failed:
+  auth (5h)  Sign-in  @sam
+blocked:
+  admin by auth
+  launch by auth
+remaining: 27h
+critical path (17h): ui -> e2e

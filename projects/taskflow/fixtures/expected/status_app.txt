@@ -1,0 +1,18 @@
+status of storefront
+8 tasks, 12% done
+  done   1
+  doing  1
+  todo   5
+  failed 1
+hours: 3 done, 37 left
+running:
+  beta (2h)  Beta programme
+ready:
+  api (8h)  HTTP API  @lin
+  ui (13h)  Web UI  @noor
+failed:
+  auth (5h)  Sign-in  @sam
+blocked:
+  admin by auth
+  launch by auth
+critical path (17h): ui -> e2e

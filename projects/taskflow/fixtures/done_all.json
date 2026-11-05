@@ -1,0 +1,4 @@
+{"project": "finished", "tasks": [
+  {"id": "b", "status": "done", "estimate": 2, "deps": ["a"]},
+  {"id": "a", "status": "done"}
+]}

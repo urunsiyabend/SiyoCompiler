@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.8.0)
+# Siyo Language Grammar (0.9.0)
 
 ## Lexical Grammar
 
@@ -78,12 +78,12 @@
   `System.currentTimeMillis()`)
 - **String**: `"hello"`, with escapes `\n` `\t` `\\` `\"` `\$`
 - **Triple-quoted string**: `"""multi-line\nliteral"""` — preserves newlines verbatim, no escape interpretation needed for `"` inside the body. The text may start on the opening line or on the next one; a newline directly after the opening `"""` and the newline directly before the closing `"""` are dropped
-- **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings.
+- **String interpolation**: `"hello $name"` (bare identifier) and `"sum is ${a + b}"` (arbitrary expression). `\$` escapes a literal `$`. Works inside both regular and triple-quoted strings. Any value may be interpolated; it is shown as `toString` shows it.
 - **Boolean**: `true`, `false`
 - **Null**: `null`
-- **Array**: `[1, 2, 3]`, `mut xs: string[] = []` (typed empty literal)
-- **Map**: `{"key": value, "other": 42}`, `{}` for empty
-- **Set**: `set()` then `.add(x)` (no literal form yet)
+- **Array**: `[1, 2, 3]`, `mut xs: string[] = []` and `mut xs: Array<T> = []` (typed empty literals)
+- **Map**: `{"key": value, "other": 42}`, `{}` for empty. A map literal may be a block's tail value; a brace followed by `key :` opens a map, and `{ }` at the start of a statement is an empty block
+- **Set**: `#{1, 2, 3}`, or `set()` then `.add(x)`
 
 ### Delimiters
 
@@ -142,6 +142,7 @@ do_while_statement
 for_statement   : 'for' variable_declaration expression expression block
 for_in_statement: 'for' IDENTIFIER 'in' expression block
                 | 'for' IDENTIFIER 'in' map_expression block   // iterates keys
+                | 'for' IDENTIFIER 'in' set_expression block   // iterates elements, in insertion order
 
 function_declaration
     : 'fn' IDENTIFIER type_parameters? '(' parameter_list? ')' type_clause? block
@@ -314,6 +315,9 @@ spawn_expression
     : 'spawn' block          // bare `spawn { ... }` is allowed outside `scope { }`
                              // and runs as a fire-and-forget virtual thread.
     | 'spawn' call_expression// `spawn Actor.new(...)` to start an actor
+    // Any other call runs on its own thread, under the rules of a spawn block: it may
+    // not hold a `mut` binding or a mutable container. An actor constructor runs where
+    // it is spawned.
 
 struct_literal
     : IDENTIFIER '{' (IDENTIFIER ':' expression ',')* '}'
@@ -425,7 +429,18 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
   error
 - String supports `+` (concatenation), `==`, `!=`, `<`, `>`, `<=`, `>=`
 - `null` supports `==` and `!=` with any reference type, collections included
-- `int` widens to `long` and `float` at a declared type
+- `int` widens to `long` and `float` at a declared type: a variable, a parameter, a
+  return, a struct field, a typed map slot, a typed array's element
+- Comparing a typed slot to null asks whether it holds anything:
+  `counts["no"] == null` is true on a `Map<string, int>`. Reading a missing `int` into
+  a variable is not defined: compiled it raises, so ask with `has` or `== null` first
+- A block with no tail value has no value. In a `match` or `if` whose value is used,
+  or that ends a function returning one, it may not sit beside an arm that has one;
+  an arm that returns or throws is fine. `else if` has the value of its branches. An
+  expression with no value is rejected as an initializer, an argument or an
+  interpolation
+- `break` and `continue` leave the innermost loop of the same function: they cannot
+  leave a lambda or a `spawn`
 - A declared type on a variable is binding: `imut x: T = e` gives `x` the type
   `T` and checks `e` against it. An `object` initializer is accepted — narrowing
   an erased value is what the annotation is for — as are the numeric widenings
@@ -755,6 +770,7 @@ strings.trimEnd(s)           // strip trailing whitespace
 strings.lastIndexOf(s, sub)  // index of last occurrence, -1 if absent
 strings.chars(s)             // split into individual characters
 strings.lines(s)             // split by newline
+strings.isInt(s)             // whether parseInt reads all of s; parseInt answers 0 otherwise
 ```
 
 Built-in string functions (no import needed): `len`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`.
@@ -775,7 +791,10 @@ import "std/json"
 
 type Json = Parsed(map) | Invalid(string)
 
-json.parse(s)         // parse JSON string → Parsed(map) or Invalid(message)
+type JsonValue = Document(object) | Malformed(string)
+
+json.parse(s)         // parse a JSON object → Parsed(map) or Invalid(message)
+json.parseValue(s)    // parse any JSON document → Document(value) or Malformed(message)
 json.parseOrEmpty(s)  // parse, returning an empty map for input it cannot read
 json.stringify(v)     // serialize map/array/scalar → JSON string
 ```
@@ -787,16 +806,21 @@ match json.parse(text) {
 }
 ```
 
-The parser validates: a missing colon, an unterminated string or object, a
-trailing comma, a bad escape and trailing input past the document are reported
-with the position they were found at. `\u` escapes and exponent notation are
-decoded.
+The parser follows RFC 8259: a missing colon, an unterminated string or object, a
+trailing comma, a bad escape, a leading zero, a raw control character in a string
+and trailing input past the document are reported with the position they were found
+at, and with the line and column in a multi-line document. `\u` escapes and exponent
+notation are decoded, and a byte order mark is ignored. Beyond that:
+
+- A duplicate key in an object is an error, since keeping one would lose data
+- A document may nest 512 levels; deeper is malformed
+- An integer too wide for a `long` reads as a `float`
 
 `json.stringify` writes each value by its runtime type: an `int`, `long` or
 `float` as a number (a non-finite float as `null`), a `bool` as `true`/`false`,
-and a `string` always as a string — `"123"` stays `"123"`. Every character
-below U+0020 in a string is escaped, so the output is valid JSON whatever the
-text holds.
+and a `string` always as a string — `"123"` stays `"123"`. A struct is written by
+its fields and a set as an array. Every character below U+0020 in a string is
+escaped, so the output is valid JSON whatever the text holds.
 
 ### `std/testing`
 

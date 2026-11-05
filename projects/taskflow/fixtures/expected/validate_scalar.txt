@@ -1,0 +1,2 @@
+fixtures/adversarial/scalar.json: a task file must hold an object or an array, got string
+invalid: 1 problem

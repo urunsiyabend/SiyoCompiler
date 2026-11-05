@@ -1,0 +1,2 @@
+fixtures/adversarial/blank.json: json: empty input at position 0 (end of input)
+invalid: 1 problem

@@ -1,0 +1,6 @@
+{"project": "evil\u001b[31m", "tasks": [
+  {"id": "bell\u0007", "title": "line\nbreak \u009b2J", "owner": "\u001b]0;pwn\u0007"},
+  {"id": "unicode-é-😀", "title": "\"quoted\" <b>&amp;</b>", "deps": ["bell\u0007"]},
+  {"id": "--json", "title": "looks like a flag"},
+  {"id": "a b", "deps": ["--json"]}
+]}

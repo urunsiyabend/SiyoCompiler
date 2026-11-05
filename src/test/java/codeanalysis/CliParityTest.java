@@ -52,6 +52,144 @@ class CliParityTest {
     }
 
     @Test
+    void nestedFunctionsOfOneNameInDifferentModulesAreSeparate() throws Exception {
+        Files.writeString(tempDir.resolve("ma.siyo"), """
+                pub fn one() -> int {
+                    fn inner() -> int { 1 }
+                    inner()
+                }
+                """);
+        Files.writeString(tempDir.resolve("mb.siyo"), """
+                pub fn two() -> int {
+                    fn inner() -> int { 2 }
+                    inner()
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "ma"
+                import "mb"
+                fn three() -> int {
+                    fn inner() -> int { 3 }
+                    inner()
+                }
+                fn main() { println(toString(ma.one()) + " " + toString(mb.two()) + " " + toString(three())) }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, main.toString());
+            assertEquals("1 2 3", result.stdout, mode + ": " + result.stderr);
+        }
+    }
+
+    @Test
+    void aModulesNestedFunctionUsingItsParentsLocalsIsReportedCompiled() throws Exception {
+        Files.writeString(tempDir.resolve("mm.siyo"), """
+                pub fn one() -> int {
+                    imut a = 1
+                    fn inner() -> int { a + 1 }
+                    inner()
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "mm"
+                fn main() { println(toString(mm.one())) }
+                """);
+        Result compiled = siyoc("run", main.toString());
+        assertEquals(1, compiled.exitCode);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                compiled.stderr.contains("Function 'inner' uses 'a' from the function around it"), compiled.stderr);
+        assertEquals("2", siyoc("interpret", main.toString()).stdout);
+    }
+
+    @Test
+    void anImportedModulesNestedFunctionCapturesFromCompositeExpressions() throws Exception {
+        Files.writeString(tempDir.resolve("mu.siyo"), """
+                pub type R = A(int)
+                imut x = "module"
+                pub fn makeUnion() -> fn() -> R {
+                    imut n = 41
+                    fn k() -> R { A(n) }
+                    k
+                }
+                pub fn makeCast() -> fn() -> object {
+                    imut x = "local"
+                    fn k() -> object { x as String }
+                    k
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "mu"
+                fn main() {
+                    imut u = mu.makeUnion()
+                    match u() { A(v) => println(toString(v)) }
+                    imut c = mu.makeCast()
+                    println(toString(c()))
+                }
+                """);
+        Result interpreted = siyoc("interpret", main.toString());
+        assertEquals("41\nlocal", interpreted.stdout, interpreted.stderr);
+        Result compiled = siyoc("run", main.toString());
+        assertEquals(1, compiled.exitCode, compiled.stdout);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                compiled.stderr.contains("from the function around it"), compiled.stderr);
+    }
+
+    @Test
+    void aMissingSourceFileIsReportedWithoutAStackTrace() throws Exception {
+        String missing = tempDir.resolve("missing.siyo").toString();
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, missing);
+            assertEquals(1, result.exitCode, mode);
+            assertEquals("siyoc: cannot read " + missing, result.stderr, mode);
+        }
+    }
+
+    @Test
+    void aSourceReachedThroughASymbolicLinkStillRuns() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(Path.of("/bin/sh")));
+        Path fifoSource = tempDir.resolve("hello.siyo");
+        Files.writeString(fifoSource, "fn main() { println(\"hi\") }\n");
+        Path link = tempDir.resolve("link.siyo");
+        Files.createSymbolicLink(link, fifoSource);
+        for (String mode : List.of("run", "interpret")) {
+            assertEquals("hi", siyoc(mode, link.toString()).stdout, mode);
+        }
+        assertEquals(1, siyoc("run", tempDir.toString() + "/nope.siyo").exitCode);
+    }
+
+    @Test
+    void runawayRecursionIsCatchableOnBothBackends() throws Exception {
+        Path file = tempDir.resolve("deep.siyo");
+        Files.writeString(file, """
+                fn forever(n: int) -> int { 1 + forever(n + 1) }
+                fn main() {
+                    try { forever(0) } catch e { println(toString(e)) }
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals("StackOverflowError", result.stdout, mode + ": " + result.stderr);
+            assertEquals(0, result.exitCode, mode);
+        }
+    }
+
+    @Test
+    void uncaughtRunawayRecursionExitsOne() throws Exception {
+        Path file = tempDir.resolve("boom.siyo");
+        Files.writeString(file, """
+                fn forever(n: int) -> int { 1 + forever(n + 1) }
+                fn main() { println(toString(forever(0))) }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals(1, result.exitCode, mode);
+            org.junit.jupiter.api.Assertions.assertTrue(result.stderr.contains("StackOverflowError"), mode);
+        }
+    }
+
+    @Test
     void anImportedModulesStateIsInitialisedWhenInterpreted() throws Exception {
         Files.writeString(tempDir.resolve("base.siyo"), """
                 pub mut greeting = "hello"

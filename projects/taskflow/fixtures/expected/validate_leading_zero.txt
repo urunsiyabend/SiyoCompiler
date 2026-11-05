@@ -1,0 +1,2 @@
+fixtures/adversarial/leading_zero.json: json: a number has no leading zero at position 35 ('0')
+invalid: 1 problem

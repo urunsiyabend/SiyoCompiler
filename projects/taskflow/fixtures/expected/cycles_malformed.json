@@ -1,0 +1,1 @@
+{"cycles":[],"problems":[{"place":"fixtures/adversarial/malformed.json","problem":"json: expected a string at position 1 (end of input)"}]}
