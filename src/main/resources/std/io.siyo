@@ -31,6 +31,15 @@ pub fn readText(path: string) -> string {
     return SiyoRuntime.readText(path)
 }
 
+// Writes text to a file that must not exist yet, created atomically: an
+// existing file, directory or symbolic link is never opened or followed, so no
+// race between a check and the write can clobber anything. Raises
+// "exists: PATH" when something is already there, "cannot write: PATH" when it
+// cannot be created or written.
+pub fn writeNew(path: string, content: string) {
+    SiyoRuntime.writeNew(path, content)
+}
+
 // Writes a line to standard error, where a CLI's diagnostics belong.
 pub fn eprintln(msg: string) {
     System.err.println(msg)

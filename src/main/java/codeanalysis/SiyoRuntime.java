@@ -465,6 +465,32 @@ public class SiyoRuntime {
         }
     }
 
+    /**
+     * Writes text to a file that must not exist yet, creating it atomically:
+     * an existing file, directory or symbolic link (dangling or not) is never
+     * opened, so a check followed by a write cannot be raced into clobbering
+     * something. Raises "exists: PATH" when it is there, "cannot write: PATH"
+     * otherwise; a file it created and could not finish is removed.
+     */
+    public static void writeNew(String path, String content) {
+        java.nio.file.Path target = java.nio.file.Path.of(path);
+        java.io.OutputStream out;
+        try {
+            out = java.nio.file.Files.newOutputStream(target,
+                    java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            throw new SiyoThrow("exists: " + path);
+        } catch (java.io.IOException | RuntimeException e) {
+            throw new SiyoThrow("cannot write: " + path);
+        }
+        try (out) {
+            out.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            try { java.nio.file.Files.deleteIfExists(target); } catch (java.io.IOException ignored) { }
+            throw new SiyoThrow("cannot write: " + path);
+        }
+    }
+
     /** A file's text exactly as written, decoded as UTF-8 with malformed bytes replaced. */
     public static String readText(String path) {
         try {
@@ -506,6 +532,10 @@ public class SiyoRuntime {
         return Double.isFinite(Double.parseDouble(s));
     }
 
+    private static boolean isAsciiDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
     /**
      * A float written with exactly {@code digits} decimals, rounding half up
      * from its shortest decimal form, so 2.675 is {@code 2.68} as it reads
@@ -532,10 +562,6 @@ public class SiyoRuntime {
      * the position of the first thing it could not read.</p>
      *
      * @param s The JSON text.
-    private static boolean isAsciiDigit(char c) {
-        return c >= '0' && c <= '9';
-    }
-
      * @return The parsed object.
      */
     public static SiyoMap jsonParseStrict(String s) {
