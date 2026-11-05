@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,880 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,906 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -137,8 +137,15 @@ as 0.9.0 had it: compiled, a method returning an erased value of the wrong type
 fails its cast in the actor's mailbox and leaves the caller waiting, exactly as
 in 0.9.0. A `Box<T>` getter (`g(b: Box<T>) -> T`, `-> Array<T>`) gives an
 array's or map's element type from the struct's argument, whether the `Box`
-was written, inferred, or made by a lambda declared to return one, and an alias
-of its result keeps it.
+was written, inferred, or made by a lambda declared to return one. One rule
+covers every path. A value whose type came from a generic struct's argument
+(a field, a getter bound through a `Box`, a `filter` or index of one, a variable
+or loop item taking one) keeps its whole known type at every depth, through
+aliases and imports. Ordinary generic results otherwise stay erased. The one
+visible change outside generic structs is that a generic call over a nested
+literal of struct rows, `firstOf([xs, xs])` with `xs = [R { n: 1 }]`, now
+knows its elements are `R`s. That was a compile error ("Object does not have
+members") in 0.9.0, and it now runs the same on both backends.
 
 The interpreter's checked reads also change some of 0.9.0's own divergences.
 Where 0.9.0 already split by backend, because an element or value read at a
@@ -207,6 +214,8 @@ Found by DataKit and left for later (see PAIN_POINTS.md):
 - **Small gaps:**
   - `toFloat` does not take a `long`, and unary minus is not defined for a
   `long` (`-x`): write `0L - x`. Numeric `as` is planned.
+- A lambda parameter typed with a comma inside type arguments
+  (`fn(x: Map<string, float>)`) is read as two parameters, as in 0.9.0.
   - `=> return x` is not a match arm. Write `=> { return x }`.
   - `1e20` is not a float literal.
   - `os.exit` and `error` are not known to diverge.

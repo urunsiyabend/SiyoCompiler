@@ -190,6 +190,35 @@ changes some of these. `direct_map_null` (a missing key through a generic
   it names its result. Tested by
   `aBoxGetterReturnsItsArgumentsElementsMapsAndScalars` and
   `aBoxMadeByALambdaKeepsItsArgumentForAGetter`.
+
+  The gate at 4b358e3 found three more paths that split by backend: an alias
+  of a getter's map result, an alias of a `filter` of it, and a nested array
+  from it. Separate markers kept missing paths, so they are replaced by one
+  provenance rule. An expression is *struct-derived* when its type came from a
+  generic struct's type argument. That covers:
+
+  - a generic struct's field;
+  - a call bound through a generic struct argument;
+  - a `filter` of a struct-derived array;
+  - an index into a struct-derived container;
+  - a variable (annotated or not) or `for` item that takes one.
+
+  Only for such expressions, the whole known type name, at every depth,
+  gives element and map value types. An array or map literal is named
+  element by element for inference, so `[[1.5]]` is an `Array<Array<float>>`.
+  Ordinary generic results stay erased as in 0.9.0
+  (`anOrdinaryGenericOverNumbersStaysErasedAsInZeroNine`, identical on 0.9.0).
+
+  `aGenericStructsArgumentReachesEveryReadOfEveryShape` checks the rule as a
+  matrix rather than by example. It crosses 5 sources (a field, a getter, an
+  annotated box, a lambda-made box, an imported getter) with 5 shapes (an array,
+  a map, an array of arrays, a map of arrays, an array of maps). Each program
+  reads the value directly, through two aliases, an annotated variable and its
+  alias, `filter` and its alias, and `for` items, on both backends.
+
+  Inherited from 0.9.0 and deferred: a lambda parameter whose type has a comma
+  inside type arguments (`fn(x: Map<string, float>)`) is read as two
+  parameters, a compile error on both backends.
 - **Security: `io.writeNew` could delete someone else's file.** When a write
   failed, it deleted the path by name. If the file it created had been renamed
   aside, that deleted whatever another process had put at the path since. The
