@@ -2505,7 +2505,10 @@ public class Binder {
             if (spawned != null && spawned.isActor()) {
                 spawnExpr.setExpressionForm(true);
             } else {
-                collectSpawnCaptures(block, callCaptures, new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>());
+                java.util.Set<VariableSymbol> mutableCaptures = new java.util.LinkedHashSet<>();
+                java.util.Set<VariableSymbol> sharedContainerCaptures = new java.util.LinkedHashSet<>();
+                collectSpawnCaptures(block, callCaptures, mutableCaptures, sharedContainerCaptures);
+                reportUnsafeSpawnCaptures(syntax, mutableCaptures, sharedContainerCaptures);
             }
             return spawnExpr;
         }
@@ -2531,8 +2534,19 @@ public class Binder {
         // Compute captures on the LOWERED (flattened) body so synthetic vars are properly detected as locals
         collectSpawnCaptures(loweredBody, captured, mutableCaptures, sharedContainerCaptures);
 
-        // A `mut` binding and an `imut` binding to a mutable container are
-        // rejected for different reasons, and each is told which one applies.
+        reportUnsafeSpawnCaptures(syntax, mutableCaptures, sharedContainerCaptures);
+
+        _insideSpawn = wasInSpawn;
+
+        return new BoundSpawnExpression(loweredBody, captured);
+    }
+
+    /**
+     * A `mut` binding and an `imut` binding to a mutable container are rejected
+     * for different reasons, and each is told which one applies.
+     */
+    private void reportUnsafeSpawnCaptures(SpawnExpressionSyntax syntax, java.util.Set<VariableSymbol> mutableCaptures,
+                                           java.util.Set<VariableSymbol> sharedContainerCaptures) {
         for (VariableSymbol var : mutableCaptures) {
             _diagnostics.reportMutableCaptureInSpawn(syntax.getSpawnKeyword().getSpan(), var.getName());
         }
@@ -2541,10 +2555,6 @@ public class Binder {
             _diagnostics.reportSharedContainerCaptureInSpawn(
                     syntax.getSpawnKeyword().getSpan(), var.getName(), describeType(var.getType()));
         }
-
-        _insideSpawn = wasInSpawn;
-
-        return new BoundSpawnExpression(loweredBody, captured);
     }
 
     private void collectSpawnCaptures(BoundNode node, java.util.Set<VariableSymbol> captured,

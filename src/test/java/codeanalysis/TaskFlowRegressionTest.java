@@ -1840,6 +1840,91 @@ class TaskFlowRegressionTest {
                 """, "SpawnedCall");
     }
 
+    private static final String SPAWN_PRELUDE = """
+            struct P { v: int }
+            actor struct Counter { n: int }
+            impl Counter {
+                fn new(v: int) -> Counter { Counter { n: v } }
+                fn get(self) -> int { self.n }
+            }
+            fn change(xs: Array<int>) { xs[0] = 99 }
+            fn showInt(n: int) { println(toString(n)) }
+            fn changeMap(m: map) { m["k"] = 99 }
+            fn changeSet(s: object) { }
+            fn changeP(p: P) { p.v = 99 }
+            fn sendTo(c: channel, n: int) { c.send(n) }
+            fn askActor(c: Counter) { println(toString(c.get())) }
+            """;
+
+    /** The same check whichever way the spawn is written. */
+    private void assertSpawnRejected(String fragment, String declaration, String call, String className) throws Exception {
+        assertRejected(fragment, SPAWN_PRELUDE + "fn main() {\n" + declaration + "\nscope { spawn " + call + " }\n}\n",
+                className + "Call");
+        assertRejected(fragment, SPAWN_PRELUDE + "fn main() {\n" + declaration + "\nscope { spawn { " + call + " } }\n}\n",
+                className + "Block");
+    }
+
+    @Test
+    void aSpawnedCallMayNotShareAMutableBinding() throws Exception {
+        assertSpawnRejected("Mutable variable 'n' cannot be captured", "mut n = 41", "showInt(n)", "SpawnMutInt");
+        assertSpawnRejected("Mutable variable 'xs' cannot be captured", "mut xs = [41]", "change(xs)", "SpawnMutArray");
+    }
+
+    @Test
+    void aSpawnedCallMayNotShareAMutableContainer() throws Exception {
+        assertSpawnRejected("'xs'", "imut xs = [41]", "change(xs)", "SpawnSharedArray");
+        assertSpawnRejected("'m'", "imut m = {\"k\": 41}", "changeMap(m)", "SpawnSharedMap");
+        assertSpawnRejected("'p'", "imut p = P { v: 41 }", "changeP(p)", "SpawnSharedStruct");
+        assertSpawnRejected("'s'", "imut s = #{41}", "changeSet(s)", "SpawnSharedSet");
+    }
+
+    @Test
+    void aSpawnedCallMayNotShareAMutableContainerThroughAComposite() throws Exception {
+        assertSpawnRejected("'xs'", "imut xs = [41]", "showInt(xs[0])", "SpawnSharedIndex");
+        assertSpawnRejected("'n'", "mut n = 41", "showInt(n + 1)", "SpawnMutBinary");
+    }
+
+    @Test
+    void aSpawnedCallMayNotReachAMutableThroughANestedFunction() throws Exception {
+        assertSpawnRejected("Mutable variable 'n' cannot be captured",
+                "mut n = 41\nfn read() -> int { n }\nfn show() { showInt(read()) }", "show()", "SpawnMutNested");
+    }
+
+    @Test
+    void aSpawnedCallMayStillBePassedWhatIsSafeToShare() throws Exception {
+        assertBoth("41\n42\n7\n7\n43", SPAWN_PRELUDE + """
+                fn main() {
+                    imut n = 41
+                    scope { spawn showInt(n) }
+                    imut c = channel(1)
+                    scope { spawn sendTo(c, n + 1) }
+                    println(toString(c.receive()))
+                    imut handle = spawn Counter.new(7)
+                    scope { spawn askActor(handle) }
+                    mut mutableHandle = spawn Counter.new(7)
+                    scope { spawn askActor(mutableHandle) }
+                    mut mutableChannel = channel(1)
+                    scope { spawn sendTo(mutableChannel, 43) }
+                    println(toString(mutableChannel.receive()))
+                }
+                """, "SpawnSafeControls");
+    }
+
+    @Test
+    void anActorConstructorStillRunsWhereItIsSpawned() throws Exception {
+        // Synchronous, so it may read what a thread could not share.
+        assertBoth("41\n42", SPAWN_PRELUDE + """
+                fn main() {
+                    mut n = 41
+                    imut a = spawn Counter.new(n)
+                    println(toString(a.get()))
+                    imut xs = [42]
+                    imut b = spawn Counter.new(xs[0])
+                    println(toString(b.get()))
+                }
+                """, "ActorConstructorSynchronous");
+    }
+
     @Test
     void anActorSpawnsConstructorArgumentIsACapture() throws Exception {
         String actor = """

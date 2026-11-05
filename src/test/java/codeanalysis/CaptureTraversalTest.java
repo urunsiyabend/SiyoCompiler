@@ -302,9 +302,13 @@ class CaptureTraversalTest {
                 Class<?> type = Class.forName("codeanalysis.binding." + simple, false, BoundNode.class.getClassLoader());
                 if (!BoundNode.class.isAssignableFrom(type) || Modifier.isAbstract(type.getModifiers())) continue;
                 nodes++;
-                for (Field field : type.getDeclaredFields()) {
-                    if (Modifier.isStatic(field.getModifiers()) || field.getType().isPrimitive()) continue;
-                    if (!understood(field.getGenericType())) unknown.add(simple + "." + field.getName() + ": " + field.getGenericType());
+                for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+                    for (Field field : c.getDeclaredFields()) {
+                        if (Modifier.isStatic(field.getModifiers()) || field.getType().isPrimitive()) continue;
+                        if (!understood(field.getGenericType())) {
+                            unknown.add(simple + "." + field.getName() + ": " + field.getGenericType());
+                        }
+                    }
                 }
             }
         }
@@ -323,7 +327,13 @@ class CaptureTraversalTest {
                     || raw == java.util.Map.class || raw == java.util.LinkedHashMap.class;
         }
         if (type instanceof Class<?> c) {
-            return BoundNode.class.isAssignableFrom(c) || c.isRecord() || LEAF_FIELD_TYPES.contains(c.getName());
+            if (c.isRecord()) {
+                for (java.lang.reflect.RecordComponent component : c.getRecordComponents()) {
+                    if (!component.getType().isPrimitive() && !understood(component.getGenericType())) return false;
+                }
+                return true;
+            }
+            return BoundNode.class.isAssignableFrom(c) || LEAF_FIELD_TYPES.contains(c.getName());
         }
         return false;
     }
