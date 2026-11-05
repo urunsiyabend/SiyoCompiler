@@ -221,7 +221,16 @@ public class TypeResolver {
         String parameter = canonicalTypeName(parameterTypeName);
         String argument = canonicalTypeName(argumentTypeName);
         if (typeParameters.contains(parameter)) {
-            if (!argument.equals("object") && !argument.equals("any")) bindings.putIfAbsent(parameter, argument);
+            if (argument.equals("object") || argument.equals("any")) return;
+            String earlier = bindings.get(parameter);
+            if (earlier == null) {
+                bindings.put(parameter, argument);
+            } else if (!earlier.equals(argument)) {
+                // Two arguments disagree, as in both(1, 2.5): the values keep
+                // their own kinds, so the parameter is erased rather than read
+                // at either one.
+                bindings.put(parameter, "object");
+            }
             return;
         }
         if (codeanalysis.FunctionTypeSignature.isSignature(parameter)) {

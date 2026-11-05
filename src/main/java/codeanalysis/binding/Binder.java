@@ -1168,9 +1168,12 @@ public class Binder {
             String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i),
                     typeParameters, typeArguments);
             Class<?> payloadType = variant.getPayloadTypes().get(i);
+            // A struct, collection or string payload is read at its type argument.
+            // A number or bool is left erased, as in 0.9.0: Some(m[k]) may hold
+            // null, which cannot be unboxed.
             if (payloadType == Object.class && !typeArguments.isEmpty()) {
                 Class<?> known = _typeResolver.lookupType(payloadTypeName);
-                if (known != null) payloadType = known;
+                if (known != null && !isUnboxed(known)) payloadType = known;
             }
             VariableSymbol binding = new VariableSymbol(token.getData(), true, payloadType);
             // The payload's written type is what it holds: T(xs) with T(Array<S>)
@@ -1501,28 +1504,6 @@ public class Binder {
                 values.put(entry.getKey(), value);
             }
             return new BoundStructLiteralExpression(symbol, values, typeName);
-        }
-        // Likewise a generic sum type's payload: Some(2) given as an Option<float>
-        // holds 2.0, so both backends read the same value back.
-        if (expression instanceof BoundUnionLiteralExpression union
-                && !union.getUnionType().getTypeParameters().isEmpty()
-                && union.getUnionType().getName().equals(TypeResolver.genericBaseName(typeName))) {
-            List<String> parameters = union.getUnionType().getTypeParameters();
-            List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
-            if (arguments.size() != parameters.size()) return expression;
-            Map<String, String> bindings = new HashMap<>();
-            for (int i = 0; i < parameters.size(); i++) bindings.put(parameters.get(i), arguments.get(i));
-            codeanalysis.UnionSymbol.Variant variant = union.getUnionType().getVariant(union.getVariantName());
-            if (variant == null) return expression;
-            List<BoundExpression> payload = new ArrayList<>();
-            for (int i = 0; i < union.getArguments().size(); i++) {
-                String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i), parameters, bindings);
-                Class<?> payloadType = _typeResolver.lookupType(payloadTypeName);
-                BoundExpression value = union.getArguments().get(i);
-                if (payloadType != null) value = widenLiteral(widenTo(value, payloadType), payloadTypeName);
-                payload.add(value);
-            }
-            return new BoundUnionLiteralExpression(union.getUnionType(), union.getVariantName(), payload);
         }
         return expression;
     }
@@ -2198,8 +2179,33 @@ public class Binder {
         String resultTypeName = TypeResolver.substitute(returnTypeName, typeParameters, bindings);
         Class<?> resultType = _typeResolver.lookupType(resultTypeName);
         if (resultType == Object.class) resultType = null;
+        // A number or bool result is unboxed, and null cannot be. Only a
+        // parameter given directly, or as an array's element, says so as 0.9.0
+        // read it; one found inside a map or another type may stand for a
+        // missing value, as get(m, "absent") does, and stays erased.
+        if (isUnboxed(resultType) && typeParameters.contains(returnTypeName)
+                && !directlyBound(function, typeParameters).contains(returnTypeName)) {
+            resultType = null;
+        }
         // A result that is still erased is left to the declared return type.
         return new GenericResult(resultType, resultTypeName.equals("object") ? null : resultTypeName);
+    }
+
+    private static boolean isUnboxed(Class<?> type) {
+        return type == Integer.class || type == Long.class || type == Double.class || type == Boolean.class;
+    }
+
+    /** The type parameters a function takes as a parameter's whole type or its array element type. */
+    private static java.util.Set<String> directlyBound(FunctionSymbol function, List<String> typeParameters) {
+        java.util.Set<String> direct = new HashSet<>();
+        for (ParameterSymbol parameter : function.getParameters()) {
+            String name = parameter.getDeclaredTypeName();
+            if (name == null) continue;
+            if (typeParameters.contains(name)) direct.add(name);
+            String element = TypeResolver.elementTypeNameOf(name);
+            if (element != null && typeParameters.contains(element)) direct.add(element);
+        }
+        return direct;
     }
 
     /** What a generic call produces: its type, and that type written out. */
