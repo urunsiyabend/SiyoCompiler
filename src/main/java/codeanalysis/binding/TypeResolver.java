@@ -86,6 +86,18 @@ public class TypeResolver {
         if (expr instanceof BoundStructLiteralExpression structLit) {
             return structLit.getTypeName();
         }
+        // [mk(0.5), mk(1.5)] is an Array<Box<float>> when every element says so;
+        // only a generic struct's name is carried this way, since its field
+        // reads are checked, while 0.9.0's element classes stay as they were.
+        if (expr instanceof BoundArrayLiteralExpression array && !array.getElements().isEmpty()) {
+            String common = declaredTypeNameOf(array.getElements().get(0));
+            if (common == null || genericBaseName(common) == null || !_structTypes.containsKey(common)) return null;
+            for (BoundExpression element : array.getElements()) {
+                common = joinTypeNames(common, declaredTypeNameOf(element));
+                if (common == null) return null;
+            }
+            return "Array<" + common + ">";
+        }
         if (expr instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP
                 && !call.getArguments().isEmpty()) {
             return elementTypeNameOf(declaredTypeNameOf(call.getArguments().get(0)));
@@ -109,6 +121,93 @@ public class TypeResolver {
      * @param field  The field's name.
      * @return The field's type name, or null when the struct is not known.
      */
+    /**
+     * What a type argument may be trusted as. Only a struct, a sum type or an
+     * interface is: its identity is checked where a value of it is read on both
+     * backends alike. A number, a bool, a string, and a container of them are
+     * erased to {@code object}, as 0.9.0 left them, since an erased path may
+     * have stored null or another kind there and an unboxing read would fail
+     * compiled only.
+     *
+     * @param typeName A type name bound to a type parameter.
+     * @return The name to substitute: itself, its trusted form, or object.
+     */
+    public String trustedTypeArgument(String typeName) {
+        if (typeName == null) return "object";
+        String name = canonicalTypeName(typeName);
+        String base = genericBaseName(name);
+        String declared = base != null ? base : name;
+        if (_structTypes.containsKey(declared) || _unionTypes.containsKey(declared)
+                || _interfaceTypes.containsKey(declared)) {
+            return name;
+        }
+        if (base == null) return "object";
+        List<String> arguments = typeArgumentsOf(name);
+        if (("Array".equals(base) || "List".equals(base) || "Set".equals(base)) && arguments.size() == 1) {
+            String element = trustedTypeArgument(arguments.get(0));
+            return element.equals("object") ? "object" : base + "<" + element + ">";
+        }
+        if ("Map".equals(base) && arguments.size() == 2) {
+            String value = trustedTypeArgument(arguments.get(1));
+            return value.equals("object") ? "object" : "Map<object," + value + ">";
+        }
+        return "object";
+    }
+
+    /**
+     * A generic call's result type written out. A type argument of a generic
+     * struct in it is kept as bound, Box<float> for mk(1.5), since that struct's
+     * fields are read checked; anywhere else it is trusted only as a struct, sum
+     * type or interface, so wrap(1) is an Array<object> as 0.9.0 had it.
+     */
+    public String substituteResult(String typeName, java.util.Collection<String> typeParameters,
+                                   Map<String, String> bindings) {
+        String name = canonicalTypeName(typeName);
+        if (typeParameters.contains(name)) return trustedTypeArgument(bindings.getOrDefault(name, "object"));
+        String base = genericBaseName(name);
+        if (base == null) return name;
+        StructSymbol struct = _structTypes.get(base);
+        boolean genericStruct = struct != null && !struct.getTypeParameters().isEmpty();
+        List<String> arguments = new java.util.ArrayList<>();
+        for (String argument : typeArgumentsOf(name)) {
+            String canonical = canonicalTypeName(argument);
+            if (genericStruct) {
+                arguments.add(substitute(canonical, typeParameters, bindings));
+            } else {
+                arguments.add(substituteResult(canonical, typeParameters, bindings));
+            }
+        }
+        String result = base + "<" + String.join(",", arguments) + ">";
+        return genericStruct ? result : trustedOrSelf(result);
+    }
+
+    /** A container of what is not trusted is erased whole, as trustedTypeArgument does. */
+    private String trustedOrSelf(String name) {
+        String base = genericBaseName(name);
+        if ("Array".equals(base) || "List".equals(base) || "Set".equals(base) || "Map".equals(base)) {
+            return trustedTypeArgument(name);
+        }
+        return name;
+    }
+
+    /** Every binding in its trusted form. */
+    public Map<String, String> trusted(Map<String, String> bindings) {
+        Map<String, String> out = new java.util.HashMap<>();
+        for (var entry : bindings.entrySet()) out.put(entry.getKey(), trustedTypeArgument(entry.getValue()));
+        return out;
+    }
+
+    /**
+     * A generic struct field's type argument as it is read: a number, bool or
+     * string argument itself is kept, since a field read is checked for its
+     * kind and for null on both backends; anything else in its trusted form.
+     */
+    private String fieldTypeArgument(String typeName) {
+        // A generic struct's field is read checked on both backends, so its type
+        // argument is kept whatever it is: Box<float>, Box<Array<float>>.
+        return canonicalTypeName(typeName);
+    }
+
     public String fieldTypeNameOf(BoundExpression target, String field) {
         StructSymbol owner = resolveStructType(target);
         if (owner == null) return null;
@@ -120,10 +219,38 @@ public class TypeResolver {
         if (targetTypeName != null && owner.getName().equals(genericBaseName(targetTypeName))) {
             List<String> arguments = typeArgumentsOf(targetTypeName);
             for (int i = 0; i < arguments.size() && i < typeParameters.size(); i++) {
-                bindings.put(typeParameters.get(i), arguments.get(i));
+                bindings.put(typeParameters.get(i), fieldTypeArgument(arguments.get(i)));
             }
         }
         return substitute(declared, typeParameters, bindings);
+    }
+
+    private static final List<String> NUMBER_KINDS = List.of("int", "long", "float");
+
+    /**
+     * Two type names one element type can stand for: equal ones, or one generic
+     * type whose arguments differ only by number kind, joined at the wider kind,
+     * which a checked read widens to on both backends: Box<int> and Box<float>
+     * are a Box<float>. Null when there is none.
+     */
+    static String joinTypeNames(String a, String b) {
+        if (a == null || b == null) return null;
+        a = canonicalTypeName(a);
+        b = canonicalTypeName(b);
+        if (a.equals(b)) return a;
+        int i = NUMBER_KINDS.indexOf(a), j = NUMBER_KINDS.indexOf(b);
+        if (i >= 0 && j >= 0) return NUMBER_KINDS.get(Math.max(i, j));
+        String base = genericBaseName(a);
+        if (base == null || !base.equals(genericBaseName(b))) return null;
+        List<String> left = typeArgumentsOf(a), right = typeArgumentsOf(b);
+        if (left.size() != right.size()) return null;
+        List<String> joined = new java.util.ArrayList<>();
+        for (int k = 0; k < left.size(); k++) {
+            String one = joinTypeNames(left.get(k), right.get(k));
+            if (one == null) return null;
+            joined.add(one);
+        }
+        return base + "<" + String.join(",", joined) + ">";
     }
 
     /**
@@ -217,11 +344,20 @@ public class TypeResolver {
      */
     public static void unify(String parameterTypeName, String argumentTypeName,
                              java.util.Collection<String> typeParameters, Map<String, String> bindings) {
-        if (parameterTypeName == null || argumentTypeName == null) return;
+        if (parameterTypeName == null) return;
         String parameter = canonicalTypeName(parameterTypeName);
+        // An argument of unknown or erased type, null among them, says nothing a
+        // cast could rely on: every parameter it stands for is erased, whatever
+        // another argument says. both(o, 2.5) with o: object stays erased.
+        if (argumentTypeName == null || canonicalTypeName(argumentTypeName).equals("object")
+                || canonicalTypeName(argumentTypeName).equals("any")) {
+            for (String typeParameter : typeParameters) {
+                if (mentionsAny(parameter, List.of(typeParameter))) bindings.put(typeParameter, "object");
+            }
+            return;
+        }
         String argument = canonicalTypeName(argumentTypeName);
         if (typeParameters.contains(parameter)) {
-            if (argument.equals("object") || argument.equals("any")) return;
             String earlier = bindings.get(parameter);
             if (earlier == null) {
                 bindings.put(parameter, argument);
@@ -411,6 +547,38 @@ public class TypeResolver {
 
     // --- Type resolution ---
 
+    /** An array's element class exactly as 0.9.0 resolved it, for 0.9.0's generic inference. */
+    public Class<?> legacyArrayElementType(BoundExpression target) {
+        if (target instanceof BoundArrayLiteralExpression arr) return arr.getElementType();
+        if (target instanceof BoundVariableExpression varExpr) {
+            Class<?> elemType = getArrayElementType(varExpr.getVariable());
+            if (elemType != null) return elemType;
+        }
+        if (target instanceof BoundCallExpression callExpr) {
+            if (callExpr.getFunction() == BuiltinFunctions.RANGE) return Integer.class;
+            if (callExpr.getFunction() == BuiltinFunctions.SPLIT) return String.class;
+            if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
+                return legacyArrayElementType(callExpr.getArguments().get(0));
+            }
+            Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
+            if (returnElementType != null) return returnElementType;
+        }
+        if (target instanceof BoundMemberAccessExpression memberExpr) {
+            StructSymbol structType = resolveStructType(memberExpr.getTarget());
+            if (structType != null && structType.getTypeParameters().isEmpty()) {
+                String fieldTypeName = structType.getFieldTypeName(memberExpr.getMemberName());
+                Class<?> elemType = fieldTypeName != null ? lookupElementType(fieldTypeName) : null;
+                if (elemType != null) return elemType;
+            }
+        }
+        if (target instanceof BoundIndexExpression) {
+            String elementName = elementTypeNameOf(declaredTypeNameOf(target));
+            Class<?> elemType = elementName != null ? lookupType(elementName) : null;
+            if (elemType != null) return elemType;
+        }
+        return Object.class;
+    }
+
     public Class<?> resolveArrayElementType(BoundExpression target) {
         if (target instanceof BoundArrayLiteralExpression arr) {
             return arr.getElementType();
@@ -427,11 +595,6 @@ public class TypeResolver {
             if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
                 return resolveArrayElementType(callExpr.getArguments().get(0));
             }
-            // A generic call: keep(rows, p) is an Array<Row>.
-            if (callExpr.getResultTypeName() != null) {
-                Class<?> elemType = lookupElementType(callExpr.getResultTypeName());
-                if (elemType != null) return elemType;
-            }
             Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
             if (returnElementType != null) return returnElementType;
         }
@@ -445,11 +608,15 @@ public class TypeResolver {
                 }
             }
         }
-        // Whatever else declares it: groups["e"] where groups: Map<string, Array<Rec>>,
-        // or a variable that took a generic struct's field, imut its = g.items.
-        String elementName = elementTypeNameOf(declaredTypeNameOf(target));
-        Class<?> elemType = elementName != null ? lookupType(elementName) : null;
-        if (elemType != null) return elemType;
+        if (target instanceof BoundIndexExpression) {
+            // groups["e"] where groups: Map<string, Array<Rec>>
+            String elementName = elementTypeNameOf(declaredTypeNameOf(target));
+            Class<?> elemType = elementName != null ? lookupType(elementName) : null;
+            if (elemType != null) return elemType;
+        }
+        // An element known only by name, from a generic result, a payload or a
+        // field taken into a variable, stays erased as 0.9.0 left it: its name
+        // still says which struct it is, and a member read casts there.
         return Object.class;
     }
 
@@ -504,8 +671,9 @@ public class TypeResolver {
                 if (st != null) return st;
             }
         }
-        // A value whose declared type names a struct: imut r = box.value on a Box<Row>.
-        if (target.getClassType() == SiyoStruct.class) {
+        // A value whose declared type names a struct, erased or not: an element
+        // of keep(rows, p), Some(r) on an Option<Row>, imut r = box.value.
+        if (target.getClassType() == SiyoStruct.class || target.getClassType() == Object.class) {
             String declared = declaredTypeNameOf(target);
             if (declared != null) return _structTypes.get(declared);
         }

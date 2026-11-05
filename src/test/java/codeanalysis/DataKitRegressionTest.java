@@ -94,18 +94,27 @@ class DataKitRegressionTest {
     }
 
     @Test
-    void aGenericCallOverPlainValuesStillWorks() throws Exception {
-        assertBoth("3\nab\n2", """
+    void aGenericResultOverNumbersAndStringsIsErasedAsInZeroNine() throws Exception {
+        // Only a struct, sum type or interface type argument is trusted, so a
+        // generic array of numbers holds what it is given, as in 0.9.0.
+        assertBoth("3\nab\n2\n2.5 two", """
                 fn twice<T>(x: T) -> Array<T> { [x, x] }
+                fn wrap<T>(x: T) -> Array<T> { [x] }
                 fn main() {
                     imut xs = twice(1)
-                    println(toString(xs[0] + xs[1] + 1))
+                    imut a: int = xs[0]
+                    imut b: int = xs[1]
+                    println(toString(a + b + 1))
                     imut ss = twice("a")
-                    println(ss[0] + "b")
+                    println(toString(ss[0]) + "b")
                     imut anything = twice(twice(2))
-                    println(toString(len(anything[0])))
+                    println(toString(len(anything)))
+                    mut ws = wrap(1)
+                    push(ws, "two")
+                    ws[0] = 2.5
+                    println(toString(ws[0]) + " " + toString(ws[1]))
                 }
-                """, "GenericPlainValues");
+                """, "GenericErasedScalars");
     }
 
     // --- G2: generic structs ----------------------------------------------------
@@ -616,11 +625,10 @@ class DataKitRegressionTest {
     }
 
     @Test
-    void anArrayDeclaredByAGenericResultTakesOnlyItsKind() {
+    void anArrayDeclaredByAnAnnotationTakesOnlyItsKind() {
         String message = harness.firstDiagnostic("""
-                fn wrap<T>(x: T) -> Array<T> { [x] }
                 fn main() {
-                    mut xs = wrap(1)
+                    mut xs: Array<int> = [1]
                     push(xs, "two")
                 }
                 """);
@@ -683,5 +691,231 @@ class DataKitRegressionTest {
                     println(toString(xs[1]) + " " + toString(xs[0]))
                 }
                 """, "GenericMissingValues");
+    }
+
+    // --- Third review: every reproducer reads as 0.9.0 did, or fails alike -------
+
+    @Test
+    void anErasedOrNullArgumentErasesTheTypeParameter(@TempDir Path dir) throws Exception {
+        String program = """
+                fn both<T>(a: T, b: T) -> Array<T> { [a, b] }
+                fn get<K, V>(m: Map<K, V>, k: K) -> Array<V> { [m[k]] }
+                fn inMap<K, V>(m: Map<K, V>, k: K) -> Map<string, V> { {"key": m[k]} }
+                fn first<T>(xs: Array<T>) -> T { xs[0] }
+                fn main() {
+                    imut o: object = 1
+                    println(toString(both(o, 2.5)[0]) + " " + toString(both(1, null)[1]))
+                    imut m: Map<string, int> = {"a": 1}
+                    println(toString(get(m, "absent")[0]) + " " + toString(inMap(m, "absent")["key"]))
+                    imut source = [1, 2]
+                    imut fs: Array<float> = source
+                    println(toString(first(fs)) + " " + toString(fs[0]))
+                }
+                """;
+        assertBoth("1 null\nnull null\n1 1", program, "ErasedArguments");
+        Files.writeString(dir.resolve("lib.siyo"), """
+                pub fn both<T>(a: T, b: T) -> Array<T> { [a, b] }
+                pub fn get<K, V>(m: Map<K, V>, k: K) -> Array<V> { [m[k]] }
+                """);
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                fn main() {
+                    imut o: object = 1
+                    imut m: Map<string, int> = {"a": 1}
+                    println(toString(lib.both(o, 2.5)[0]) + " " + toString(lib.get(m, "absent")[0]))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("1 null", result.stdout(), mode + ": " + result.stderr());
+        }
+    }
+
+    @Test
+    void aGenericStructFieldOfTheWrongKindOrNullFailsAlikeOnBothBackends() throws Exception {
+        assertBoth("failed failed failed failed failed 1.0 3.0 failed", """
+                struct Box<T> { value: T }
+                fn setNull(b: Box) { b.value = null }
+                fn setText(b: Box) { b.value = "abc" }
+                fn main() {
+                    imut a: Box<int> = Box { value: 1 }
+                    setNull(a)
+                    mut out = ""
+                    try { out = out + toString(a.value + 1) } catch e { out = out + "failed" }
+                    mut r = Box { value: 1 }
+                    r = Box { value: null }
+                    try { out = out + " " + toString(r.value + 1) } catch e { out = out + " failed" }
+                    imut c: Box<int> = Box { value: 1 }
+                    imut alias: Box<object> = c
+                    alias.value = null
+                    try { out = out + " " + toString(c.value + 1) } catch e { out = out + " failed" }
+                    imut d: Box<string> = Box { value: "s" }
+                    setText(d)
+                    imut e: Box<int> = Box { value: 1 }
+                    setText(e)
+                    try { out = out + " " + toString(e.value + 1) } catch x { out = out + " failed" }
+                    imut arrays: Box<Array<int>> = Box { value: [1] }
+                    setText(arrays)
+                    try { out = out + " " + toString(len(arrays.value)) } catch x { out = out + " failed" }
+                    imut floats: Box<Array<float>> = Box { value: [1, 2] }
+                    out = out + " " + toString(floats.value[0])
+                    floats.value = [3, 4]
+                    out = out + " " + toString(floats.value[0])
+                    imut f2: Box<Array<int>> = Box { value: [1] }
+                    f2.value = [2.5]
+                    try { out = out + " " + toString(f2.value[0]) } catch x { out = out + " failed" }
+                    println(out)
+                }
+                """, "GenericFieldChecks");
+    }
+
+    @Test
+    void aGenericPayloadOfCollectionsReadsAsInZeroNineAndAStructOneIsChecked() throws Exception {
+        assertBoth("3", """
+                type Opt<T> = Some(T) | None
+                fn main() {
+                    imut o: Opt<Array<int>> = Some("abc")
+                    match o { Some(xs) => println(toString(len(xs))), None => println("none") }
+                }
+                """, "PayloadCollection");
+        String message = harness.firstDiagnostic("""
+                struct R { n: int }
+                type Opt<T> = Some(T) | None
+                fn main() {
+                    imut o: Opt<R> = Some("abc")
+                    match o { Some(x) => println(toString(x)), None => println("none") }
+                }
+                """);
+        assertEquals("Cannot convert type <class java.lang.String> to <class codeanalysis.SiyoStruct>", message);
+    }
+
+    @Test
+    void isFloatIsLinearOnALongRunOfDigits() throws Exception {
+        String digits = "1".repeat(200_000);
+        long start = System.nanoTime();
+        assertEquals(false, SiyoRuntime.isFloat(digits + "x"));
+        assertEquals(true, SiyoRuntime.isFloat("1".repeat(300) + ".5"));
+        assertEquals(false, SiyoRuntime.isFloat(digits + ".5"));  // past the largest float
+        assertEquals(false, SiyoRuntime.isFloat(digits + "." + digits + "e"));
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        // A backtracking pattern took about 5 s for 32,000 digits.
+        org.junit.jupiter.api.Assertions.assertTrue(millis < 2000, millis + " ms");
+    }
+
+    @Test
+    void aLoneEmptyCellRoundTripsAndABlankLineIsMarked() throws Exception {
+        assertBoth("\"\"\n1 false\n2/1 true 3/1 false", SHOW_CSV + """
+                fn describe(r: CsvRow) -> string { toString(r.line) + "/" + toString(len(r.cells)) + " " + toString(r.blank) }
+                fn main() {
+                    imut line = csv.formatRow([""])
+                    println(line)
+                    match csv.parse(line) {
+                        Table(rows) => println(toString(len(rows)) + " " + toString(rows[0].blank)),
+                        BadCsv(why) => println(why)
+                    }
+                    match csv.parse("v\\n\\n\\"\\"\\n") {
+                        Table(rows) => println(describe(rows[1]) + " " + describe(rows[2])),
+                        BadCsv(why) => println(why)
+                    }
+                }
+                """, "CsvBlank");
+    }
+
+    @Test
+    void writeNewNeverOpensWhatIsAlreadyThere(@TempDir Path dir) throws Exception {
+        Path sentinel = dir.resolve("sentinel.txt");
+        Files.writeString(sentinel, "KEEP");
+        Files.writeString(dir.resolve("exists.txt"), "OLD");
+        Files.createSymbolicLink(dir.resolve("link.txt"), sentinel);
+        Files.createSymbolicLink(dir.resolve("dangling.txt"), dir.resolve("nowhere.txt"));
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "std/io"
+                fn attempt(path: string) -> string {
+                    try { io.writeNew(path, "NEW")
+                          return "wrote" } catch e { return toString(e) }
+                }
+                fn main() {
+                    println(attempt("exists.txt"))
+                    println(attempt("link.txt"))
+                    println(attempt("dangling.txt"))
+                    println(attempt("fresh.txt"))
+                    println(attempt("fresh.txt"))
+                    println(attempt("missing/dir.txt"))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Files.deleteIfExists(dir.resolve("fresh.txt"));
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("exists: exists.txt\nexists: link.txt\nexists: dangling.txt\nwrote\nexists: fresh.txt\ncannot write: missing/dir.txt",
+                    result.stdout(), mode + ": " + result.stderr());
+            assertEquals("KEEP", Files.readString(sentinel));
+            assertEquals("OLD", Files.readString(dir.resolve("exists.txt")));
+            assertEquals(false, Files.exists(dir.resolve("nowhere.txt")));
+            assertEquals("NEW", Files.readString(dir.resolve("fresh.txt")));
+        }
+    }
+
+    @Test
+    void aStructNameCarriesIdentityWhileTheValueStaysAsZeroNineHadIt() throws Exception {
+        // Fourth review: a generic struct's numbers read at their type argument,
+        // a struct array from a generic call holds whatever was pushed (the
+        // member read casts), map and array fields keep their types, and an
+        // annotated payload from an erased source prints as in 0.9.0.
+        assertBoth("3.0 18000000000\n1.0 3.0 \nR { n: 1 }|5|1\ntext\n1\n1.5\n5", """
+struct R { n: int }
+struct Box<T> { value: T }
+type Opt<T> = Some(T) | None
+fn mk<T>(x: T) -> Box<T> { Box { value: x } }
+fn wrap<T>(x: T) -> Array<T> { [x] }
+fn opt(x: object) -> Opt { Some(x) }
+fn setAll(xs: Array<object>) { push(xs, "text") }
+fn main() {
+    println(toString(mk(1.5).value * 2) + " " + toString(mk(9000000000).value * 2))
+    for b in [mk(0.5), mk(1.5)] { print(toString(b.value * 2) + " ") }
+    println("")
+    mut rs = wrap(R { n: 1 })
+    push(rs, 5)
+    for r in rs { print(toString(r) + "|") }
+    println(toString(rs[0].n))
+    mut ws = wrap("text")
+    setAll(ws)
+    println(toString(ws[1]))
+    imut m: Box<Map<string, int>> = Box { value: {"a": 1} }
+    println(toString(m.value["a"]))
+    imut f: Box<Array<float>> = Box { value: [1, 2] }
+    f.value = [3, 4]
+    println(toString(f.value[0] / 2))
+    imut o: Opt<R> = opt(5)
+    match o { Some(x) => println(toString(x)), None => println("none") }
+}
+                """, "NameCarriesIdentity");
+    }
+
+    @Test
+    void aListOfGenericStructsKeepsTheirTypeArgument() throws Exception {
+        // Fifth review: a list literal bound to a variable carried no name, so
+        // b.value was erased and erased arithmetic split by backend. Number
+        // kinds join at the wider one, which a checked read widens to.
+        assertBoth("3.0 5.0\n1.0 3.0\n1.25 0.5\n2 18000000000\nfailed", """
+                struct Box<T> { value: T }
+                fn mk<T>(x: T) -> Box<T> { Box { value: x } }
+                fn main() {
+                    imut bs = [Box { value: 1.5 }, Box { value: 2.5 }]
+                    println(toString(bs[0].value * 2) + " " + toString(bs[1].value * 2))
+                    imut ms = [mk(0.5), mk(1.5)]
+                    mut line = ""
+                    for b in ms { line = line + toString(b.value * 2) + " " }
+                    println(trim(line))
+                    imut mixed = [Box { value: 2.5 }, Box { value: 1 }]
+                    println(toString(mixed[0].value / 2) + " " + toString(mixed[1].value / 2))
+                    imut longs = [Box { value: 1 }, Box { value: 9000000000 }]
+                    println(toString(longs[0].value * 2) + " " + toString(longs[1].value * 2))
+                    mut ints = [Box { value: 1 }]
+                    push(ints, Box { value: "x" })
+                    try { println(toString(ints[1].value + 1)) } catch e { println("failed") }
+                }
+                """, "GenericStructList");
     }
 }

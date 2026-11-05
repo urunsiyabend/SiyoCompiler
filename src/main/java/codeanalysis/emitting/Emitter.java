@@ -2268,6 +2268,8 @@ public class Emitter {
     private void emitMemberAccessExpression(BoundMemberAccessExpression node) {
         // map.get("fieldName") -> unbox
         emitExpression(node.getTarget());
+        // An erased value read as the struct its name says it is.
+        if (node.getTarget().getClassType() == Object.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoObject");
         _mv.visitLdcInsn(node.getMemberName());
         _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", true);
         emitUnboxIfNeeded(node.getClassType());
@@ -2276,6 +2278,7 @@ public class Emitter {
     private void emitMemberAssignmentExpression(BoundMemberAssignmentExpression node) {
         // map.put("fieldName", value) -> we want new value on stack
         emitExpression(node.getTarget());  // map
+        if (node.getTarget().getClassType() == Object.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoObject");
         _mv.visitLdcInsn(node.getMemberName());  // key
         emitExpression(node.getValue());  // value (once only)
         emitBoxIfNeeded(node.getValue().getClassType());

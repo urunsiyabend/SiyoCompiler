@@ -1284,14 +1284,17 @@ public class Evaluator {
         Object target = evaluateExpression(node.getTarget());
         Object indexValue = evaluateExpression(node.getIndex());
 
+        // A read at a declared element or value type is checked as the compiled
+        // read is: a float element given an int reads as a float, and null or
+        // another kind where a number is declared fails on both backends.
         if (target instanceof SiyoMap map) {
-            return map.get(indexValue);
+            return readPayloadAs(node.getClassType(), map.get(indexValue));
         }
 
         int index = (int) indexValue;
 
         if (target instanceof SiyoArray arr) {
-            return arr.get(index);
+            return readPayloadAs(node.getClassType(), arr.get(index));
         } else if (target instanceof String str) {
             return String.valueOf(str.charAt(index));
         }
@@ -1319,9 +1322,15 @@ public class Evaluator {
      */
     private static Object readPayloadAs(Class<?> type, Object value) {
         Object read = readAs(type, value);
-        boolean scalar = type == Integer.class || type == Long.class || type == Double.class
-                || type == Boolean.class || type == String.class;
-        if (scalar && read != null && !type.isInstance(read)) {
+        boolean unboxed = type == Integer.class || type == Long.class || type == Double.class
+                || type == Boolean.class;
+        if (unboxed && read == null) {
+            // Compiled, unboxing null fails; it must not read as null here.
+            throw new NullPointerException("a " + type.getSimpleName() + " was expected, and there is no value");
+        }
+        boolean checked = unboxed || type == String.class || type == SiyoStruct.class || type == SiyoUnion.class
+                || type == SiyoArray.class || type == SiyoMap.class || type == SiyoSet.class;
+        if (checked && read != null && !type.isInstance(read)) {
             throw new ClassCastException("class " + read.getClass().getName() + " cannot be cast to class " + type.getName());
         }
         return read;

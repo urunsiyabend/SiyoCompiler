@@ -402,6 +402,7 @@ public class Binder {
         // `mut h: long = 0` holds a long from the start; interpreted it stayed an
         // int and later additions wrapped.
         if (annotation != null) initializer = widenLiteral(widenTo(initializer, variableType), annotation.getData());
+        if (annotation != null) checkPayloadAgainst(initializer, annotation.getData(), syntax.getInitializer().getSpan());
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
@@ -415,13 +416,15 @@ public class Binder {
             variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
         } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression
                 || initializer instanceof BoundMemberAccessExpression
-                || initializer instanceof BoundStructLiteralExpression) {
+                || initializer instanceof BoundStructLiteralExpression
+                || initializer instanceof BoundArrayLiteralExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
             // A field or a literal is followed only for the struct identity it
             // carries, as in imut its = g.items on a Group<Row>.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
             boolean followed = !(initializer instanceof BoundMemberAccessExpression)
-                    && !(initializer instanceof BoundStructLiteralExpression);
+                    && !(initializer instanceof BoundStructLiteralExpression)
+                    && !(initializer instanceof BoundArrayLiteralExpression);
             if (inherited != null && (followed || namesADeclaredType(inherited))) {
                 variableSymbol.setDeclaredTypeName(inherited);
             }
@@ -952,6 +955,35 @@ public class Binder {
     private final Map<BoundMatchExpression, BoundMatchExpression> _erasableMatches = new java.util.IdentityHashMap<>();
     private final Map<BoundMatchExpression, String> _mixedArmMessages = new java.util.IdentityHashMap<>();
 
+    /**
+     * A sum type value written where a generic type is declared: its payload
+     * must be what the type argument says, where that argument is trusted.
+     * imut o: Opt<R> = Some("abc") is reported rather than failing when matched.
+     */
+    private void checkPayloadAgainst(BoundExpression value, String typeName, codeanalysis.text.TextSpan span) {
+        if (!(value instanceof BoundUnionLiteralExpression union)) return;
+        codeanalysis.UnionSymbol symbol = union.getUnionType();
+        if (symbol.getTypeParameters().isEmpty() || !symbol.getName().equals(TypeResolver.genericBaseName(typeName))) return;
+        List<String> parameters = symbol.getTypeParameters();
+        List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
+        if (arguments.size() != parameters.size()) return;
+        Map<String, String> bindings = new HashMap<>();
+        for (int i = 0; i < parameters.size(); i++) {
+            bindings.put(parameters.get(i), _typeResolver.trustedTypeArgument(arguments.get(i)));
+        }
+        codeanalysis.UnionSymbol.Variant variant = symbol.getVariant(union.getVariantName());
+        if (variant == null) return;
+        for (int i = 0; i < union.getArguments().size(); i++) {
+            Class<?> expected = _typeResolver.lookupType(
+                    TypeResolver.substitute(variant.getPayloadTypeNames().get(i), parameters, bindings));
+            Class<?> actual = union.getArguments().get(i).getClassType();
+            if (expected != null && expected != Object.class && actual != null && actual != Object.class
+                    && actual != expected) {
+                _diagnostics.reportCannotConvert(span, actual, expected);
+            }
+        }
+    }
+
     /** A number, a bool or a string: a value whose kind a slot cannot quietly change. */
     private static boolean isScalar(Class<?> type) {
         return type == Integer.class || type == Long.class || type == Double.class
@@ -1154,7 +1186,7 @@ public class Binder {
         if (targetTypeName != null && union.getName().equals(TypeResolver.genericBaseName(targetTypeName))) {
             List<String> arguments = TypeResolver.typeArgumentsOf(targetTypeName);
             for (int i = 0; i < arguments.size() && i < typeParameters.size(); i++) {
-                typeArguments.put(typeParameters.get(i), arguments.get(i));
+                typeArguments.put(typeParameters.get(i), _typeResolver.trustedTypeArgument(arguments.get(i)));
             }
         }
 
@@ -1168,13 +1200,8 @@ public class Binder {
             String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i),
                     typeParameters, typeArguments);
             Class<?> payloadType = variant.getPayloadTypes().get(i);
-            // A struct, collection or string payload is read at its type argument.
-            // A number or bool is left erased, as in 0.9.0: Some(m[k]) may hold
-            // null, which cannot be unboxed.
-            if (payloadType == Object.class && !typeArguments.isEmpty()) {
-                Class<?> known = _typeResolver.lookupType(payloadTypeName);
-                if (known != null && !isUnboxed(known)) payloadType = known;
-            }
+            // The payload keeps 0.9.0's erased class; its name says which struct
+            // it is, so Some(r) => r.name on an Option<Row> reads a Row.
             VariableSymbol binding = new VariableSymbol(token.getData(), true, payloadType);
             // The payload's written type is what it holds: T(xs) with T(Array<S>)
             // binds an Array<S>, whose elements are known to be S.
@@ -2167,45 +2194,65 @@ public class Binder {
         if (function.getTypeParameters().isEmpty()) return GenericResult.NONE;
         String returnTypeName = function.getDeclaredReturnTypeName();
         if (returnTypeName == null) return GenericResult.NONE;
-
         List<String> typeParameters = function.getTypeParameters();
+        if (!TypeResolver.mentionsAny(returnTypeName, typeParameters)) return GenericResult.NONE;
+
+        // The written result type, with each parameter bound to what its
+        // arguments say and trusted only as a struct, sum type or interface:
+        // keep(rows, p) is an Array<Row>, wrap(1) an Array<object> as in 0.9.0.
         Map<String, String> bindings = new HashMap<>();
         for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
             TypeResolver.unify(function.getParameters().get(i).getDeclaredTypeName(),
                     typeNameOf(arguments.get(i)), typeParameters, bindings);
         }
-        if (!TypeResolver.mentionsAny(returnTypeName, typeParameters)) return GenericResult.NONE;
+        String resultTypeName = _typeResolver.substituteResult(returnTypeName, typeParameters, bindings);
 
-        String resultTypeName = TypeResolver.substitute(returnTypeName, typeParameters, bindings);
-        Class<?> resultType = _typeResolver.lookupType(resultTypeName);
-        if (resultType == Object.class) resultType = null;
-        // A number or bool result is unboxed, and null cannot be. Only a
-        // parameter given directly, or as an array's element, says so as 0.9.0
-        // read it; one found inside a map or another type may stand for a
-        // missing value, as get(m, "absent") does, and stays erased.
-        if (isUnboxed(resultType) && typeParameters.contains(returnTypeName)
-                && !directlyBound(function, typeParameters).contains(returnTypeName)) {
-            resultType = null;
+        // The result's own class is what 0.9.0 gave it, so identity(5) + 1 still
+        // adds; a struct or sum type result is also known by name.
+        Class<?> resultType = legacyGenericResultType(function, arguments);
+        Class<?> named = _typeResolver.lookupType(resultTypeName);
+        if (resultType == null && (named == SiyoStruct.class || named == codeanalysis.SiyoUnion.class
+                || named == SiyoArray.class || named == SiyoMap.class || named == SiyoSet.class)) {
+            resultType = named;
         }
-        // A result that is still erased is left to the declared return type.
         return new GenericResult(resultType, resultTypeName.equals("object") ? null : resultTypeName);
+    }
+
+    /**
+     * A generic call's class exactly as 0.9.0 inferred it: from a parameter
+     * written as the bare type parameter, or as an array of it, read off the
+     * argument's own class or tracked element class.
+     */
+    private Class<?> legacyGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
+        Map<String, Class<?>> bindings = new HashMap<>();
+        for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
+            String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
+            if (parameterTypeName == null) continue;
+            Class<?> argumentType = arguments.get(i).getClassType();
+            if (function.getTypeParameters().contains(parameterTypeName)) {
+                bindings.putIfAbsent(parameterTypeName, argumentType);
+                continue;
+            }
+            String elementName = TypeResolver.elementTypeNameOf(parameterTypeName);
+            if (elementName != null && function.getTypeParameters().contains(elementName)) {
+                Class<?> elementType = _typeResolver.legacyArrayElementType(arguments.get(i));
+                if (elementType != null) bindings.putIfAbsent(elementName, elementType);
+            }
+        }
+        String returnTypeName = function.getDeclaredReturnTypeName();
+        if (function.getTypeParameters().contains(returnTypeName)) {
+            Class<?> bound = bindings.get(returnTypeName);
+            return bound == null || bound == Object.class ? null : bound;
+        }
+        String returnElementName = TypeResolver.elementTypeNameOf(returnTypeName);
+        if (returnElementName != null && function.getTypeParameters().contains(returnElementName)) {
+            return SiyoArray.class;
+        }
+        return null;
     }
 
     private static boolean isUnboxed(Class<?> type) {
         return type == Integer.class || type == Long.class || type == Double.class || type == Boolean.class;
-    }
-
-    /** The type parameters a function takes as a parameter's whole type or its array element type. */
-    private static java.util.Set<String> directlyBound(FunctionSymbol function, List<String> typeParameters) {
-        java.util.Set<String> direct = new HashSet<>();
-        for (ParameterSymbol parameter : function.getParameters()) {
-            String name = parameter.getDeclaredTypeName();
-            if (name == null) continue;
-            if (typeParameters.contains(name)) direct.add(name);
-            String element = TypeResolver.elementTypeNameOf(name);
-            if (element != null && typeParameters.contains(element)) direct.add(element);
-        }
-        return direct;
     }
 
     /** What a generic call produces: its type, and that type written out. */
@@ -2525,7 +2572,15 @@ public class Binder {
         BoundExpression target = bindExpression(syntax.getTarget());
         String memberName = syntax.getMember().getData();
 
-        if (target.getClassType() != SiyoStruct.class) {
+        // An erased value whose declared type names a struct, an element of
+        // keep(rows, p) or Some(r) on an Option<Row>, is read as that struct:
+        // the access casts, so a value of another kind fails there on both
+        // backends, and everything else about the value stays as 0.9.0 had it.
+        if (target.getClassType() == Object.class && _typeResolver.resolveStructType(target) == null) {
+            _diagnostics.reportCannotAccessMember(syntax.getDot().getSpan(), target.getClassType());
+            return new BoundLiteralExpression(0);
+        }
+        if (target.getClassType() != SiyoStruct.class && target.getClassType() != Object.class) {
             _diagnostics.reportCannotAccessMember(syntax.getDot().getSpan(), target.getClassType());
             return new BoundLiteralExpression(0);
         }
@@ -2582,7 +2637,7 @@ public class Binder {
         if (syntax.getTarget() instanceof MemberAccessExpressionSyntax memberSyntax) {
             BoundExpression target = bindExpression(memberSyntax.getTarget());
             String memberName = memberSyntax.getMember().getData();
-            StructSymbol structType = target.getClassType() == SiyoStruct.class
+            StructSymbol structType = target.getClassType() == SiyoStruct.class || target.getClassType() == Object.class
                     ? _typeResolver.resolveStructType(target) : null;
             if (structType != null && !structType.hasField(memberName)) {
                 reportNoSuchField(memberSyntax.getMember().getSpan(), structType, memberName);
@@ -2595,6 +2650,11 @@ public class Binder {
                     if (substituted != null) fieldType = substituted;
                 }
                 value = widenTo(value, fieldType);
+                // A generic struct's literal widens to its type argument, as at
+                // construction; a plain struct's assignment stays as 0.9.0 had it.
+                if (!structType.getTypeParameters().isEmpty()) {
+                    value = widenLiteral(value, _typeResolver.fieldTypeNameOf(target, memberName));
+                }
                 if (isScalar(fieldType) && isScalar(value.getClassType()) && fieldType != value.getClassType()) {
                     _diagnostics.reportCannotConvert(syntax.getEqualsToken().getSpan(), value.getClassType(), fieldType);
                 }
@@ -2674,6 +2734,7 @@ public class Binder {
         }
         List<String> arguments = new ArrayList<>();
         for (String parameter : typeParameters) arguments.add(bindings.getOrDefault(parameter, "object"));
+        // Kept as inferred: a field read applies the trust rule (TypeResolver.fieldTypeNameOf).
         return structType.getName() + "<" + String.join(",", arguments) + ">";
     }
 
