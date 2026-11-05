@@ -406,6 +406,9 @@ public class Binder {
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
+            // A struct-derived value under an annotation: the variable holds what
+            // the annotation says, and its aliases do too. Reads stay checked.
+            if (_typeResolver.isStructDerived(initializer)) _typeResolver.markStructDerived(variableSymbol);
             if (variableType == SiyoClosure.class) {
                 checkAgainstFunctionType(initializer, annotation.getData(),
                         syntax.getInitializer().getSpan());
@@ -431,28 +434,18 @@ public class Binder {
             // A plain alias, imut c = b, carries a generic struct's type
             // arguments, and nothing 0.9.0 would not have known.
             boolean alias = initializer instanceof BoundVariableExpression;
-            if (inherited != null && (alias ? _typeResolver.mentionsGenericStruct(inherited)
-                    : (followed || namesADeclaredType(inherited)))) {
+            boolean structDerived = annotation == null && _typeResolver.isStructDerived(initializer);
+            if (inherited != null && (structDerived || (alias ? _typeResolver.mentionsGenericStruct(inherited)
+                    : (followed || namesADeclaredType(inherited))))) {
                 variableSymbol.setDeclaredTypeName(inherited);
             }
+            // The variable holds what the struct-derived value does, however it is
+            // later aliased, filtered or indexed.
+            if (structDerived && inherited != null) _typeResolver.markStructDerived(variableSymbol);
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
             _diagnostics.reportVariableAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
-        }
-
-        // A local taken from a generic struct's field reads as the field does:
-        // imut v = b.value on a Box<Array<float>> holds floats, read checked.
-        if (annotation == null && initializer instanceof BoundMemberAccessExpression field) {
-            StructSymbol owner = _typeResolver.resolveStructType(field.getTarget());
-            if (owner != null && !owner.getTypeParameters().isEmpty()) {
-                String fieldTypeName = _typeResolver.fieldTypeNameOf(field.getTarget(), field.getMemberName());
-                if (fieldTypeName != null && !fieldTypeName.equals("object")) variableSymbol.setDeclaredTypeName(fieldTypeName);
-                if (initializer.getClassType() == SiyoArray.class) {
-                    _typeResolver.trackArrayType(variableSymbol, _typeResolver.resolveArrayElementType(initializer),
-                            _typeResolver.resolveStructTypeFromCollection(initializer));
-                }
-            }
         }
 
         // Track element/struct types for type resolution
@@ -505,14 +498,6 @@ public class Binder {
             StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(initializer);
             if (elemStruct != null) _typeResolver.trackArrayType(variableSymbol, elemType, elemStruct);
             else _typeResolver.trackArrayType(variableSymbol, elemType);
-            if (_typeResolver.isBoundThroughStruct(callExpr2)) _typeResolver.markElementsFromStruct(variableSymbol);
-        } else if (initializer instanceof BoundVariableExpression source && source.getClassType() == SiyoArray.class
-                && _typeResolver.hasElementsFromStruct(source.getVariable())) {
-            // An alias of what a Box<T> getter returned keeps its elements' type;
-            // any other alias stays as 0.9.0 had it.
-            _typeResolver.trackArrayType(variableSymbol, _typeResolver.resolveArrayElementType(source),
-                    _typeResolver.resolveStructTypeFromCollection(source));
-            _typeResolver.markElementsFromStruct(variableSymbol);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
         } else if (initializer.getClassType() == codeanalysis.SiyoUnion.class) {
@@ -2346,6 +2331,19 @@ public class Binder {
         String declared = _typeResolver.declaredTypeNameOf(expr);
         if (declared != null) return declared;
         if (expr instanceof BoundLambdaExpression lambda) return signatureNameOf(lambda);
+        // An array literal of one element kind, named element by element so a
+        // nested literal is whole: [[1.5]] is an Array<Array<float>> and
+        // [{"k": 1.5}] an Array<Map<string,float>>. Only inference reads this.
+        if (expr instanceof BoundArrayLiteralExpression array && !array.getElements().isEmpty()
+                && _typeResolver.declaredTypeNameOf(array) == null) {
+            String element = null;
+            for (int i = 0; i < array.getElements().size(); i++) {
+                String one = typeNameOf(array.getElements().get(i));
+                element = i == 0 ? one : TypeResolver.joinTypeNames(element, one);
+                if (element == null) break;
+            }
+            if (element != null && !element.equals("object")) return "Array<" + element + ">";
+        }
         // A map literal of one key kind and one value kind, number kinds joined
         // at the wider: Box { value: {"x": 1.5} } is a Box<Map<string,float>>.
         if (expr instanceof BoundMapLiteralExpression map && !map.getKeys().isEmpty()) {
@@ -2381,6 +2379,7 @@ public class Binder {
 
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
         BoundExpression collection = bindExpression(syntax.getCollection());
+        BoundExpression originalCollection = collection;
         String itemName = syntax.getItemName().getData();
 
         // Channel iteration: for msg in ch { ... } → while (true) { msg = ch.receive(); if msg == null break; body }
@@ -2458,6 +2457,9 @@ public class Binder {
                 : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
+            if (walkedTypeName == null && _typeResolver.isStructDerived(originalCollection)) {
+                _typeResolver.markStructDerived(itemVar);
+            }
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {

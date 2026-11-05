@@ -110,7 +110,7 @@ public class TypeResolver {
         if (expr instanceof BoundCallExpression filtered && filtered.getFunction() == BuiltinFunctions.FILTER
                 && !filtered.getArguments().isEmpty()) {
             String name = declaredTypeNameOf(filtered.getArguments().get(0));
-            return mentionsGenericStruct(name) ? name : null;
+            return mentionsGenericStruct(name) || isStructDerived(filtered.getArguments().get(0)) ? name : null;
         }
         if (expr instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP
                 && !call.getArguments().isEmpty()) {
@@ -212,20 +212,37 @@ public class TypeResolver {
         _boundThroughStruct.add(call);
     }
 
-    public boolean isBoundThroughStruct(BoundCallExpression call) {
-        return _boundThroughStruct.contains(call);
-    }
-
-    // Variables holding an array a Box<T> getter returned, whose element type is known.
-    private final java.util.Set<VariableSymbol> _elementsFromStruct =
+    // Variables whose type came from a generic struct's type argument: initialised
+    // from a struct-derived expression, or walking a struct-derived collection.
+    private final java.util.Set<VariableSymbol> _structDerived =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
-    public void markElementsFromStruct(VariableSymbol var) {
-        _elementsFromStruct.add(var);
+    public void markStructDerived(VariableSymbol var) {
+        _structDerived.add(var);
     }
 
-    public boolean hasElementsFromStruct(VariableSymbol var) {
-        return _elementsFromStruct.contains(var);
+    /**
+     * Whether an expression's type came from a generic struct's type argument,
+     * so its whole written type name, at every depth, is what it holds: its
+     * reads are checked the same way on both backends. That is a generic
+     * struct's field, a call whose result was bound through a generic struct
+     * argument, a filter of such an array, an index into such a container, and
+     * a variable or loop item that took one. Nothing else is: ordinary generic
+     * results stay erased as in 0.9.0.
+     */
+    public boolean isStructDerived(BoundExpression expr) {
+        if (expr instanceof BoundMemberAccessExpression member) {
+            StructSymbol owner = resolveStructType(member.getTarget());
+            return owner != null && !owner.getTypeParameters().isEmpty();
+        }
+        if (expr instanceof BoundCallExpression call) {
+            if (_boundThroughStruct.contains(call)) return true;
+            return call.getFunction() == BuiltinFunctions.FILTER && !call.getArguments().isEmpty()
+                    && isStructDerived(call.getArguments().get(0));
+        }
+        if (expr instanceof BoundVariableExpression variable) return _structDerived.contains(variable.getVariable());
+        if (expr instanceof BoundIndexExpression index) return isStructDerived(index.getTarget());
+        return false;
     }
 
     /** Whether a type name mentions a struct that declares type parameters: Box<float>, Array<Box<int>>. */
@@ -632,6 +649,11 @@ public class TypeResolver {
     }
 
     public Class<?> resolveArrayElementType(BoundExpression target) {
+        // A struct-derived array holds what its whole known type says, at any depth.
+        if (isStructDerived(target)) {
+            Class<?> elemType = lookupElementType(declaredTypeNameOf(target));
+            if (elemType != null) return elemType;
+        }
         if (target instanceof BoundArrayLiteralExpression arr) {
             return arr.getElementType();
         }
@@ -646,12 +668,6 @@ public class TypeResolver {
             // whatever the function returned, which is erased.
             if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
                 return resolveArrayElementType(callExpr.getArguments().get(0));
-            }
-            // g(b: Box<T>) -> T given a Box<Array<float>>: the struct's argument
-            // is known and its field read checked, so its elements are floats.
-            if (_boundThroughStruct.contains(callExpr) && callExpr.getResultTypeName() != null) {
-                Class<?> elemType = lookupElementType(callExpr.getResultTypeName());
-                if (elemType != null) return elemType;
             }
             Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
             if (returnElementType != null) return returnElementType;

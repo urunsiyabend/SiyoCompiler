@@ -1,6 +1,8 @@
 package codeanalysis;
 
+import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -1103,5 +1105,101 @@ fn main() {
                     println(toString(g(b)[0] * 2) + " " + toString(g(ha(1.5))[0] * 2) + " " + toString(g(hm(1.5))["k"] * 2))
                 }
                 """, "LambdaBoxGetter");
+    }
+
+    // --- Gate at 4b358e3: one provenance rule, checked as a matrix ----------------
+
+    /** A container shape: its type, a literal of it, a read reaching a 1.5, and how a loop item is read. */
+    private record Shape(String name, String type, String literal, String read, String itemRead) {
+    }
+
+    private static final List<Shape> SHAPES = List.of(
+            new Shape("array", "Array<float>", "[1.5]", "[0]", ""),
+            new Shape("map", "Map<string,float>", "{\"k\": 1.5}", "[\"k\"]", null),
+            new Shape("nested", "Array<Array<float>>", "[[1.5]]", "[0][0]", "[0]"),
+            new Shape("maparr", "Map<string,Array<float>>", "{\"k\": [1.5]}", "[\"k\"][0]", null),
+            new Shape("arrmap", "Array<Map<string,float>>", "[{\"k\": 1.5}]", "[0][\"k\"]", "[\"k\"]"));
+
+    private static final List<String> SOURCES = List.of("field", "getter", "annotated", "lambda", "imported");
+
+    /** A program reading one source and shape directly, through aliases, an annotation, filter and for. */
+    private static String provenanceProgram(String source, Shape shape) {
+        StringBuilder body = new StringBuilder();
+        String value = switch (source) {
+            case "field" -> "Box { value: " + shape.literal() + " }.value";
+            case "getter" -> "g(Box { value: " + shape.literal() + " })";
+            case "annotated" -> "g(boxed)";
+            case "lambda" -> "g(mk(" + shape.literal() + "))";
+            default -> "lib.g(Box { value: " + shape.literal() + " })";
+        };
+        if (source.equals("annotated")) body.append("    imut boxed: Box<").append(shape.type()).append("> = Box { value: ").append(shape.literal()).append(" }\n");
+        if (source.equals("lambda")) body.append("    imut mk = fn(v: object) -> Box<").append(shape.type()).append("> { Box { value: v } }\n");
+        body.append("    imut a = ").append(value).append("\n    imut b = a\n    imut c = b\n");
+        body.append("    imut d: ").append(shape.type()).append(" = a\n    imut e = d\n");
+        int reads = 0;
+        for (String name : List.of("a", "b", "c", "e")) {
+            body.append("    println(toString(").append(name).append(shape.read()).append(" * 2))\n");
+            reads++;
+        }
+        if (shape.itemRead() != null) {
+            body.append("    imut f = filter(a, fn(x: object) -> bool { true })\n    imut h = f\n");
+            body.append("    println(toString(f").append(shape.read()).append(" * 2))\n");
+            body.append("    println(toString(h").append(shape.read()).append(" * 2))\n");
+            body.append("    for x in b { println(toString(x").append(shape.itemRead()).append(" * 2)) }\n");
+            reads += 3;
+        }
+        String header = source.equals("imported") ? "import \"lib\"\n"
+                : "struct Box<T> { value: T }\nfn g<T>(b: Box<T>) -> T { b.value }\n";
+        return header + "fn main() {\n" + body + "}\n" + "// reads: " + reads + "\n";
+    }
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aGenericStructsArgumentReachesEveryReadOfEveryShape(@TempDir Path dir) {
+        List<DynamicTest> tests = new java.util.ArrayList<>();
+        for (String source : SOURCES) {
+            for (Shape shape : SHAPES) {
+                tests.add(DynamicTest.dynamicTest(source + " " + shape.name(), () -> {
+                    String program = provenanceProgram(source, shape);
+                    int reads = Integer.parseInt(program.substring(program.lastIndexOf(": ") + 2).trim());
+                    String expected = String.join("\n", java.util.Collections.nCopies(reads, "3.0"));
+                    if (!source.equals("imported")) {
+                        assertBoth(expected, program, "Provenance_" + source + "_" + shape.name());
+                        return;
+                    }
+                    Path project = Files.createDirectories(dir.resolve(shape.name()));
+                    Files.writeString(project.resolve("lib.siyo"),
+                            "pub struct Box<T> { value: T }\npub fn g<T>(b: Box<T>) -> T { b.value }\n");
+                    Path main = project.resolve("main.siyo");
+                    Files.writeString(main, program);
+                    for (String mode : List.of("run", "interpret")) {
+                        CliParityTest.Result result = CliParityTest.siyoc(project, mode, main.toString());
+                        assertEquals(expected, result.stdout(), mode + ": " + result.stderr());
+                    }
+                }));
+            }
+        }
+        return tests.stream();
+    }
+
+    @Test
+    void anOrdinaryGenericOverNumbersStaysErasedAsInZeroNine() throws Exception {
+        // The provenance rule must not reach a plain generic result: these hold
+        // what is pushed into them, as 0.9.0's did.
+        assertBoth("two two two", """
+                fn keep<T>(xs: Array<T>) -> Array<T> { xs }
+                fn get<K, V>(m: Map<K, V>, k: K) -> Array<V> { [m[k]] }
+                fn main() {
+                    mut a = keep([1])
+                    push(a, "two")
+                    imut b = a
+                    mut c = filter(keep([1]), fn(x: object) -> bool { true })
+                    push(c, "two")
+                    imut m: Map<string, int> = {"k": 1}
+                    mut d = get(m, "k")
+                    push(d, "two")
+                    imut e = d
+                    println(toString(b[1]) + " " + toString(c[1]) + " " + toString(e[1]))
+                }
+                """, "OrdinaryErased");
     }
 }
