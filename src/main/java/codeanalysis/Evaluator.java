@@ -27,6 +27,8 @@ public class Evaluator {
     private Object _lastValue;
     private boolean _returnTriggered = false;
     private Object _returnValue = null;
+    // An actor's method evaluator: its methods' returns are left as 0.9.0 had them.
+    private boolean _insideActor = false;
 
     /**
      * Evaluates the expression syntax tree and computes the result.
@@ -94,6 +96,15 @@ public class Evaluator {
                 case ReturnStatement -> {
                     BoundReturnStatement rs = (BoundReturnStatement) s;
                     _returnValue = rs.getExpression() == null ? null : evaluateExpression(rs.getExpression());
+                    // An erased value returned where a function declares a type is
+                    // cast compiled (Emitter.emitReturnStatement); it is checked
+                    // the same way here, so a Box<T> function returning a string
+                    // fails on both backends.
+                    if (rs.getExpression() != null && rs.getExpression().getClassType() == Object.class
+                            && !_insideActor && !_callStack.isEmpty()) {
+                        Class<?> declared = _callStack.peek().getDeclaredReturnType();
+                        if (declared != null && declared != Object.class) _returnValue = readPayloadAs(declared, _returnValue);
+                    }
                     _returnTriggered = true;
                 }
                 case ThrowStatement -> {
@@ -333,7 +344,8 @@ public class Evaluator {
             case CallExpression -> {
                 BoundCallExpression call = (BoundCallExpression) node;
                 Object value = evaluateCallExpression(call);
-                yield call.getResultTypeOverride() != null ? readAs(call.getResultTypeOverride(), value) : value;
+                // Read at the type the call was given, as the compiled unboxing reads it.
+                yield call.getResultTypeOverride() != null ? readPayloadAs(call.getResultTypeOverride(), value) : value;
             }
             case InterfaceCallExpression -> evaluateInterfaceCall((BoundInterfaceCallExpression) node);
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
@@ -807,7 +819,7 @@ public class Evaluator {
         }
 
         // Create stack frame with captured variables + parameters
-        StackFrame frame = new StackFrame(null);
+        StackFrame frame = new StackFrame(null, closure.getReturnType());
 
         // Load captured variables
         for (var entry : closure.getCapturedVars().entrySet()) {
@@ -845,7 +857,7 @@ public class Evaluator {
      * @throws Exception If the body fails.
      */
     private Object invokeClosure(SiyoClosure closure, Object... args) throws Exception {
-        StackFrame frame = new StackFrame(null);
+        StackFrame frame = new StackFrame(null, closure.getReturnType());
         for (var entry : closure.getCapturedVars().entrySet()) {
             frame.getLocals().put(entry.getKey(), entry.getValue());
         }
@@ -1132,6 +1144,9 @@ public class Evaluator {
                     }
 
                     actorEval._callStack.push(frame);
+                    // A failed return check would end the actor's method silently
+                    // and leave its caller waiting, so it is not made there.
+                    actorEval._insideActor = true;
                     try {
                         actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
                         actorEval.evaluateBlock(body);

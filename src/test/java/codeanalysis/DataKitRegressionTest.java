@@ -918,4 +918,124 @@ fn main() {
                 }
                 """, "GenericStructList");
     }
+
+    // --- Re-review at 328a5c7: knowable generic struct names, declared shapes -----
+
+    @Test
+    void aGenericStructsTypeArgumentSurvivesAnAliasFilterAndFieldElement() throws Exception {
+        assertBoth("3.0 3.0 3.0 3.0", """
+                struct Box<T> { value: T }
+                fn first<T>(xs: Array<T>) -> T { xs[0] }
+                fn main() {
+                    imut b = Box { value: 1.5 }
+                    imut c = b
+                    imut bs = [Box { value: 1.5 }]
+                    imut cs = filter(bs, fn(x: Box<float>) -> bool { true })
+                    imut held: Box<Array<float>> = Box { value: [1.5] }
+                    imut alias = cs
+                    println(toString(c.value * 2) + " " + toString(cs[0].value * 2) + " "
+                        + toString(first(held.value) * 2) + " " + toString(alias[0].value * 2))
+                }
+                """, "GenericAlias");
+    }
+
+    @Test
+    void anImportedGenericStructKeepsItsArgumentThroughAnAlias(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("lib.siyo"), """
+                pub struct Box<T> { value: T }
+                pub fn mk<T>(x: T) -> Box<T> { Box { value: x } }
+                """);
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                fn main() {
+                    imut b = lib.mk(1.5)
+                    imut c = b
+                    println(toString(c.value * 2))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("3.0", result.stdout(), mode + ": " + result.stderr());
+        }
+    }
+
+    @Test
+    void aValueOfTheWrongShapeFailsAtADeclaredReturnOnBothBackends() throws Exception {
+        assertBoth("failed failed failed", """
+                struct Box<T> { value: T }
+                struct R { n: int }
+                fn wrong<T>(x: T) -> Box<T> {
+                    imut b: object = "abc"
+                    b
+                }
+                fn same<T>(x: T) -> T {
+                    imut b: object = "abc"
+                    b
+                }
+                fn count() -> int {
+                    imut o: object = "abc"
+                    return o
+                }
+                fn main() {
+                    mut out = ""
+                    try { out = out + toString(len(wrong(1))) } catch e { out = out + "failed" }
+                    imut rs: Array<R> = [R { n: 1 }]
+                    try { out = out + " " + toString(len(same(rs))) } catch e { out = out + " failed" }
+                    try { out = out + " " + toString(count()) } catch e { out = out + " failed" }
+                    println(out)
+                }
+                """, "DeclaredReturnShape");
+    }
+
+    @Test
+    void aGenericStructsArgumentReachesABareResultAndAFieldLocal() throws Exception {
+        assertBoth("3.0 s! 3.0 5.0 3.0", """
+                struct Box<T> { value: T }
+                fn g<T>(b: Box<T>) -> T {
+                    imut c = b
+                    c.value
+                }
+                fn main() {
+                    imut b = Box { value: [1.5, 2.5] }
+                    imut c = b
+                    imut v = c.value
+                    imut held: Box<Map<string, float>> = Box { value: {"a": 1.5} }
+                    imut m = held.value
+                    println(toString(g(Box { value: 1.5 }) * 2) + " " + g(Box { value: "s" }) + "! "
+                        + toString(v[0] * 2) + " " + toString(c.value[1] * 2) + " " + toString(m["a"] * 2))
+                }
+                """, "GenericToBareAndLocal");
+    }
+
+    @Test
+    void aLambdasDeclaredReturnIsCheckedOnBothBackendsButNotAnActorsMethod() throws Exception {
+        assertBoth("failed failed", """
+                struct Box<T> { value: T }
+                fn main() {
+                    imut h = fn(o: object) -> Box<float> { o }
+                    imut s = fn(o: object) -> string { o }
+                    mut out = ""
+                    try { out = out + toString(len(toString(h("abc")))) } catch e { out = out + "failed" }
+                    try { out = out + " " + s(3) } catch e { out = out + " failed" }
+                    println(out)
+                }
+                """, "LambdaReturnShape");
+    }
+
+    @Test
+    void aMapLiteralGivesAGenericStructItsMapType() throws Exception {
+        assertBoth("3.0 3.0 3.0 2.0", """
+                struct Box<T> { value: T }
+                fn mk<T>(x: T) -> Box<T> { Box { value: x } }
+                fn main() {
+                    imut a = Box { value: {"x": 1.5} }
+                    imut b = mk({"x": 1.5})
+                    imut m = a.value
+                    imut mixed = Box { value: {"i": 1, "f": 2.5} }
+                    println(toString(a.value["x"] * 2) + " " + toString(b.value["x"] * 2) + " "
+                        + toString(m["x"] * 2) + " " + toString(mixed.value["i"] * 2))
+                }
+                """, "GenericMapLiteral");
+    }
 }

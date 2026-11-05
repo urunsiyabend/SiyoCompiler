@@ -98,6 +98,12 @@ public class TypeResolver {
             }
             return "Array<" + common + ">";
         }
+        // filter keeps its elements, and so the generic struct they are.
+        if (expr instanceof BoundCallExpression filtered && filtered.getFunction() == BuiltinFunctions.FILTER
+                && !filtered.getArguments().isEmpty()) {
+            String name = declaredTypeNameOf(filtered.getArguments().get(0));
+            return mentionsGenericStruct(name) ? name : null;
+        }
         if (expr instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP
                 && !call.getArguments().isEmpty()) {
             return elementTypeNameOf(declaredTypeNameOf(call.getArguments().get(0)));
@@ -188,6 +194,16 @@ public class TypeResolver {
             return trustedTypeArgument(name);
         }
         return name;
+    }
+
+    /** Whether a type name mentions a struct that declares type parameters: Box<float>, Array<Box<int>>. */
+    public boolean mentionsGenericStruct(String typeName) {
+        if (typeName == null) return false;
+        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
+            StructSymbol struct = word.isEmpty() ? null : _structTypes.get(word);
+            if (struct != null && !struct.getTypeParameters().isEmpty()) return true;
+        }
+        return false;
     }
 
     /** Every binding in its trusted form. */
@@ -565,8 +581,12 @@ public class TypeResolver {
         }
         if (target instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol structType = resolveStructType(memberExpr.getTarget());
-            if (structType != null && structType.getTypeParameters().isEmpty()) {
-                String fieldTypeName = structType.getFieldTypeName(memberExpr.getMemberName());
+            if (structType != null) {
+                // A generic struct's field is read at its type argument, checked, so
+                // first(b.value) on a Box<Array<float>> knows it gives a float.
+                String fieldTypeName = structType.getTypeParameters().isEmpty()
+                        ? structType.getFieldTypeName(memberExpr.getMemberName())
+                        : fieldTypeNameOf(memberExpr.getTarget(), memberExpr.getMemberName());
                 Class<?> elemType = fieldTypeName != null ? lookupElementType(fieldTypeName) : null;
                 if (elemType != null) return elemType;
             }

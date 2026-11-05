@@ -417,21 +417,41 @@ public class Binder {
         } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression
                 || initializer instanceof BoundMemberAccessExpression
                 || initializer instanceof BoundStructLiteralExpression
-                || initializer instanceof BoundArrayLiteralExpression) {
+                || initializer instanceof BoundArrayLiteralExpression
+                || initializer instanceof BoundVariableExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
             // A field or a literal is followed only for the struct identity it
             // carries, as in imut its = g.items on a Group<Row>.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
             boolean followed = !(initializer instanceof BoundMemberAccessExpression)
                     && !(initializer instanceof BoundStructLiteralExpression)
-                    && !(initializer instanceof BoundArrayLiteralExpression);
-            if (inherited != null && (followed || namesADeclaredType(inherited))) {
+                    && !(initializer instanceof BoundArrayLiteralExpression)
+                    && !(initializer instanceof BoundVariableExpression);
+            // A plain alias, imut c = b, carries a generic struct's type
+            // arguments, and nothing 0.9.0 would not have known.
+            boolean alias = initializer instanceof BoundVariableExpression;
+            if (inherited != null && (alias ? _typeResolver.mentionsGenericStruct(inherited)
+                    : (followed || namesADeclaredType(inherited)))) {
                 variableSymbol.setDeclaredTypeName(inherited);
             }
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
             _diagnostics.reportVariableAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        }
+
+        // A local taken from a generic struct's field reads as the field does:
+        // imut v = b.value on a Box<Array<float>> holds floats, read checked.
+        if (annotation == null && initializer instanceof BoundMemberAccessExpression field) {
+            StructSymbol owner = _typeResolver.resolveStructType(field.getTarget());
+            if (owner != null && !owner.getTypeParameters().isEmpty()) {
+                String fieldTypeName = _typeResolver.fieldTypeNameOf(field.getTarget(), field.getMemberName());
+                if (fieldTypeName != null && !fieldTypeName.equals("object")) variableSymbol.setDeclaredTypeName(fieldTypeName);
+                if (initializer.getClassType() == SiyoArray.class) {
+                    _typeResolver.trackArrayType(variableSymbol, _typeResolver.resolveArrayElementType(initializer),
+                            _typeResolver.resolveStructTypeFromCollection(initializer));
+                }
+            }
         }
 
         // Track element/struct types for type resolution
@@ -1520,6 +1540,9 @@ public class Binder {
             List<String> parameters = symbol.getTypeParameters();
             List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
             if (arguments.size() != parameters.size()) return expression;
+            // A parameter written Box<T> says nothing about this literal's T; only
+            // a type written out (Box<float>) is one to widen to and name it by.
+            if (TypeResolver.mentionsAny(typeName, _typeResolver.getTypeParameters())) return expression;
             Map<String, String> bindings = new HashMap<>();
             for (int i = 0; i < parameters.size(); i++) bindings.put(parameters.get(i), arguments.get(i));
             java.util.LinkedHashMap<String, BoundExpression> values = new java.util.LinkedHashMap<>();
@@ -2210,6 +2233,22 @@ public class Binder {
         // The result's own class is what 0.9.0 gave it, so identity(5) + 1 still
         // adds; a struct or sum type result is also known by name.
         Class<?> resultType = legacyGenericResultType(function, arguments);
+        // A bare T bound through a generic struct argument, g(b: Box<T>) -> T
+        // given a Box<float>: the struct's type argument is known, and the
+        // call's result is read checked on both backends, so it is a float.
+        if (resultType == null && typeParameters.contains(returnTypeName)) {
+            Map<String, String> throughStructs = new HashMap<>();
+            for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
+                String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
+                if (!_typeResolver.mentionsGenericStruct(parameterTypeName)) continue;
+                TypeResolver.unify(parameterTypeName, typeNameOf(arguments.get(i)), typeParameters, throughStructs);
+            }
+            String bound = throughStructs.get(returnTypeName);
+            Class<?> boundType = bound == null || bound.equals("object") ? null : _typeResolver.lookupType(bound);
+            if (boundType != null && boundType != Object.class && bindings.getOrDefault(returnTypeName, bound).equals(bound)) {
+                return new GenericResult(boundType, bound);
+            }
+        }
         Class<?> named = _typeResolver.lookupType(resultTypeName);
         if (resultType == null && (named == SiyoStruct.class || named == codeanalysis.SiyoUnion.class
                 || named == SiyoArray.class || named == SiyoMap.class || named == SiyoSet.class)) {
@@ -2272,6 +2311,19 @@ public class Binder {
         String declared = _typeResolver.declaredTypeNameOf(expr);
         if (declared != null) return declared;
         if (expr instanceof BoundLambdaExpression lambda) return signatureNameOf(lambda);
+        // A map literal of one key kind and one value kind, number kinds joined
+        // at the wider: Box { value: {"x": 1.5} } is a Box<Map<string,float>>.
+        if (expr instanceof BoundMapLiteralExpression map && !map.getKeys().isEmpty()) {
+            String key = null, value = null;
+            for (int i = 0; i < map.getKeys().size(); i++) {
+                String k = typeNameOf(map.getKeys().get(i));
+                String v = typeNameOf(map.getValues().get(i));
+                key = i == 0 ? k : TypeResolver.joinTypeNames(key, k);
+                value = i == 0 ? v : TypeResolver.joinTypeNames(value, v);
+                if (key == null || value == null) return "map";
+            }
+            return "Map<" + key + "," + value + ">";
+        }
         Class<?> type = expr.getClassType();
         if (type == SiyoStruct.class) {
             StructSymbol struct = _typeResolver.resolveStructType(expr);
