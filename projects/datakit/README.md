@@ -98,8 +98,10 @@ Transform options:
   is a usage error.
 - `--out FILE` writes to FILE rather than standard output. It never overwrites:
   if FILE exists or is an input file, DataKit exits 2. The file is created
-  atomically with `io.writeNew`, so a file or symbolic link that appears between
-  the check and the write is refused too, never followed or truncated. Nothing is written when
+  exclusively with `io.writeNew`, so a file or symbolic link that appears between
+  the check and the write is refused too, never followed or truncated. If writing
+  fails part-way (a full disk), exit 2 and the partial file DataKit created stays;
+  it is never removed by name, since the path may by then be someone else's. Nothing is written when
   the data or a flag is invalid.
 
 Ordering and number formats:

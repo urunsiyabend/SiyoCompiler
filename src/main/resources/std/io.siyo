@@ -35,7 +35,8 @@ pub fn readText(path: string) -> string {
 // existing file, directory or symbolic link is never opened or followed, so no
 // race between a check and the write can clobber anything. Raises
 // "exists: PATH" when something is already there, "cannot write: PATH" when it
-// cannot be created or written.
+// cannot be created or written. Creation is exclusive; publishing the whole
+// content is not atomic: a write that fails part-way leaves the partial file.
 pub fn writeNew(path: string, content: string) {
     SiyoRuntime.writeNew(path, content)
 }

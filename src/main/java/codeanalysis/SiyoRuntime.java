@@ -470,7 +470,9 @@ public class SiyoRuntime {
      * an existing file, directory or symbolic link (dangling or not) is never
      * opened, so a check followed by a write cannot be raced into clobbering
      * something. Raises "exists: PATH" when it is there, "cannot write: PATH"
-     * otherwise; a file it created and could not finish is removed.
+     * otherwise. Creation is exclusive, not an atomic publication of the whole
+     * content: a write that fails part-way leaves the partial file it created,
+     * since removing it by name could remove someone else's file.
      */
     public static void writeNew(String path, String content) {
         java.nio.file.Path target = java.nio.file.Path.of(path);
@@ -486,7 +488,8 @@ public class SiyoRuntime {
         try (out) {
             out.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (java.io.IOException e) {
-            try { java.nio.file.Files.deleteIfExists(target); } catch (java.io.IOException ignored) { }
+            // The file is left as it is. Deleting by name could remove whatever
+            // another process put at that path after this file was moved aside.
             throw new SiyoThrow("cannot write: " + path);
         }
     }
