@@ -21,7 +21,7 @@ a whole is covered by `DataKitEndToEndTest.java`.
 | G5 | missing stdlib | There was no CSV reader. Added `std/csv`, written in Siyo, which follows RFC 4180. The first version returned bare rows, which DataKit could not turn into line numbers once a quoted field spanned lines, so rows now carry the line they start on (`CsvRow`). | `csvReadsQuotedFieldsLineEndingsAndAByteOrderMark`, `csvReportsMalformedQuotingWithItsLine`, `csvFormatRowQuotesWhatNeedsItAndRoundTrips` |
 | G6 | type bug | A function imported from another module lost its type parameters, so `lib.ident(r).n` was rejected. A module-qualified call, and a call written as a method, did not infer a generic result. | `anImportedGenericFunctionKeepsItsResultTypeAndWidensItsArguments` |
 | G7 | type rule | A module-qualified call did not widen a narrower number at a parameter: `lib.half(5)` against `half(x: float)` was rejected, though `half(5)` in the same file is accepted. | same test |
-| G8 | type bug | A sum type's payload lost its written type. With `T(Array<S>)`, `T(xs) => xs[0].n` was rejected, and `Some(r)` on an `Option<Row>` bound an erased value. | `aPayloadKeepsItsWrittenGenericType`, `aGenericSumTypesPayloadIsReadAtItsTypeArgument` |
+| G8 | type bug | A sum type's payload lost its written type. With `T(Array<S>)`, `T(xs) => xs[0].n` was rejected, and `Some(r)` on an `Option<Row>` bound an erased value. A number or bool payload stays erased (see review below). | `aPayloadKeepsItsWrittenGenericType`, `aGenericSumTypesPayloadIsReadAtItsTypeArgument` |
 | G9 | type bug | A signature naming a type declared further down the file got a null type: `fn s() -> Later` above `struct Later`, then `s().n`, was "Type <null> does not have members". | `aSignatureMayNameATypeDeclaredLaterInTheFile` |
 | G10 | type rule + diagnostics | A function turning a sum type into JSON values, `fn conv(v: V) -> object { match v { I(n) => n, S(s) => s, M => null } }`, was rejected with "cannot mix void and value arms" although no arm is void. It is now accepted where the match ends a function returning `object`. Anywhere a type is declared the arms must still agree, since accepting them there turned 0.9.0's compile error into a silent wrong value interpreted (tried and caught in review: `imut x: int = match ... { _ => "no" }` printed `no1`). The message now names the two types. | `aMatchEndingAnObjectFunctionMayGiveValuesOfDifferentTypes`, `armsOfDifferentTypesAreStillRejectedWhereATypeIsDeclared` |
 | G14 | stdlib gap | `io.readFile` reads lines and joins them with `"\n"`, so a CR or CRLF inside a quoted CSV field came back as LF, and the final newline was dropped. The independent oracle caught this; the app's own tests did not. `readFile` keeps its documented behaviour, which programs rely on, and `io.readText` returns a file as written, decoded as UTF-8. | `readTextKeepsLineEndingsAndTheFinalNewline`, `DataKitEndToEndTest.aLineBreakInsideAQuotedFieldIsKeptAsWritten` |
@@ -60,22 +60,26 @@ println(show(I(2)))
 
 ### Caught in review
 
-An independent review of the branch found that G1, G2 and G8 read values at
-types nothing had checked. The result was compiled ClassCastExceptions, and
-backends disagreeing (`2.0` against `2`), for programs 0.9.0 ran consistently.
-Fixed before release, each with a test:
+Two rounds of independent review found that G1, G2 and G8 read values at types
+nothing had checked. The result was compiled ClassCastExceptions and
+NullPointerExceptions, and backends disagreeing (`2.0` against `2`), for
+programs 0.9.0 ran consistently. Fixed before release:
 
-- Payloads now widen to the type argument.
+- A number or bool payload, and a number result bound through anything but a
+  parameter or an array element, stay erased, as in 0.9.0, since either may
+  hold null.
+- Arguments that disagree erase the type parameter.
 - The interpreter widens and checks erased reads as the compiled casts do.
 - Declared names are set only where they carry struct or generic identity.
 - `push` into a declared array and assignment to a generic field are checked.
 - A number returned from an `object` function is boxed.
 
-The tests are `aGenericPayloadWidensToItsDeclaredTypeArgument`,
+The tests are `aNumberPayloadOfAGenericSumTypeReadsAsItDidInZeroNine`,
 `aGenericValueOfTheWrongKindFailsTheSameWayOnBothBackends`,
 `anArrayDeclaredByAGenericResultTakesOnlyItsKind`,
-`whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged` and
-`aNumberReturnedFromAnObjectFunctionIsBoxed`.
+`whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged`,
+`aNumberReturnedFromAnObjectFunctionIsBoxed` and
+`aMissingValueThroughAGenericCallOrPayloadReadsAsNullOnBothBackends`.
 
 ## DataKit's own bugs, found in testing
 

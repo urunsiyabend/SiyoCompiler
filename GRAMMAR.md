@@ -474,8 +474,12 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
   `Array<Row>` gives an `Array<Row>`, matching through arrays, maps, sets,
   generic structs and function types (`fn(T) -> string` against a lambda's
   `fn(Row) -> string`). This holds for a function from another module too.
-  A sum type's payload is read at the matched value's type arguments, so
-  `Some(r)` on an `Option<Row>` binds a `Row`, and a payload widens to its
+  A sum type's struct, collection or string payload is read at the matched
+  value's type arguments, so `Some(r)` on an `Option<Row>` binds a `Row`; a
+  number or bool payload stays erased, since it may hold null, and is narrowed
+  with a typed variable (`imut k: int = v`). A call's number or bool result is
+  unboxed only when its type parameter comes from a parameter or an array
+  element, and arguments that disagree erase it. A payload widens to its
   declared number type as a parameter does
 - A signature may name a struct, sum type or interface declared further down
   the file

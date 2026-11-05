@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,857 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,858 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -49,8 +49,9 @@ and `Map<string, Array<T>>` likewise. Only a bare `-> T` kept its type.
   lose its type parameters altogether.
 
 **A payload keeps its written type.** With `type R = T(Array<S>) | ...`,
-`T(xs) => xs[0].n` was rejected. A generic sum type's payload is now read at the
-matched value's type argument, so `Some(r)` on an `Option<Row>` binds a `Row`.
+`T(xs) => xs[0].n` was rejected. A generic sum type's struct, collection or
+string payload is now read at the matched value's type argument, so `Some(r)`
+on an `Option<Row>` binds a `Row`.
 
 ## Type rules
 
@@ -78,23 +79,30 @@ fn jsonValue(v: Value) -> object {
   turned 0.9.0's compile error for `imut x: int = match ... { _ => "no" }` into
   a silent `no1` interpreted.
 
-**Declared types are trusted only where they were checked.** Review of this
-release found that the new type substitutions read values at types nothing had
-checked. The 0.9.0 behaviour of these programs is kept, or they now fail the
-same way on both backends:
+**Declared types are trusted only where they were checked.** Two rounds of
+review found that the new type substitutions read values at types nothing had
+checked. Programs that 0.9.0 ran consistently crashed compiled, or printed
+`2.0` against `2`. What ships keeps 0.9.0's behaviour for those programs, or
+reports them at compile time:
 
-- **Generic payloads.** A generic sum type's payload widens to its declared type
-  argument: `Some(2)` as an `Option<float>` holds `2.0` on both backends.
-- **Values of the wrong kind.** One that reaches a payload or a generic struct's
-  field through an erased path, such as an `Option<int>` built from a string or
-  a `Box<int>` whose value was set through an erased `Box`, fails when read, on
-  both backends. Compiled, it already failed.
+- **Number and bool payloads.** A generic sum type's number or bool payload
+  stays erased, as in 0.9.0, since `Some(m[k])` may hold null. Narrow it with a
+  typed variable: `imut k: int = v`. Struct, collection and string payloads are
+  read at their type argument.
+- **Number and bool results.** A generic call's number or bool result is
+  unboxed only when its type parameter comes from a parameter or an array
+  element, as in 0.9.0. One bound through a map, such as
+  `get<K, V>(m: Map<K, V>, k: K) -> V`, stays erased, so a missing key reads as
+  null on both backends.
+- **Arguments that disagree.** `both(1, 2.5)` erases `T` rather than taking the
+  first argument's type.
 - **Arrays.** An array declared by an annotation or by a generic result
   (`wrap(1)` is an `Array<int>`) cannot be given a value of another kind:
   `push(xs, "two")` is reported. An array only inferred from a literal, a plain
   `float[]` payload, and a field taken into a variable read as in 0.9.0.
-- **Assignment.** A generic struct's field is checked on assignment:
-  `b.value = 2.5` on a `Box<int>` is reported.
+- **Generic struct fields.** A field is checked on assignment, so `b.value = 2.5`
+  on a `Box<int>` is reported. A value of the wrong kind that reaches a field
+  through an erased `Box` fails when read, on both backends.
 - **Returning a number from a function returning `object`.** `return n` there
   failed JVM verification in 0.9.0. It is now boxed.
 
