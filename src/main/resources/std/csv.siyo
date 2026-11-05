@@ -6,8 +6,9 @@
 // fields from the next is not a syntax error, so the caller decides what it is.
 
 // A row and the line it starts on, which a quoted line break makes differ from
-// its position among the rows.
-pub struct CsvRow { line: int, cells: Array<string> }
+// its position among the rows. `blank` is true for a line with nothing on it,
+// which a caller may skip; a quoted empty field ("") is a record, not a blank.
+pub struct CsvRow { line: int, cells: Array<string>, blank: bool }
 
 pub type CsvResult = Table(Array<CsvRow>) | BadCsv(string)
 
@@ -18,7 +19,9 @@ pub fn parse(text: string) -> CsvResult {
     mut i = 0
     mut line = 1
     mut rowLine = 1
+    mut rowStart = 0
     if n > 0 && substring(text, 0, 1) == chr(65279) { i = 1 }
+    rowStart = i
     if i >= n { return Table(rows) }
     while true {
         mut value = ""
@@ -69,7 +72,7 @@ pub fn parse(text: string) -> CsvResult {
         }
         push(row, value)
         if i >= n {
-            push(rows, CsvRow { line: rowLine, cells: row })
+            push(rows, CsvRow { line: rowLine, cells: row, blank: i == rowStart })
             break
         }
         imut c = substring(text, i, i + 1)
@@ -78,16 +81,18 @@ pub fn parse(text: string) -> CsvResult {
             if i >= n {
                 // A comma ending the text leaves one more, empty, field.
                 push(row, "")
-                push(rows, CsvRow { line: rowLine, cells: row })
+                push(rows, CsvRow { line: rowLine, cells: row, blank: false })
                 break
             }
             continue
         }
+        imut blank = i == rowStart
         if c == "\r" && i + 1 < n && substring(text, i + 1, i + 2) == "\n" { i += 2 } else { i += 1 }
         line += 1
-        push(rows, CsvRow { line: rowLine, cells: row })
+        push(rows, CsvRow { line: rowLine, cells: row, blank: blank })
         row = []
         rowLine = line
+        rowStart = i
         if i >= n { break }
     }
     Table(rows)
@@ -96,6 +101,8 @@ pub fn parse(text: string) -> CsvResult {
 // One row written as a line, without its line ending. A cell is quoted when it
 // holds a comma, a quote, a line break, or space at either end.
 pub fn formatRow(cells: Array<string>) -> string {
+    // A lone empty cell is written quoted, or the line would read as blank.
+    if len(cells) == 1 && cells[0] == "" { return "\"\"" }
     mut out = ""
     mut first = true
     for cell in cells {
