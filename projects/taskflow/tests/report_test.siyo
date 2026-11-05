@@ -7,13 +7,13 @@ import "status"
 import "helpers"
 
 fn controlCharactersBecomeEscapes() {
-    testing.assertEq(report.safe("a" + chr(27) + "[31m"), "a\\u001b[31m", "ESC")
-    testing.assertEq(report.safe(chr(10)), "\\u000a", "newline")
-    testing.assertEq(report.safe(chr(127) + chr(155)), "\\u007f\\u009b", "DEL and C1")
+    testing.assertEq(model.safe("a" + chr(27) + "[31m"), "a\\u001b[31m", "ESC")
+    testing.assertEq(model.safe(chr(10)), "\\u000a", "newline")
+    testing.assertEq(model.safe(chr(127) + chr(155)), "\\u007f\\u009b", "DEL and C1")
 }
 
 fn ordinaryTextIsLeftAlone() {
-    testing.assertEq(report.safe("café <b> 😀"), "café <b> 😀", "kept")
+    testing.assertEq(model.safe("café <b> 😀"), "café <b> 😀", "kept")
 }
 
 fn validateCountsWithProperWords() {

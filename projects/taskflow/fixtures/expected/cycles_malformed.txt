@@ -1,0 +1,1 @@
+fixtures/adversarial/malformed.json: json: expected a string at position 1 (end of input)

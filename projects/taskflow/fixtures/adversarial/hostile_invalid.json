@@ -1,0 +1,5 @@
+{"tasks": [
+  {"id": "a\u001b[31m", "deps": ["ghost\u0007", "a\u001b[31m"]},
+  {"id": "b", "status": "\u001b[2J"},
+  {"id": "b", "bad\u009bfield": 1}
+]}

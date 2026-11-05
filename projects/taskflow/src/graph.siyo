@@ -101,9 +101,9 @@ fn walkFrom(s: Tarjan, root: int) {
     }
 }
 
-// One concrete cycle through a strongly connected group, starting at its
-// smallest id and always taking the smallest id that stays in the group, so
-// the same graph always names the same cycle.
+// One concrete cycle through a strongly connected group: the shortest from its
+// smallest id back to itself, trying smaller ids first, so the same graph always
+// names the same cycle.
 fn cycleThrough(g: Graph, group: Array<int>) -> Array<string> {
     mut inGroup: Set<int> = #{}
     mut start = group[0]
@@ -111,21 +111,32 @@ fn cycleThrough(g: Graph, group: Array<int>) -> Array<string> {
         inGroup.add(v)
         if v < start { start = v }
     }
-    mut seenAt: Map<int, int> = {}
-    mut path: Array<int> = []
-    mut at = start
-    while !seenAt.has(at) {
-        seenAt[at] = len(path)
-        push(path, at)
-        mut next = -1
-        for w in g.deps[at] {
-            if inGroup.has(w) && (next < 0 || w < next) { next = w }
+    mut cameFrom: Map<int, int> = {}
+    mut queue: Array<int> = [start]
+    mut head = 0
+    mut last = -1
+    while last < 0 {
+        imut v = queue[head]
+        head += 1
+        for w in g.deps[v] {
+            if w == start {
+                last = v
+                break
+            }
+            if inGroup.has(w) && !cameFrom.has(w) {
+                cameFrom[w] = v
+                push(queue, w)
+            }
         }
-        at = next
+    }
+    mut backwards: Array<int> = [start, last]
+    mut at = last
+    while at != start {
+        at = cameFrom[at]
+        push(backwards, at)
     }
     mut names: Array<string> = []
-    for mut i = seenAt[at] i < len(path) i = i + 1 { push(names, g.ids[path[i]]) }
-    push(names, g.ids[at])
+    while len(backwards) > 0 { push(names, g.ids[pop(backwards)]) }
     names
 }
 
@@ -157,13 +168,15 @@ fn hasSelfLoop(g: Graph, v: int) -> bool {
     false
 }
 
-// Everything `start` needs, directly or not, itself included.
-pub fn closure(g: Graph, start: int) -> Set<int> {
+// Everything `start` needs, directly or not, itself included. A task in `stops`
+// is counted but not looked through.
+pub fn closure(g: Graph, start: int, stops: Set<int>) -> Set<int> {
     mut seen: Set<int> = #{}
     mut stack: Array<int> = [start]
     seen.add(start)
     while len(stack) > 0 {
         imut v = pop(stack)
+        if stops.has(v) { continue }
         for w in g.deps[v] {
             if !seen.has(w) {
                 seen.add(w)

@@ -75,6 +75,9 @@ class TaskFlowEndToEndTest {
             new Case("plan_empty.txt", 0, "plan", "fixtures/empty.json"),
             new Case("status_empty.txt", 0, "status", "fixtures/empty.json"),
             new Case("status_done.txt", 0, "status", "fixtures/done_all.json"),
+            new Case("cycles_malformed.txt", 3, "cycles", BAD + "malformed.json"),
+            new Case("cycles_malformed.json", 3, "cycles", BAD + "malformed.json", "--json"),
+            new Case("plan_failed_target.txt", 0, "plan", BAD + "failed_chain.json", "--target", "root1"),
             new Case("validate_cycles.txt", 3, "validate", BAD + "cycles.json"),
             new Case("validate_cycles.json", 3, "validate", BAD + "cycles.json", "--json"),
             new Case("cycles_cycles.txt", 3, "cycles", BAD + "cycles.json"),
@@ -194,12 +197,32 @@ class TaskFlowEndToEndTest {
     @Test
     void textOutputCarriesNoControlCharacterFromTheInput() throws Exception {
         for (String mode : MODES) {
-            for (String command : List.of("status", "plan", "validate")) {
-                String out = taskflow(mode, command, BAD + "hostile_text.json").stdout();
+            for (String[] args : List.of(new String[]{"status", BAD + "hostile_text.json"},
+                    new String[]{"plan", BAD + "hostile_text.json"},
+                    new String[]{"validate", BAD + "hostile_invalid.json"},
+                    new String[]{"cycles", BAD + "hostile_invalid.json"})) {
+                String command = String.join(" ", args);
+                String out = taskflow(mode, args).stdout();
+                assertTrue(out.length() > 5, mode + " " + command);
                 for (char c : out.toCharArray()) {
                     assertFalse((c < 0x20 && c != '\n') || (c >= 0x7f && c < 0xa0),
                             mode + " " + command + " wrote U+" + Integer.toHexString(c));
                 }
+            }
+        }
+    }
+
+    @Test
+    void errorMessagesCarryNoControlCharacters() throws Exception {
+        String esc = "\u001b[31m";
+        for (String mode : MODES) {
+            for (String[] args : List.of(new String[]{"plan", RELEASE, "-" + esc}, new String[]{esc},
+                    new String[]{"plan", RELEASE, "--workers", esc}, new String[]{"plan", RELEASE, "--target", esc},
+                    new String[]{"plan", "missing" + esc + ".json"})) {
+                CliParityTest.Result result = taskflow(mode, args);
+                assertFalse(result.stderr().contains("\u001b"), mode + " " + String.join(" ", args));
+                assertTrue(result.stderr().contains("\\u001b[31m"), mode + ": " + result.stderr());
+                assertTrue(result.exitCode() != 0, mode);
             }
         }
     }
@@ -370,6 +393,34 @@ class TaskFlowEndToEndTest {
         }
     }
 
+    @Test
+    void generatedTargetPlansObeyEveryRule() throws Exception {
+        for (long seed = 21; seed <= 24; seed++) {
+            List<Generated> tasks = randomGraph(seed, 50, 0.08, false);
+            Generated target = tasks.get(tasks.size() - 1);
+            Map<String, Generated> byId = new HashMap<>();
+            for (Generated t : tasks) byId.put(t.id(), t);
+            // What the target needs, not looking through work already done.
+            Set<String> scope = new HashSet<>();
+            List<String> stack = new ArrayList<>(List.of(target.id()));
+            while (!stack.isEmpty()) {
+                String v = stack.remove(stack.size() - 1);
+                if (scope.add(v) && !byId.get(v).status().equals("done")) stack.addAll(byId.get(v).deps());
+            }
+            List<Generated> inScope = new ArrayList<>();
+            for (Generated t : tasks) if (scope.contains(t.id())) inScope.add(t);
+            Path file = writeTasks("t" + seed + ".json", tasks);
+            String expected = null;
+            for (String mode : MODES) {
+                CliParityTest.Result result = taskflow(mode, "plan", file.toString(), "--json", "--target", target.id());
+                assertEquals(0, result.exitCode(), mode + ": " + result.stderr());
+                if (expected == null) expected = result.stdout();
+                assertEquals(expected, result.stdout(), "backends differ, seed " + seed);
+            }
+            checkPlan(inScope, Integer.MAX_VALUE, expected, "target, seed " + seed);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static void checkPlan(List<Generated> tasks, int workers, String json, String where) {
         Map<String, Object> plan = (Map<String, Object>) StrictJson.parse(json);
@@ -407,6 +458,21 @@ class TaskFlowEndToEndTest {
         for (List<Map<String, Object>> batch : batches) {
             assertTrue(batch.size() <= workers, where + ": a batch is over the worker limit");
             assertFalse(batch.isEmpty(), where + ": an empty batch");
+            // A batch takes the best-ranked of everything ready: nothing waits needlessly.
+            List<Generated> ready = new ArrayList<>();
+            for (String id : mustRun) {
+                boolean isReady = true;
+                for (String d : byId.get(id).deps()) {
+                    if (byId.get(d).status().matches("todo|doing") && !finished.contains(d)) isReady = false;
+                }
+                if (isReady) ready.add(byId.get(id));
+            }
+            ready.sort(TaskFlowEndToEndTest::rankCompare);
+            List<String> wanted = new ArrayList<>();
+            for (Generated t : ready.subList(0, Math.min(workers, ready.size()))) wanted.add(t.id());
+            List<String> actual = new ArrayList<>();
+            for (Map<String, Object> entry : batch) actual.add((String) entry.get("id"));
+            assertEquals(wanted, actual, where + ": a batch is not the best of what was ready");
             Generated previous = null;
             for (Map<String, Object> entry : batch) {
                 Generated t = byId.get((String) entry.get("id"));
@@ -434,8 +500,26 @@ class TaskFlowEndToEndTest {
         assertEquals(new BigDecimal(hours), plan.get("remainingHours"), where + ": hours");
         assertEquals(new BigDecimal(longestAll), plan.get("criticalHours"), where + ": critical hours");
         Set<String> blockedSeen = new HashSet<>();
-        for (Map<String, Object> b : (List<Map<String, Object>>) plan.get("blocked")) blockedSeen.add((String) b.get("id"));
+        for (Map<String, Object> b : (List<Map<String, Object>>) plan.get("blocked")) {
+            String id = (String) b.get("id");
+            blockedSeen.add(id);
+            // Named: the failed tasks reached through unfinished work, stopping at each.
+            Set<String> causes = new HashSet<>();
+            Set<String> seen = new HashSet<>();
+            List<String> stack = new ArrayList<>(byId.get(id).deps());
+            while (!stack.isEmpty()) {
+                String v = stack.remove(stack.size() - 1);
+                if (!seen.add(v)) continue;
+                if (byId.get(v).status().equals("failed")) causes.add(v);
+                else if (!byId.get(v).status().equals("done")) stack.addAll(byId.get(v).deps());
+            }
+            assertEquals(causes, new HashSet<>((List<String>) b.get("by")), where + ": why " + id + " is blocked");
+        }
         assertEquals(blocked, blockedSeen, where + ": blocked");
+        Set<String> failedSeen = new HashSet<>((List<String>) plan.get("failed"));
+        Set<String> failed = new HashSet<>();
+        for (Generated t : tasks) if (t.status().equals("failed")) failed.add(t.id());
+        assertEquals(failed, failedSeen, where + ": failed");
 
         // The named critical path is a real chain of the length it claims.
         List<String> path = (List<String>) plan.get("criticalPath");
@@ -459,15 +543,17 @@ class TaskFlowEndToEndTest {
     void theOrderOfFilesAndTasksDoesNotChangeTheResult() throws Exception {
         List<Generated> tasks = randomGraph(42, 40, 0.08, false);
         List<Generated> first = tasks.subList(0, 20);
-        List<Generated> second = new ArrayList<>(tasks.subList(20, 40));
+        List<Generated> second = tasks.subList(20, 40);
         Path a = writeTasks("a.json", first);
         Path b = writeTasks("b.json", second);
-        Collections.shuffle(second, new Random(7));
         List<Generated> reshuffled = new ArrayList<>(tasks);
         Collections.shuffle(reshuffled, new Random(9));
         Path single = writeTasks("one.json", reshuffled);
         for (String mode : MODES) {
-            String forward = taskflow(mode, "plan", a.toString(), b.toString()).stdout();
+            CliParityTest.Result forwardRun = taskflow(mode, "plan", a.toString(), b.toString());
+            assertEquals(0, forwardRun.exitCode(), mode + ": " + forwardRun.stderr());
+            String forward = forwardRun.stdout();
+            assertTrue(forward.contains("batch 1:"), mode + ": " + forward);
             assertEquals(forward, taskflow(mode, "plan", b.toString(), a.toString()).stdout(), mode + ": argument order");
             assertEquals(forward, taskflow(mode, "plan", single.toString()).stdout(), mode + ": task order");
             assertEquals(taskflow(mode, "status", a.toString(), b.toString(), "--json").stdout(),
@@ -517,6 +603,7 @@ class TaskFlowEndToEndTest {
             for (List<String> cycle : cycles) {
                 String start = cycle.get(0);
                 assertTrue(starts.add(start), "one cycle per group, seed " + seed);
+                assertTrue(groupLeaders.contains(start), "a cycle starts at its group's smallest id, seed " + seed);
                 assertTrue(start.compareTo(previousStart) > 0, "sorted, seed " + seed);
                 previousStart = start;
                 assertEquals(cycle.get(cycle.size() - 1), start, "closed, seed " + seed);
@@ -525,9 +612,7 @@ class TaskFlowEndToEndTest {
                     assertTrue(reach.get(start).contains(cycle.get(i)) && reach.get(cycle.get(i)).contains(start), "same group");
                 }
             }
-            // A cycle may start after the walk rejoins part-way round, so it names
-            // a member of the group rather than always its leader: count the groups.
-            assertEquals(groupLeaders.size(), cycles.size(), "seed " + seed);
+            assertEquals(groupLeaders, starts, "every group named, seed " + seed);
         }
     }
 

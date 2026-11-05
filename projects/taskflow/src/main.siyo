@@ -19,7 +19,7 @@ imut EXIT_UNREADABLE = 2
 imut EXIT_INVALID = 3
 
 fn fail(code: int, msg: string) {
-    io.eprintln("taskflow: " + msg)
+    io.eprintln("taskflow: " + model.safe(msg))
     os.exit(code)
 }
 
@@ -32,13 +32,13 @@ fn validate(o: Options, p: Project, cycles: Array<Array<string>>) {
     if len(p.problems) + len(cycles) > 0 { os.exit(EXIT_INVALID) }
 }
 
-fn showCycles(o: Options, cycles: Array<Array<string>>) {
+fn showCycles(o: Options, p: Project, cycles: Array<Array<string>>) {
     if o.json {
-        println(report.cyclesJson(cycles))
+        println(report.cyclesJson(p, cycles))
     } else {
-        print(report.cyclesText(cycles))
+        print(report.cyclesText(p, cycles))
     }
-    if len(cycles) > 0 { os.exit(EXIT_INVALID) }
+    if len(p.problems) + len(cycles) > 0 { os.exit(EXIT_INVALID) }
 }
 
 // plan and status cannot say anything true about input that does not validate.
@@ -50,10 +50,10 @@ fn requireValid(p: Project, cycles: Array<Array<string>>) {
 }
 
 fn showPlan(o: Options, p: Project, g: Graph) {
-    if o.target != "" && !p.byId.has(o.target) {
+    if o.hasTarget && !p.byId.has(o.target) {
         fail(EXIT_INVALID, "unknown target task \"" + o.target + "\"")
     }
-    imut pl = plan.build(p.tasks, g, o.workers, o.target)
+    imut pl = plan.build(p.tasks, g, o.workers, if o.hasTarget { o.target } else { "" })
     if o.json {
         println(report.planJson(p.name, pl))
     } else {
@@ -76,7 +76,7 @@ fn execute(o: Options, p: Project) {
     if o.command == "validate" {
         validate(o, p, cycles)
     } else if o.command == "cycles" {
-        showCycles(o, cycles)
+        showCycles(o, p, cycles)
     } else {
         requireValid(p, cycles)
         if o.command == "plan" { showPlan(o, p, g) } else { showStatus(o, p, g) }
@@ -100,7 +100,7 @@ fn main() {
     match cli.parseArgs(os.args()) {
         Help => println(cli.usage()),
         Usage(why) => {
-            io.eprintln("taskflow: " + why)
+            io.eprintln("taskflow: " + model.safe(why))
             io.eprintln(cli.usage())
             os.exit(EXIT_USAGE)
         },

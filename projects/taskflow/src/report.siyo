@@ -5,41 +5,15 @@ import "std/strings"
 import "model"
 import "plan"
 
-fn hex4(n: int) -> string {
-    imut digits = "0123456789abcdef"
-    mut out = ""
-    mut rest = n
-    for mut i = 0 i < 4 i = i + 1 {
-        out = substring(digits, rest % 16, rest % 16 + 1) + out
-        rest = rest / 16
-    }
-    out
-}
-
-// Text comes from a file, and a terminal would obey any control sequence in it,
-// so a text report shows C0 and C1 control characters as escapes.
-pub fn safe(s: string) -> string {
-    imut out = strings.builder()
-    for c in strings.chars(s) {
-        imut code = ord(c)
-        if code < 32 || (code >= 127 && code < 160) {
-            out.append("\\u" + hex4(code))
-        } else {
-            out.append(c)
-        }
-    }
-    toString(out)
-}
-
 fn names(tasks: Array<Task>) -> Array<string> {
     mut result: Array<string> = []
-    for t in tasks { push(result, safe(t.id)) }
+    for t in tasks { push(result, model.safe(t.id)) }
     result
 }
 
 fn safeAll(xs: Array<string>) -> Array<string> {
     mut result: Array<string> = []
-    for x in xs { push(result, safe(x)) }
+    for x in xs { push(result, model.safe(x)) }
     result
 }
 
@@ -52,7 +26,7 @@ fn cycleLine(c: Array<string>) -> string {
 }
 
 pub fn problemText(p: Problem) -> string {
-    safe(p.place) + ": " + safe(p.what)
+    model.safe(p.place) + ": " + model.safe(p.what)
 }
 
 pub fn problemsText(problems: Array<Problem>, cycles: Array<Array<string>>) -> string {
@@ -95,26 +69,25 @@ pub fn validateJson(p: Project, cycles: Array<Array<string>>) -> string {
     })
 }
 
-pub fn cyclesText(cycles: Array<Array<string>>) -> string {
-    if len(cycles) == 0 { return "no cycles\n" }
-    imut out = strings.builder()
-    for c in cycles { out.append("cycle: " + cycleLine(c) + "\n") }
-    toString(out)
+// Saying "no cycles" about input that could not be read would be false.
+pub fn cyclesText(p: Project, cycles: Array<Array<string>>) -> string {
+    if len(p.problems) + len(cycles) == 0 { return "no cycles\n" }
+    problemsText(p.problems, cycles)
 }
 
-pub fn cyclesJson(cycles: Array<Array<string>>) -> string {
-    json.stringify({"cycles": cycles})
+pub fn cyclesJson(p: Project, cycles: Array<Array<string>>) -> string {
+    json.stringify({"cycles": cycles, "problems": problemsJson(p.problems)})
 }
 
 fn titleOf(t: Task) -> string {
-    imut title = if t.title == t.id { "" } else { "  " + safe(t.title) }
-    imut who = if t.owner == "" { "" } else { "  @" + safe(t.owner) }
-    safe(t.id) + " (" + toString(t.estimate) + "h)" + title + who
+    imut title = if t.title == t.id { "" } else { "  " + model.safe(t.title) }
+    imut who = if t.owner == "" { "" } else { "  @" + model.safe(t.owner) }
+    model.safe(t.id) + " (" + toString(t.estimate) + "h)" + title + who
 }
 
 pub fn planText(name: string, pl: Plan) -> string {
     imut out = strings.builder()
-    if name != "" { out.append("plan for " + safe(name) + "\n") }
+    if name != "" { out.append("plan for " + model.safe(name) + "\n") }
     if len(pl.batches) == 0 { out.append("nothing to do\n") }
     mut b = 1
     for batch in pl.batches {
@@ -122,10 +95,14 @@ pub fn planText(name: string, pl: Plan) -> string {
         b += 1
         for t in batch { out.append("  " + titleOf(t) + "\n") }
     }
+    if len(pl.failed) > 0 {
+        out.append("failed:\n")
+        for t in pl.failed { out.append("  " + titleOf(t) + "\n") }
+    }
     if len(pl.blocked) > 0 {
         out.append("blocked:\n")
         for x in pl.blocked {
-            out.append("  " + safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
+            out.append("  " + model.safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
         }
     }
     out.append("remaining: " + toString(pl.remaining) + "h\n")
@@ -164,6 +141,7 @@ pub fn planJson(name: string, pl: Plan) -> string {
     json.stringify({
         "project": name,
         "batches": batches,
+        "failed": ids(pl.failed),
         "blocked": blockedJson(pl.blocked),
         "remainingHours": pl.remaining,
         "criticalPath": ids(pl.critical),
@@ -189,7 +167,7 @@ pub struct Status {
 
 pub fn statusText(s: Status) -> string {
     imut out = strings.builder()
-    if s.name != "" { out.append("status of " + safe(s.name) + "\n") }
+    if s.name != "" { out.append("status of " + model.safe(s.name) + "\n") }
     out.append(count(s.total, "task", "tasks") + ", " + toString(s.percentDone) + "% done\n")
     for key in ["done", "doing", "todo", "failed"] {
         out.append("  " + strings.padRight(key, 7, " ") + toString(s.counts[key]) + "\n")
@@ -201,13 +179,13 @@ pub fn statusText(s: Status) -> string {
     if len(s.blocked) > 0 {
         out.append("blocked:\n")
         for x in s.blocked {
-            out.append("  " + safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
+            out.append("  " + model.safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
         }
     }
     if len(s.critical) > 0 {
         out.append("critical path (" + toString(s.criticalHours) + "h): " + strings.join(names(s.critical), " -> ") + "\n")
     }
-    for w in s.warnings { out.append("warning: " + safe(w) + "\n") }
+    for w in s.warnings { out.append("warning: " + model.safe(w) + "\n") }
     toString(out)
 }
 

@@ -8,6 +8,7 @@ pub struct Blocked { id: string, by: Array<string> }
 
 pub struct Plan {
     batches: Array<Array<Task>>,   // what can run together, in order
+    failed: Array<Task>,           // failed, and in the plan's scope
     blocked: Array<Blocked>,       // cannot run: a task they need failed
     remaining: long,               // hours across the batches
     critical: Array<Task>,         // the longest chain of remaining work
@@ -38,7 +39,8 @@ fn ranks(tasks: Array<Task>, order: Array<int>) -> Map<int, int> {
 fn waiting(status: string) -> bool { status == "todo" || status == "doing" }
 
 // A task is blocked when something it needs failed, or is itself blocked. The
-// tasks named are the failed ones at the root of it.
+// tasks named are the failed ones it waits on: a failure stops at the first
+// failed task, since nothing can be said about what that task would have needed.
 fn findBlocked(tasks: Array<Task>, g: Graph, inPlan: Set<int>) -> Map<int, Set<string>> {
     mut causes: Map<int, Set<string>> = {}
     mut stack: Array<int> = []
@@ -105,7 +107,12 @@ fn longestChain(tasks: Array<Task>, g: Graph, topo: Array<int>, rank: Map<int, i
 pub fn build(tasks: Array<Task>, g: Graph, workers: int, target: string) -> Plan {
     mut inPlan: Set<int> = #{}
     if target != "" {
-        inPlan = graph.closure(g, g.index[target])
+        // Work already done needs nothing further to be done first.
+        mut finished: Set<int> = #{}
+        for mut d = 0 d < len(tasks) d = d + 1 {
+            if tasks[d].status == "done" { finished.add(d) }
+        }
+        inPlan = graph.closure(g, g.index[target], finished)
     } else {
         for mut i = 0 i < len(tasks) i = i + 1 { inPlan.add(i) }
     }
@@ -130,7 +137,7 @@ pub fn build(tasks: Array<Task>, g: Graph, workers: int, target: string) -> Plan
         if count == 0 { heap.insert(ready, rank[v]) }
     }
 
-    imut plan = Plan { batches: [], blocked: [], remaining: 0, critical: [], criticalHours: 0 }
+    imut plan = Plan { batches: [], failed: [], blocked: [], remaining: 0, critical: [], criticalHours: 0 }
     mut topo: Array<int> = []
     while len(ready) > 0 {
         mut batch: Array<Task> = []
@@ -156,6 +163,7 @@ pub fn build(tasks: Array<Task>, g: Graph, workers: int, target: string) -> Plan
 
     mut j = 0
     for t in tasks {
+        if t.status == "failed" && inPlan.has(j) { push(plan.failed, t) }
         if causes.has(j) {
             mut by: Array<string> = []
             for name in causes[j] { push(by, name) }

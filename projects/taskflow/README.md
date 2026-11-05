@@ -31,6 +31,8 @@ batch 2:
   ui (13h)  Web UI  @noor
 batch 3:
   e2e (4h)  End-to-end suite
+failed:
+  auth (5h)  Sign-in  @sam
 blocked:
   admin by auth
   launch by auth
@@ -69,27 +71,38 @@ an error, since a typo like `dep` would otherwise produce a wrong plan silently.
 | Command | Output | Exit |
 |---|---|---|
 | `validate F...` | every problem and cycle, or `ok: N tasks, M dependencies` | 0 or 3 |
-| `cycles F...` | the dependency cycles | 0, or 3 if any |
-| `plan F... [--workers N] [--target ID]` | batches, blocked tasks, hours, critical path | 0 or 3 |
+| `cycles F...` | the dependency cycles, and any problems that stop the answer being complete | 0, or 3 if any |
+| `plan F... [--workers N] [--target ID]` | batches, failed and blocked tasks, hours, critical path | 0 or 3 |
 | `status F...` | counts, progress, running, ready, failed, blocked, warnings | 0 or 3 |
 
 Every command takes `--json`. Exit codes: 0 ok, 1 usage error, 2 a file cannot be
 read, 3 invalid input. Malformed JSON counts as invalid input and is reported with
 the other files' problems. `plan` and `status` print nothing on invalid input but
-the problems, on standard error.
+the problems, on standard error. With `--json` a report is one JSON document on
+standard output, and `validate` and `cycles` still produce it for invalid input;
+usage errors, unreadable files and an unknown target are text on standard error,
+with nothing on standard output.
 
 ## What the plan means
 
 - `done` satisfies a dependency. `failed` does not run, and blocks everything
-  downstream, naming the failed tasks responsible. A `done` task stops a failure
-  spreading through it: the work happened.
+  downstream, naming the failed tasks each one waits on. A `done` task stops a
+  failure spreading through it: the work happened.
+- `--target ID` plans what ID needs and ID itself. It does not look through a `done`
+  task, whose prerequisites are not needed any more. An id starting with `--` cannot
+  be named as a target.
 - A batch holds tasks that can run together, at most `--workers` of them.
 - The output is deterministic: tasks are ordered `doing` first, then higher
-  priority, then smaller id, and neither file order nor task order changes it.
-- A cycle starts at its smallest id and takes the smallest id that stays in its
-  strongly connected group. One cycle is named per group.
-- The critical path is the longest remaining chain by hours; a tie goes to the
-  task that would run first.
+  priority, then smaller id. For valid input neither file order nor task order
+  changes anything.
+- A report of invalid input reads files in sorted order and each file top to bottom,
+  so what it says about a file does not depend on how the files were listed. The
+  first of two tasks with one id is the one kept; the other's fields are checked
+  but its dependencies are dropped, so fix a duplicate and validate again.
+- A cycle starts at its smallest id and is the shortest way back to it, smaller ids
+  first. One cycle is named per strongly connected group.
+- The critical path is the longest remaining chain by hours. A tie goes to the end
+  task earlier in that order, then step by step to the earlier predecessor.
 - `status` warns about a `done` or `doing` task whose dependencies are unfinished.
 
 Text output escapes control characters from the input, so a hostile task title
@@ -120,3 +133,5 @@ against rules worked out independently of the application.
 
 Graph depth is bounded by memory, not the call stack. A chain of 100,000 tasks
 takes about 20 s compiled and about 60 s interpreted; 10,000 takes a few seconds.
+At the JVM's default heap a file of around 1.5 million tasks runs out of memory,
+with a Java stack trace and exit status 1: raise it with `-Xmx`.

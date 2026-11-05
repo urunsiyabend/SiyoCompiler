@@ -42,21 +42,32 @@ fn overlappingLoopsNameOneCycle() {
 }
 
 fn aWalkMayRejoinPartWayRound() {
-    // a -> b -> c -> b, with a reachable from c only through d.
-    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\", \"deps\": [\"b\", \"d\"]}, {\"id\": \"d\", \"deps\": [\"a\"]}]"), "b>c>b", "rejoin")
+    // a -> b -> c -> b, with a reachable from c only through d. Walking by the
+    // smallest id alone would name b>c>b, which does not start at the smallest.
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\", \"deps\": [\"b\", \"d\"]}, {\"id\": \"d\", \"deps\": [\"a\"]}]"), "a>b>c>d>a", "rejoin")
 }
 
 fn closureFollowsEveryPath() {
     imut p = helpers.project("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\"}, {\"id\": \"z\"}]")
     imut g = graph.build(p.tasks)
-    imut seen = graph.closure(g, g.index["b"])
+    imut seen = graph.closure(g, g.index["b"], #{})
     testing.assertEq(toString(len(seen)), "2", "b and c")
     testing.assert(seen.has(g.index["c"]), "c")
     testing.assert(!seen.has(g.index["a"]), "not a")
 }
 
+fn closureStopsAtWhatItIsTold() {
+    imut p = helpers.project("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\"}]")
+    imut g = graph.build(p.tasks)
+    mut stops: Set<int> = #{}
+    stops.add(g.index["b"])
+    imut seen = graph.closure(g, g.index["a"], stops)
+    testing.assert(seen.has(g.index["b"]), "b is counted")
+    testing.assert(!seen.has(g.index["c"]), "c is behind it")
+}
+
 fn main() {
-    testing.run("graph", [anAcyclicGraphHasNoCycles, aDiamondIsNotACycle, aSelfDependencyIsACycle,
+    testing.run("graph", [closureStopsAtWhatItIsTold, anAcyclicGraphHasNoCycles, aDiamondIsNotACycle, aSelfDependencyIsACycle,
         aCycleStartsAtItsSmallestId, separateCyclesAreEachReported, aTaskLeadingIntoACycleIsNotPartOfIt,
         overlappingLoopsNameOneCycle, aWalkMayRejoinPartWayRound, closureFollowsEveryPath])
 }

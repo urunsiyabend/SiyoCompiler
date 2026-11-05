@@ -33,6 +33,12 @@ fn defaultsAreNoLimitAndNoTarget() {
     testing.assert(!o.json, "text by default")
 }
 
+fn anEmptyTargetIsStillATarget() {
+    imut o = opts(["plan", "a.json", "--target", ""])
+    testing.assert(o.hasTarget, "asked for")
+    testing.assertEq(o.target, "", "empty")
+}
+
 fn helpIsNotAnError() {
     testing.assertEq(usageOf(["help"]), "help", "help")
     testing.assertEq(usageOf(["--help"]), "help", "--help")
@@ -62,6 +68,6 @@ fn aFlagIsNotTakenAsAValue() {
 }
 
 fn main() {
-    testing.run("cli", [parsesAPlanWithItsOptions, defaultsAreNoLimitAndNoTarget, helpIsNotAnError,
+    testing.run("cli", [anEmptyTargetIsStillATarget, parsesAPlanWithItsOptions, defaultsAreNoLimitAndNoTarget, helpIsNotAnError,
                         usageErrors, workersMustBeAPositiveInteger, aFlagIsNotTakenAsAValue])
 }

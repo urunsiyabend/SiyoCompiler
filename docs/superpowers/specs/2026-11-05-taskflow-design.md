@@ -34,7 +34,7 @@ typo such as `dep` would otherwise produce a wrong plan silently.
 | Command | Does | Exit |
 |---|---|---|
 | `validate F...` | every problem and every cycle, or `ok` | 0, or 3 if invalid |
-| `cycles F...` | the dependency cycles only | 0, or 3 if any |
+| `cycles F...` | the dependency cycles, and any problems that stop the answer being complete | 0, or 3 if any |
 | `plan F... [--workers N] [--target ID]` | batches, blocked tasks, critical path | 0, or 3 if invalid |
 | `status F...` | counts, progress, running, ready, failed, blocked, warnings | 0, or 3 if invalid |
 
@@ -44,19 +44,21 @@ is invalid input (3), and is reported with the other files' problems.
 ## Determinism rules
 
 - Tasks are sorted by id, so file order and argument order do not change output.
-- A problem list is sorted by place, then text.
+- Files are read in sorted order, and each from top to bottom, so a report of invalid
+  input does not depend on the order files were listed in. Tasks and dependencies
+  are sorted before they are resolved.
 - A batch is ordered: `doing` first, then higher priority, then smaller id.
-- A cycle starts at its smallest id and always takes the smallest id that stays
-  in its strongly connected group. Cycles are sorted by first id.
+- A cycle starts at its smallest id and is the shortest way back to it, within its
+  strongly connected group, smaller ids first. Cycles are sorted by first id.
 - A critical path tie goes to the smaller rank.
 - No wall-clock time or environment appears in output.
 
 ## Semantics
 
 `done` satisfies a dependency. `failed` does not run and blocks everything
-downstream, naming the failed roots. A `done` task with an unfinished dependency
+downstream, naming the failed tasks each one waits on. A `done` task with an unfinished dependency
 is a warning in `status`, not an error: the history happened. `--target` limits a
-plan to what the target needs. Text output escapes control characters from input;
+plan to what the target needs, not looking through `done` tasks. Text output escapes control characters from input;
 JSON output is escaped by `json.stringify`.
 
 ## Modules

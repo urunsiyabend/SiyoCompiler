@@ -20,6 +20,25 @@ fn nullReadsAsAbsent() {
     testing.assertEq(helpers.problemsOf(p), "", "no problems")
 }
 
+fn nullSectionsReadAsAbsent() {
+    imut p = helpers.project("{\"tasks\": null, \"dependencies\": null, \"project\": null}")
+    testing.assertEq(helpers.problemsOf(p), "", "no problems")
+}
+
+fn everyFieldOfABadTaskIsChecked() {
+    imut p = helpers.project("[{\"id\": \"  \", \"status\": \"x\", \"deps\": 3}]")
+    testing.assertEq(helpers.problemsOf(p),
+        "t.json: tasks[0]: a task needs a non-empty \"id\"\n"
+        + "t.json: tasks[0]: \"status\" must be todo, doing, done or failed, got \"x\"\n"
+        + "t.json: tasks[0]: \"deps\" must be an array of task ids, got int\n", "all of it")
+}
+
+fn unknownDependenciesAreReportedInSortedOrder() {
+    imut one = helpers.project("[{\"id\": \"b\", \"deps\": [\"y\", \"x\"]}, {\"id\": \"a\", \"deps\": [\"z\"]}]")
+    imut two = helpers.project("[{\"id\": \"a\", \"deps\": [\"z\"]}, {\"id\": \"b\", \"deps\": [\"x\", \"y\"]}]")
+    testing.assertEq(helpers.problemsOf(one), helpers.problemsOf(two), "same report")
+}
+
 fn tasksComeOutSortedById() {
     imut p = helpers.project("[{\"id\": \"b\"}, {\"id\": \"C\"}, {\"id\": \"a\"}]")
     testing.assertEq(p.tasks[0].id + p.tasks[1].id + p.tasks[2].id, "Cab", "by code unit")
@@ -96,7 +115,7 @@ fn anUnreadableFileIsNamed() {
 }
 
 fn main() {
-    testing.run("loader", [appliesDefaults, nullReadsAsAbsent, tasksComeOutSortedById,
+    testing.run("loader", [appliesDefaults, nullReadsAsAbsent, nullSectionsReadAsAbsent, everyFieldOfABadTaskIsChecked, unknownDependenciesAreReportedInSortedOrder, tasksComeOutSortedById,
         aDependencySectionJoinsTheTasksOwnList, dependenciesMayLiveInAnotherFile, reportsAProblemAndKeepsChecking,
         anUnknownFieldIsAProblem, numbersAreChecked, unknownAndRepeatedDependencies, aDuplicateIdNamesTheOtherFile,
         malformedJsonIsAProblemNotACrash, aFileMayNotBeAScalar, anUnreadableFileIsNamed])

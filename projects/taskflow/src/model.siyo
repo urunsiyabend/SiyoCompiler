@@ -1,5 +1,7 @@
 // What every other module talks about: tasks, and what can be wrong with them.
 
+import "std/strings"
+
 pub struct Task {
     id: string,
     title: string,
@@ -29,4 +31,30 @@ pub fn problem(place: string, what: string) -> Problem {
 
 pub fn isStatus(s: string) -> bool {
     s == "todo" || s == "doing" || s == "done" || s == "failed"
+}
+
+fn hex4(n: int) -> string {
+    imut digits = "0123456789abcdef"
+    mut out = ""
+    mut rest = n
+    for mut i = 0 i < 4 i = i + 1 {
+        out = substring(digits, rest % 16, rest % 16 + 1) + out
+        rest = rest / 16
+    }
+    out
+}
+
+// Text comes from a file, and a terminal would obey any control sequence in it,
+// so a text report shows C0 and C1 control characters as escapes.
+pub fn safe(s: string) -> string {
+    imut out = strings.builder()
+    for c in strings.chars(s) {
+        imut code = ord(c)
+        if code < 32 || (code >= 127 && code < 160) {
+            out.append("\\u" + hex4(code))
+        } else {
+            out.append(c)
+        }
+    }
+    toString(out)
 }

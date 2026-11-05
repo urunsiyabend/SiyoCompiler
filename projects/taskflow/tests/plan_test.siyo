@@ -55,6 +55,18 @@ fn aTargetLimitsThePlan() {
     testing.assertEq(toString(len(pl.blocked)), "0", "failures elsewhere do not show")
 }
 
+fn aTargetDoesNotLookThroughDoneWork() {
+    imut text = "[{\"id\": \"x\"}, {\"id\": \"d\", \"status\": \"done\", \"deps\": [\"x\"]}, {\"id\": \"t\", \"deps\": [\"d\"]}]"
+    planIs(text, 0, "t", "t", "x is not needed")
+}
+
+fn aFailedTargetSaysSo() {
+    imut pl = helpers.planOf("[{\"id\": \"f\", \"status\": \"failed\"}, {\"id\": \"g\", \"status\": \"failed\"}]", 0, "f")
+    testing.assertEq(toString(len(pl.batches)), "0", "nothing runs")
+    testing.assertEq(toString(len(pl.failed)), "1", "only f is in scope")
+    testing.assertEq(pl.failed[0].id, "f", "named")
+}
+
 fn theCriticalPathIsTheLongestByHours() {
     imut pl = helpers.planOf("[{\"id\": \"a\", \"estimate\": 1}, {\"id\": \"b\", \"estimate\": 5}, {\"id\": \"c\", \"estimate\": 1, \"deps\": [\"a\", \"b\"]}, {\"id\": \"d\", \"estimate\": 2, \"deps\": [\"a\"]}]", 0, "")
     testing.assertEq(toString(pl.criticalHours), "6", "b then c")
@@ -81,5 +93,6 @@ fn main() {
     testing.run("plan", [dependenciesComeFirst, priorityThenIdOrdersABatch, runningWorkComesFirst,
         workersCapABatchAndKeepTheOrder, doneWorkSatisfiesADependency, nothingLeftIsAnEmptyPlan,
         aFailedTaskBlocksWhatFollows, aDoneTaskStopsAFailureSpreading, aTargetLimitsThePlan,
+        aTargetDoesNotLookThroughDoneWork, aFailedTargetSaysSo,
         theCriticalPathIsTheLongestByHours, aCriticalPathIgnoresWorkAlreadyDone, hoursDoNotOverflowAnInt])
 }

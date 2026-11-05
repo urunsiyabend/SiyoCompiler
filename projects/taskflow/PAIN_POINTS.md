@@ -36,6 +36,13 @@ and, for the application as a whole, `TaskFlowEndToEndTest.java`.
 | P21 | stdlib gap | a valid integer wider than a long failed with `For input string`; a byte order mark was rejected; an error in a long file gave only an offset | `anIntegerTooLongForALongIsAFloat`, `aByteOrderMarkIsIgnored`, `aMalformedDocumentNamesItsLineAndColumn` |
 | P22 | stdlib bug | `json.stringify` wrote a struct as the quoted text of `toString`, and a set likewise | `stringifyWritesAStructByItsFields` |
 | P23 | performance | `io.readFile` and `strings.join` concatenated in a loop: 3.6 MB took 1m48s. `readFile` also dropped leading blank lines | `readingAndJoiningALargeTextIsNotQuadratic`, `readFileKeepsLeadingBlankLines` |
+| P25 | regression caught in review | fixing P1 removed the leak that nested closures, spawns and nested `fn`s were reading outer locals through: interpreted they read `null`. Capture is now transitive, and a local of a caller is found on the call stack. Compiled, a doubly nested closure is still an internal compiler error (D10). | `aNestedClosureReadsAVariableItsParentNeverNamed`, `aNestedClosureThatOutlivesItsFunctionKeepsItsCapture`, `aNestedClosureWritesThroughToTheOuterVariable`, `aFunctionDeclaredInsideAFunctionReadsItsLocals` |
+| P26 | VerifyError / parity | a value-returning function whose tail arm only loops or falls off the end failed verification; `if a { 1 } else { return 2 }` returned a default compiled | `aTailArmThatOnlyLoopsFallsThroughLikeAnyOtherPath`, `anIfArmMayReturnBesideAValue`, `anIfThatReturnsInOneArmMayFallThroughInTheOther` |
+| P27 | silent wrong result | `fn a(x: int) -> map { if x == 1 { {"k": 1} } else { {} } }` returned null compiled and the map interpreted. A value beside an arm that falls off the end is now rejected | `aValueBesideAnArmThatFallsOffTheEndIsRejected` |
+| P28 | crash | an expression with no value used as one, such as `println(if a { imut b = 1 } else { imut c = 2 })`, failed verification or an internal error. It is now reported | `anExpressionWithNoValueIsRejectedWhereOneIsNeeded` |
+| P29 | parity crash | `fn g() -> float[] { return [1, 2] }` kept ints: compiled ClassCastException on read. A literal widens to its declared element type, and a compiled read of a `long` or `float` tolerates a narrower number from an erased container | `aLiteralWidensToItsDeclaredElementType`, `aSetOfFloatsAcceptsAnIntAndReadsAFloat` |
+| P30 | diagnostics | `break` or `continue` in a lambda or spawn inside a loop was accepted: an internal error compiled, a jump out of the closure interpreted | `breakCannotLeaveALambdaOrASpawn` |
+| P31 | tooling | `siyoc run missing.siyo` printed a Java stack trace | `CliParityTest.aMissingSourceFileIsReportedWithoutAStackTrace` |
 | P24 | missing stdlib | `parseInt` answers 0 for anything unreadable, so `--workers abc` and `--workers 0` looked alike: `strings.isInt` | `isIntTellsWhatParseIntCanRead` |
 
 ### Reproducers
@@ -76,7 +83,7 @@ fn main() {
 fn f(n: int) -> int { match n { 1 => { if n == 1 { return 1 }
                                        effect() }, _ => 2 } }
 
-// P4 — interpreted -1294967296
+// P4 — interpreted -294967296
 fn main() {
     mut h: long = 0
     for i in [1000000000, 1000000000, 1000000000, 1000000000] { h += i }
@@ -141,8 +148,8 @@ fn main() { imut a = [1, 2]
 //   [1, 2]                   invalid: expected an object
 //   {"a": 01}                accepted
 //   {"a": 1, "a": 2}         accepted, {"a": 2}
-//   "[" repeated 200,000     invalid: StackOverflowError
-//   123456789012345678901    invalid: For input string
+//   {"a": then "[" 200,000   invalid: StackOverflowError
+//   {"a": 123456789012345678901}  invalid: For input string
 // P22 — printed "T { id: a }" with its quotes
 import "std/json"
 struct T { id: string }
@@ -167,7 +174,13 @@ fn main() { println(toString(parseInt("0")))
 |---------|-----|------|
 | Hours were `int`: 3,000 tasks of 1,000,000 hours came to a negative total. | Hours are `long`. | `hoursDoNotOverflowAnInt`, `estimatesThatOverflowAnIntStillAddUp` |
 | Control characters were escaped with a decimal code, so ESC showed as `'`, and C1 controls such as U+009B reached the terminal. | Hexadecimal, and C1 is escaped. | `controlCharactersBecomeEscapes`, `textOutputCarriesNoControlCharacterFromTheInput` |
-| Messages depended on the order files were listed in. | Files are read in sorted order. | `theOrderOfFilesAndTasksDoesNotChangeTheResult`, golden `validate_clash.txt` |
+| Messages depended on the order files were listed in, and on task order. | Files are read in sorted order; tasks and their dependencies are sorted before they are checked. | `theOrderOfFilesAndTasksDoesNotChangeTheResult`, `unknownDependenciesAreReportedInSortedOrder`, golden `validate_clash.txt` |
+| `cycles` said `no cycles`, exit 0, for malformed input. | It reports the problems and exits 3. | golden `cycles_malformed.txt`, `cycles_malformed.json` |
+| `--target` walked through `done` tasks, planning work nobody needed. | The walk stops at them. | `aTargetDoesNotLookThroughDoneWork`, `generatedTargetPlansObeyEveryRule` |
+| `--target ""` silently planned everything; a failed target printed `nothing to do`. | It is an unknown target; plans list the failed tasks in scope. | `anEmptyTargetIsStillATarget`, `anUnknownTargetIsInvalidInput`, `aFailedTargetSaysSo` |
+| A cycle could start part-way round a group, which the README ruled out. | Search from the smallest id back to itself. | `aWalkMayRejoinPartWayRound`, `generatedCyclesMatchAnIndependentSearch` |
+| Arguments and paths reached standard error unescaped. | Every error goes through `model.safe`. | `errorMessagesCarryNoControlCharacters` |
+| `{"tasks": null}` was an error, though `null` reads as absent everywhere else. A bad `id` hid the task's other problems. Whitespace was a valid id. | All fixed in the loader. | `nullSectionsReadAsAbsent`, `everyFieldOfABadTaskIsChecked` |
 
 ## A change tried and withdrawn
 
@@ -192,4 +205,7 @@ depth comes from untrusted input.
 | D6 | tooling | An uncaught `throw` prints a Java stack trace, a different one per backend. Exit status and message agree. | A proper Siyo stack trace is its own feature. | Every failure is caught and reported by `main`. |
 | D7 | type rule | `imut xs: object[] = [1, "a"]` is still rejected (LogScope D3). | Not needed: reports are built with `push`. | `push` into an `object[]`. |
 | D8 | language rule | `parseInt("12x")` still answers 0. | Changing it would alter existing programs; `strings.isInt` (P24) asks first. | `strings.isInt`. |
-| D9 | output | Column padding counts UTF-16 units, and `len("😀")` is 2. JSON output leaves C1 controls raw, which RFC 8259 allows. | Display width is a Unicode problem of its own. | Only fixed status names are padded. JSON is for programs. |
+| D9 | output | Column padding counts UTF-16 units, and `len("😀")` is 2. JSON output leaves C1 controls raw, which RFC 8259 allows. A lone surrogate prints as `?`. Invalid UTF-8 decodes to U+FFFD, so two different bad ids can look like a duplicate. Under `LC_ALL=C` the JVM cannot decode a non-ASCII argument. | Display width and encoding policy are problems of their own. | Only fixed status names are padded. JSON is for programs. |
+| D10 | internal error | Compiled, a closure nested in a closure, or a `fn` declared in a `fn` that reads its locals, is an internal compiler error, located and reported. Interpreted they work. Also in 0.8.0. | Needs closure conversion in the emitter. | TaskFlow does not nest closures. |
+| D11 | type rule | A literal that contradicts its annotation, `imut m: Map<int, string> = {"1": "a"}`, is not rejected; compiled, walking its keys fails on the cast, interpreted it prints. | A type check of literals against generic annotations is a feature of its own. | Not applicable. |
+| D12 | resources | Out of memory is a Java stack trace and exit status 1. | Only heap exhaustion reaches it; a Siyo `catch` should not pretend to recover. | Documented in the README. |

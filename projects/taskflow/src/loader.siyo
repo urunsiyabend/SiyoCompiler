@@ -106,10 +106,7 @@ fn addTask(b: Builder, raw: object, file: string, place: string) {
     imut m: map = raw
     checkKnownFields(b, m, ["id", "title", "status", "priority", "estimate", "owner", "deps"], place)
     imut id = textField(b, m, "id", "", place)
-    if id == "" {
-        report(b, place, "a task needs a non-empty \"id\"")
-        return
-    }
+    if trim(id) == "" { report(b, place, "a task needs a non-empty \"id\"") }
     imut status = textField(b, m, "status", "todo", place)
     if !model.isStatus(status) {
         report(b, place, "\"status\" must be todo, doing, done or failed, got \"" + status + "\"")
@@ -124,6 +121,7 @@ fn addTask(b: Builder, raw: object, file: string, place: string) {
         deps: idList(b, m, "deps", place),
         source: file
     }
+    if trim(id) == "" { return }
     if b.byId.has(id) {
         report(b, place, "duplicate task id \"" + id + "\", already declared in " + b.byId[id].source)
         return
@@ -149,11 +147,10 @@ fn addDependencies(b: Builder, raw: object, place: string) {
         imut m: map = entry
         checkKnownFields(b, m, ["task", "needs"], where)
         imut task = textField(b, m, "task", "", where)
-        if task == "" {
-            report(b, where, "a dependency needs a non-empty \"task\"")
-            continue
-        }
-        for need in idList(b, m, "needs", where) {
+        if trim(task) == "" { report(b, where, "a dependency needs a non-empty \"task\"") }
+        imut needs = idList(b, m, "needs", where)
+        if trim(task) == "" { continue }
+        for need in needs {
             push(b.edges, Edge { task: task, needs: need, place: where })
         }
     }
@@ -183,8 +180,8 @@ fn addObject(b: Builder, m: map, file: string) {
             b.nameFrom = file
         }
     }
-    if m.has("tasks") { addTasks(b, m["tasks"], file, file + ": tasks") }
-    if m.has("dependencies") { addDependencies(b, m["dependencies"], file + ": dependencies") }
+    if typeOf(m["tasks"]) != "null" { addTasks(b, m["tasks"], file, file + ": tasks") }
+    if typeOf(m["dependencies"]) != "null" { addDependencies(b, m["dependencies"], file + ": dependencies") }
 }
 
 fn addFile(b: Builder, file: string, text: string) {
@@ -203,26 +200,39 @@ fn addFile(b: Builder, file: string, text: string) {
     }
 }
 
-// Every dependency points at a task that exists, and a dependency section's
-// edges join the task's own list without repeating one.
+fn byText(x: string, y: string) -> int {
+    if x < y { -1 } else if x > y { 1 } else { 0 }
+}
+
+// A dependency section's edges join the task's own list without repeating one,
+// and every dependency must point at a task that exists. Tasks and their
+// dependencies are sorted first, so these reports do not depend on input order.
 fn resolve(b: Builder) {
+    mut known: Map<string, Set<string>> = {}
     for e in b.edges {
         if !b.byId.has(e.task) {
             report(b, e.place, "unknown task \"" + e.task + "\"")
             continue
         }
         imut task = b.byId[e.task]
-        mut already = false
-        for d in task.deps { if d == e.needs { already = true } }
-        if !already { push(task.deps, e.needs) }
+        if !known.has(e.task) {
+            mut seen: Set<string> = #{}
+            for d in task.deps { seen.add(d) }
+            known[e.task] = seen
+        }
+        if !known[e.task].has(e.needs) {
+            known[e.task].add(e.needs)
+            push(task.deps, e.needs)
+        }
     }
+    sort(b.tasks, fn(x: Task, y: Task) -> int { byText(x.id, y.id) })
     for t in b.tasks {
+        sort(t.deps, fn(x: string, y: string) -> int { byText(x, y) })
         for d in t.deps {
             if !b.byId.has(d) {
                 report(b, t.source + ": task \"" + t.id + "\"", "depends on unknown task \"" + d + "\"")
             }
         }
-        sort(t.deps, fn(x: string, y: string) -> int { if x < y { -1 } else if x > y { 1 } else { 0 } })
     }
 }
 
@@ -231,7 +241,6 @@ pub fn assemble(names: string[], texts: string[]) -> Project {
     imut b = Builder { name: "", nameFrom: "", tasks: [], byId: {}, problems: [], edges: [] }
     for mut i = 0 i < len(names) i = i + 1 { addFile(b, names[i], texts[i]) }
     resolve(b)
-    sort(b.tasks, fn(x: Task, y: Task) -> int { if x.id < y.id { -1 } else if x.id > y.id { 1 } else { 0 } })
     Project { name: b.name, tasks: b.tasks, byId: b.byId, problems: b.problems }
 }
 
@@ -240,7 +249,7 @@ pub fn assemble(names: string[], texts: string[]) -> Project {
 pub fn load(paths: string[]) -> Loaded {
     mut ordered: string[] = []
     for p in paths { push(ordered, p) }
-    sort(ordered, fn(x: string, y: string) -> int { if x < y { -1 } else if x > y { 1 } else { 0 } })
+    sort(ordered, fn(x: string, y: string) -> int { byText(x, y) })
     mut texts: string[] = []
     for p in ordered {
         try {

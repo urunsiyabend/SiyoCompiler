@@ -7,7 +7,8 @@ pub struct Options {
     files: string[],
     json: bool,
     workers: int,
-    target: string
+    target: string,
+    hasTarget: bool
 }
 
 pub type Parsed = Opts(Options) | Usage(string) | Help
@@ -45,6 +46,7 @@ pub fn parseArgs(args: string[]) -> Parsed {
     mut asJson = false
     mut workers = 0
     mut target = ""
+    mut hasTarget = false
     mut i = 1
     while i < len(args) {
         imut a = args[i]
@@ -58,6 +60,7 @@ pub fn parseArgs(args: string[]) -> Parsed {
             i += 1
             if a == "--target" {
                 target = value
+                hasTarget = true
             } else {
                 if !strings.isInt(value) || parseInt(value) < 1 {
                     return Usage("--workers needs a positive integer, got '" + value + "'")
@@ -71,5 +74,5 @@ pub fn parseArgs(args: string[]) -> Parsed {
         }
     }
     if len(files) == 0 { return Usage(command + " needs at least one file") }
-    Opts(Options { command: command, files: files, json: asJson, workers: workers, target: target })
+    Opts(Options { command: command, files: files, json: asJson, workers: workers, target: target, hasTarget: hasTarget })
 }
