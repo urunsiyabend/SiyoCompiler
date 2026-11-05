@@ -168,9 +168,28 @@ changes some of these. `direct_map_null` (a missing key through a generic
   on both backends. A lambda's declared return is checked the same way
   (`aLambdasDeclaredReturnIsCheckedOnBothBackendsButNotAnActorsMethod`).
 
-  An actor's method is left unchecked, as in 0.9.0. A failed check there ended
-  the method silently, so the interpreted caller waited forever. Compiled, these
-  programs fail to verify, as they did in 0.9.0.
+  An actor's method is left unchecked when interpreted, as in 0.9.0, where a
+  failed check would end the method silently and leave the caller waiting.
+  Compiled, a method declared to return one type that returns an erased value
+  of another compiles; its cast fails in the actor's mailbox, and the compiled
+  caller is left waiting. 0.9.0 and both intermediate snapshots behave exactly
+  the same (final-gate `actor_bad_return`, `actor_nested_bad_return`). It is an
+  inherited split, recorded here; actor runtime error reporting is out of this
+  release's scope.
+
+  The final gate found one more path to a generic struct's argument. A
+  `Box<T>` getter returning an array or map, `g(b: Box<T>) -> T` or
+  `h(b: Box<Array<T>>) -> Array<T>` given a `Box<Array<float>>`, knew the result
+  type, but the element type was lost, so `v[0] * 2` raised compiled and gave
+  `3.0` interpreted. A call bound through a generic struct argument now gives
+  its elements that type. So does an alias of its result, and nothing else:
+  plain generic functions over numbers (`keep([1.5])`) are erased as in 0.9.0.
+  A `Box` made by a lambda declared to return one
+  (`fn(x: float) -> Box<Array<float>>`) carries the type the same way: the
+  lambda's signature keeps a generic struct's return name, and a call through
+  it names its result. Tested by
+  `aBoxGetterReturnsItsArgumentsElementsMapsAndScalars` and
+  `aBoxMadeByALambdaKeepsItsArgumentForAGetter`.
 - **Security: `io.writeNew` could delete someone else's file.** When a write
   failed, it deleted the path by name. If the file it created had been renamed
   aside, that deleted whatever another process had put at the path since. The

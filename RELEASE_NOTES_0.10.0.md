@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,878 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,880 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -133,7 +133,12 @@ A generic struct's type argument also survives:
 A value returned from a function or lambda declaring a type is checked by the
 interpreter as the compiled return cast checks it, so a `Box<T>` function
 returning an erased string fails on both backends. An actor's method is left
-as 0.9.0 had it.
+as 0.9.0 had it: compiled, a method returning an erased value of the wrong type
+fails its cast in the actor's mailbox and leaves the caller waiting, exactly as
+in 0.9.0. A `Box<T>` getter (`g(b: Box<T>) -> T`, `-> Array<T>`) gives an
+array's or map's element type from the struct's argument, whether the `Box`
+was written, inferred, or made by a lambda declared to return one, and an alias
+of its result keeps it.
 
 The interpreter's checked reads also change some of 0.9.0's own divergences.
 Where 0.9.0 already split by backend, because an element or value read at a
