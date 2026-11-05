@@ -68,8 +68,24 @@ fn aProfileRanksFrequentValuesThenByValue() {
     }
 }
 
+fn tinyFloatsAreSeparateGroupsAndAnInfiniteSumIsAnError() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "x", "type": "float"}, {"name": "t", "type": "string"}]}""")
+    imut c = helpers.csvOf(s, "x,t\n1e-18,a\n2e-18,a\n0.0,a\n-0.0,a\n5e-324,a\n")
+    match stats.group(c.records, s.columns[0], "") {
+        Totals(gs) => testing.assertEq(toString(len(gs)) + " " + model.text(gs[0].key) + " " + toString(gs[0].count),
+            "4 0.0 2", "0.0 and -0.0 are one group, the tiny ones each their own"),
+        Overflow(why) => testing.assert(false, why)
+    }
+    imut big = helpers.csvOf(s, "x,t\n1e308,a\n1e308,a\n")
+    match stats.group(big.records, s.columns[1], "x") {
+        Totals(gs) => testing.assert(false, "expected an overflow"),
+        Overflow(why) => testing.assertEq(why, "the sum of x is too large for a float", "message")
+    }
+}
+
 fn main() {
     testing.run("stats", [groupsAreOrderedByValueWithMissingLast, anIntSumStaysExactAndAFloatSumIsAFloat,
                           anOverflowingSumIsReportedNotWrapped, countsAloneLeaveTheRestMissing,
-                          aProfileRanksFrequentValuesThenByValue])
+                          aProfileRanksFrequentValuesThenByValue,
+                          tinyFloatsAreSeparateGroupsAndAnInfiniteSumIsAnError])
 }

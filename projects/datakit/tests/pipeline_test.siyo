@@ -37,9 +37,15 @@ fn sortByIsStable() {
 fn sortByHandlesALongReversedInput() {
     mut xs: Array<int> = []
     for mut i = 3000 i > 0 i = i - 1 { push(xs, i) }
+    // A generic result over ints is erased (only struct type arguments are
+    // trusted), so each element is narrowed where it is compared.
     imut sorted = pipeline.sortBy(xs, fn(a: int, b: int) -> int { a - b })
     mut ordered = true
-    for mut i = 1 i < len(sorted) i = i + 1 { if sorted[i - 1] > sorted[i] { ordered = false } }
+    for mut i = 1 i < len(sorted) i = i + 1 {
+        imut before: int = sorted[i - 1]
+        imut here: int = sorted[i]
+        if before > here { ordered = false }
+    }
     testing.assert(ordered, "ascending")
     testing.assertEq(toString(sorted[0]) + " " + toString(sorted[2999]), "1 3000", "ends")
 }

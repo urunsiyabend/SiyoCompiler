@@ -58,7 +58,8 @@ An empty cell and a JSON `null` both mean *missing*, in every column type.
 - **CSV** follows RFC 4180, using `std/csv`. It is read with `io.readText`, so
   line breaks inside quoted fields are kept as written. The first row is the header. Quoted
   fields may hold commas, doubled quotes and line breaks. CRLF, LF and CR all end
-  a line, and a byte order mark is skipped. Blank lines are skipped. A row with
+  a line, and a byte order mark is skipped. Blank lines are skipped; a record holding one quoted empty field (`""`) is not
+  blank and is checked like any other. A row with
   a different number of fields from the header is a problem, and the other rows
   are still checked. Messages name the line a row starts on.
 - **JSON** must be an array of objects. Messages name the record by its
@@ -69,10 +70,16 @@ An empty cell and a JSON `null` both mean *missing*, in every column type.
 
 | Command | Output | Exit |
 |---|---|---|
-| `validate DATA --schema S [--json]` | Every problem in file order, then a summary; or `ok: N rows, M columns` | 0 or 3 |
+| `validate DATA --schema S [--json]` | The first 100 problems in file order, `... and N more` past that, then a summary counting all of them; or `ok: N rows, M columns` | 0 or 3 |
 | `transform DATA --schema S [options]` | Rows that pass every `--where`, as CSV (header first) or as a JSON array of objects | 0 |
 | `group DATA --schema S --by COL [--sum COL] [--json]` | One line per distinct value of COL, with count and (with `--sum`) present, sum, min, max and mean | 0 |
 | `report DATA --schema S [--json]` | Each column's present, missing and distinct counts; min, max, sum and mean for numbers; earliest and latest for dates; true and false counts for bools; the three most frequent values for strings | 0 |
+
+All problems are found and counted. Text output and `--json` list the first
+100: in JSON, `problemCount` is the total and `problems` holds at most 100, so
+the two differ for a file with more. `rows` counts every data row read,
+including a ragged CSV line or a JSON record that is not an object, and
+`invalidRows` those rejected.
 
 `transform`, `group` and `report` compute nothing from invalid data. Each
 prints the problems to standard error and exits 3.
@@ -90,7 +97,9 @@ Transform options:
   extension, else CSV. A `--format` that contradicts a `.csv` or `.json` `--out`
   is a usage error.
 - `--out FILE` writes to FILE rather than standard output. It never overwrites:
-  if FILE exists or is an input file, DataKit exits 2. Nothing is written when
+  if FILE exists or is an input file, DataKit exits 2. The file is created
+  atomically with `io.writeNew`, so a file or symbolic link that appears between
+  the check and the write is refused too, never followed or truncated. Nothing is written when
   the data or a flag is invalid.
 
 Ordering and number formats:
@@ -98,7 +107,13 @@ Ordering and number formats:
 - **Groups** are ordered by value: numbers numerically, text and dates as text,
   false before true. Missing comes last, as `(missing)` in text and `null` in JSON.
 - **Sums** of an int column are exact 64-bit integers. A sum that does not fit
-  is an error (exit 3), not a wrapped number. Sums of a float column are floats.
+  is an error (exit 3), not a wrapped number. Sums of a float column are floats;
+  one past the largest float is an error too (exit 3), never `Infinity` or `null`.
+- **Floats** are written losslessly, in the shortest decimal that reads back as
+  the same float and never in exponent form (`0.000000000000000001`), in CSV,
+  problem messages and group keys. `1e-18` and `2e-18` are different groups.
+- **Bounds** keep their written value: an integer `min` or `max` is compared as
+  an exact 64-bit integer.
 - **Group and report tables** show floats to two places, rounded half up.
   Problem messages and CSV output show a value's shortest exact form. JSON carries full
   precision.

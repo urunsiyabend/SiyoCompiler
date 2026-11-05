@@ -5,7 +5,7 @@ line 3, remote: must be true or false, got "yes"
 line 4, id: must be at least 1, got 0
 line 4, name: is required
 line 4, dept: must be one of eng, ops, sales, got "hr"
-line 4, salary: must be at least 0.0, got -5.0
+line 4, salary: must be at least 0, got -5.0
 line 4, start: must be a date written YYYY-MM-DD, got "2021-13-01"
 line 4, remote: must be true or false, got "TRUE"
 line 5, salary: must be a number, got "NaN"

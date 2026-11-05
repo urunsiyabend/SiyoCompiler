@@ -107,11 +107,16 @@ fn runTransform(o: Options, s: Schema, c: Checked) {
         print(text)
         return
     }
+    // Created atomically: the check above only fails early, and a file or
+    // link that appears since is refused here rather than written through.
+    mut refused = ""
     try {
-        io.writeFile(o.out, text)
+        io.writeNew(o.out, text)
     } catch e {
-        fail(EXIT_FILE, "cannot write " + o.out)
+        refused = toString(e)
     }
+    if startsWith(refused, "exists") { fail(EXIT_FILE, "refusing to overwrite " + o.out + ": it already exists") }
+    if refused != "" { fail(EXIT_FILE, "cannot write " + o.out) }
     io.eprintln("datakit: wrote " + toString(len(rows)) + " " + (if len(rows) == 1 { "row" } else { "rows" }) + " to " + model.safe(o.out))
 }
 

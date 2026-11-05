@@ -116,28 +116,29 @@ fn readColumn(entry: object, place: string, problems: Array<string>) -> Option<C
     if len(problems) > before { return None }
     imut column = Column {
         name: name, kind: kind, required: required,
-        hasMin: lo.has, min: lo.value, hasMax: hi.has, max: hi.value, allowed: allowed
+        min: lo, max: hi, allowed: allowed
     }
-    if column.hasMin && column.hasMax && column.min > column.max {
+    if !model.isMissing(column.min) && !model.isMissing(column.max) && model.compare(column.min, column.max) > 0 {
         push(problems, place + ": \"min\" is greater than \"max\"")
         return None
     }
     Some(column)
 }
 
-struct Bound { has: bool, value: float }
-
-fn bound(c: map, key: string, kind: string, place: string, problems: Array<string>) -> Bound {
+// A bound as written: an integer stays an exact long, so 9007199254740993 is
+// not rounded to the float 9007199254740992.
+fn bound(c: map, key: string, kind: string, place: string, problems: Array<string>) -> Value {
     imut k = typeOf(c[key])
-    if k == "null" { return Bound { has: false, value: 0.0 } }
+    if k == "null" { return Missing }
     if kind != "int" && kind != "float" {
         push(problems, place + ": \"" + key + "\" applies only to a number column")
-        return Bound { has: false, value: 0.0 }
+        return Missing
     }
-    if k == "int" || k == "long" || k == "float" {
+    if k == "int" || k == "long" { return IntV(parseLong(toString(c[key]))) }
+    if k == "float" {
         imut x: float = c[key]
-        return Bound { has: true, value: x }
+        return FloatV(x)
     }
     push(problems, place + ": \"" + key + "\" must be a number, got " + k)
-    Bound { has: false, value: 0.0 }
+    Missing
 }

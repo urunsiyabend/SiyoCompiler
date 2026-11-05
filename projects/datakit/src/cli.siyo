@@ -25,7 +25,7 @@ pub fn usage() -> string {
     """usage: datakit <command> DATA --schema SCHEMA [options]
 
 commands:
-  validate   check DATA against SCHEMA and list every problem
+  validate   check DATA against SCHEMA; list the first 100 problems and count all
   transform  filter, sort and select valid rows, written as CSV or JSON
   group      count rows by one column, and sum another
   report     profile every column: counts, ranges, frequent values

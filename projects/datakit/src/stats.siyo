@@ -49,7 +49,8 @@ pub fn group(records: Array<Record>, by: Column, sum: string) -> Summed {
 fn keyOf(v: Value) -> string {
     match v {
         IntV(n) => "i" + toString(n),
-        FloatV(x) => "f" + model.plain(x),
+        // Lossless, so 1e-18 and 2e-18 are two groups; -0.0 equals 0.0.
+        FloatV(x) => if x == 0.0 { "f0.0" } else { "f" + model.plain(x) },
         Text(s) => "t" + s,
         Flag(b) => if b { "b1" } else { "b0" },
         Missing => "m"
@@ -86,6 +87,10 @@ fn summarise(records: Array<Record>, column: string) -> Summed {
     }
     if present == 0 {
         return Totals([GroupStat { key: Missing, count: len(records), present: 0, sum: Missing, min: Missing, max: Missing, mean: Missing }])
+    }
+    // A float sum past the largest float is infinite: an error, not a value.
+    if !isInt && !(floatSum - floatSum == 0.0) {
+        return Overflow("the sum of " + column + " is too large for a float")
     }
     imut total: Value = if isInt { IntV(intSum) } else { FloatV(floatSum) }
     imut mean = model.number(total) / present

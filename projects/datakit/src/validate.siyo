@@ -18,7 +18,7 @@ pub fn check(s: Schema, raw: RawData) -> Checked {
     mut problems: Array<Problem> = []
     for p in raw.problems { push(problems, p) }
     mut invalidRows = 0
-    for p in raw.problems { if p.row > 1 { invalidRows += 1 } }
+    for p in raw.problems { if isRowProblem(p) { invalidRows += 1 } }
 
     mut known: Set<string> = #{}
     for c in s.columns { known.add(c.name) }
@@ -67,9 +67,15 @@ pub fn check(s: Schema, raw: RawData) -> Checked {
     Checked { records: records, problems: ordered, rows: len(raw.rows) + countRowProblems(raw), invalidRows: invalidRows }
 }
 
+// A problem that rejects a whole row the source could not read: a ragged CSV
+// line, a JSON record that is not an object. Not the header's or the file's.
+fn isRowProblem(p: Problem) -> bool {
+    p.place != "file" && p.place != "line 1"
+}
+
 fn countRowProblems(raw: RawData) -> int {
     mut n = 0
-    for p in raw.problems { if p.row > 1 { n += 1 } }
+    for p in raw.problems { if isRowProblem(p) { n += 1 } }
     n
 }
 
@@ -140,9 +146,12 @@ fn fromJson(c: Column, raw: object, row: RawRow, problems: Array<Problem>) -> Va
 
 fn checkRange(c: Column, v: Value, row: RawRow, problems: Array<Problem>) -> Value {
     if model.isNumeric(c) {
-        imut x = model.number(v)
-        if c.hasMin && x < c.min { return report(problems, row, c, "must be at least " + boundText(c, c.min) + ", got " + model.text(v)) }
-        if c.hasMax && x > c.max { return report(problems, row, c, "must be at most " + boundText(c, c.max) + ", got " + model.text(v)) }
+        if !model.isMissing(c.min) && model.compare(v, c.min) < 0 {
+            return report(problems, row, c, "must be at least " + model.text(c.min) + ", got " + model.text(v))
+        }
+        if !model.isMissing(c.max) && model.compare(v, c.max) > 0 {
+            return report(problems, row, c, "must be at most " + model.text(c.max) + ", got " + model.text(v))
+        }
     }
     if len(c.allowed) > 0 {
         imut s = model.text(v)
@@ -151,13 +160,6 @@ fn checkRange(c: Column, v: Value, row: RawRow, problems: Array<Problem>) -> Val
         if !found { return report(problems, row, c, "must be one of " + strings.join(c.allowed, ", ") + ", got \"" + s + "\"") }
     }
     v
-}
-
-// A bound as the schema meant it: 1 for an int column, 1.0 for a float one.
-fn boundText(c: Column, x: float) -> string {
-    imut written = model.plain(x)
-    if c.kind == "int" && endsWith(written, ".0") { return substring(written, 0, len(written) - 2) }
-    written
 }
 
 // An integer that fits a long: an optional minus, then ASCII digits.

@@ -58,8 +58,8 @@ pub fn fromCsv(text: string) -> RawData {
                 imut row = table[r]
                 r += 1
                 imut place = "line " + toString(row.line)
-                // A blank line holds no data, wherever it is.
-                if len(row.cells) == 1 && row.cells[0] == "" { continue }
+                // A blank line holds no data, wherever it is; a quoted "" is a record.
+                if row.blank { continue }
                 if len(row.cells) != len(header) {
                     push(problems, Problem { row: row.line, place: place, column: "",
                         message: "has " + toString(len(row.cells)) + " fields, the header has " + toString(len(header)) })

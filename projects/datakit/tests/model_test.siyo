@@ -1,4 +1,5 @@
 import "std/testing"
+import "std/strings"
 import "model"
 
 fn plainNeverUsesAnExponent() {
@@ -7,7 +8,12 @@ fn plainNeverUsesAnExponent() {
     testing.assertEq(model.plain(1.0 / 3.0), "0.3333333333333333", "repeating")
     testing.assertEq(model.plain(0.000001), "0.000001", "small")
     testing.assertEq(model.plain(-2.5), "-2.5", "negative")
-    testing.assertEq(model.plain(-0.0), "0.0", "negative zero")
+    testing.assertEq(model.plain(-0.0), "-0.0", "negative zero reads back as itself")
+    testing.assertEq(model.plain(0.000000000000000001), "0.000000000000000001", "1e-18 is not rounded away")
+    testing.assertEq(model.plain(0.000000000000000002), "0.000000000000000002", "nor 2e-18")
+    testing.assertEq(toString(len(model.plain(parseFloat("5e-324")))) + " " + substring(model.plain(parseFloat("5e-324")), 320, 327), "327 0000049", "the smallest float keeps every digit")
+    testing.assertEq(model.plain(parseFloat("1.7976931348623157e308")), "17976931348623157" + strings.repeat("0", 292) + ".0", "the largest")
+    testing.assertEq(model.plain(123.456), "123.456", "plain stays plain")
     testing.assertEq(model.plain(3.0), "3.0", "whole")
 }
 
@@ -28,6 +34,17 @@ fn safeEscapesWhatATerminalWouldObey() {
     testing.assertEq(model.safe("café, naïve"), "café, naïve", "letters stay")
 }
 
+fn aLongAndAFloatCompareExactly() {
+    testing.assertEq(toString(model.compareLongFloat(9007199254740993L, 9007199254740992.0)), "1", "above 2^53")
+    testing.assertEq(toString(model.compareLongFloat(9007199254740992L, 9007199254740992.0)), "0", "equal")
+    testing.assertEq(toString(model.compareLongFloat(9223372036854775807L, 9223372036854775807.0)), "-1", "every long is below 2^63")
+    testing.assertEq(toString(model.compareLongFloat(0L - 9223372036854775807L - 1L, -9223372036854775808.0)), "0", "the smallest long")
+    testing.assertEq(toString(model.compareLongFloat(0L, -0.5)) + toString(model.compareLongFloat(0L, 0.5)) + toString(model.compareLongFloat(0L - 1L, -0.5)),
+        "1-1-1", "fractions on either side of zero")
+    testing.assertEq(toString(model.compare(FloatV(2.5), IntV(2))) + toString(model.compare(IntV(3), FloatV(2.5))), "11", "both orders")
+}
+
 fn main() {
-    testing.run("model", [plainNeverUsesAnExponent, compareOrdersEachKindAndMissingLast, safeEscapesWhatATerminalWouldObey])
+    testing.run("model", [plainNeverUsesAnExponent, compareOrdersEachKindAndMissingLast, safeEscapesWhatATerminalWouldObey,
+                         aLongAndAFloatCompareExactly])
 }

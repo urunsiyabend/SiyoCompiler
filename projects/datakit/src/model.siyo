@@ -10,10 +10,8 @@ pub struct Column {
     name: string,
     kind: string,            // int | float | string | bool | date
     required: bool,
-    hasMin: bool,
-    min: float,
-    hasMax: bool,
-    max: float,
+    min: Value,              // Missing when there is no bound; IntV keeps an int64 bound exact
+    max: Value,
     allowed: Array<string>   // empty: any value
 }
 
@@ -65,14 +63,36 @@ pub fn text(v: Value) -> string {
 }
 
 // The shortest decimal that reads back as x, never in exponent form:
-// 1e20 is 100000000000000000000.0 and 0.1 is 0.1.
+// 1e20 is 100000000000000000000.0, 0.1 is 0.1 and 5e-324 keeps all its zeros.
+// toString gives the shortest form that reads back, sometimes with an
+// exponent; the digits are only moved, never rounded.
 pub fn plain(x: float) -> string {
-    imut full = strings.formatFloat(x, 17)
-    if !contains(full, ".") { return full }
-    mut end = len(full)
-    while end > 0 && substring(full, end - 1, end) == "0" { end -= 1 }
-    if substring(full, end - 1, end) == "." { end += 1 }
-    substring(full, 0, end)
+    imut written = toString(x)
+    imut e = indexOf(written, "E")
+    if e < 0 { return written }
+    imut negative = startsWith(written, "-")
+    imut mantissa = substring(written, if negative { 1 } else { 0 }, e)
+    imut exponent = parseInt(substring(written, e + 1, len(written)))
+    imut point = indexOf(mantissa, ".")
+    mut digits = substring(mantissa, 0, point) + substring(mantissa, point + 1, len(mantissa))
+    mut at = point + exponent
+    // Leading zeros of the digits only move the point.
+    while len(digits) > 1 && startsWith(digits, "0") {
+        digits = substring(digits, 1, len(digits))
+        at -= 1
+    }
+    mut out = ""
+    if at <= 0 {
+        out = "0." + strings.repeat("0", 0 - at) + digits
+    } else if at >= len(digits) {
+        out = digits + strings.repeat("0", at - len(digits)) + ".0"
+    } else {
+        out = substring(digits, 0, at) + "." + substring(digits, at, len(digits))
+    }
+    // No trailing zeros past the first decimal.
+    mut end = len(out)
+    while substring(out, end - 1, end) == "0" && substring(out, end - 2, end - 1) != "." { end -= 1 }
+    (if negative { "-" } else { "" }) + substring(out, 0, end)
 }
 
 // A number as a float, for sums and means; null-free since Missing is skipped by callers.
@@ -101,17 +121,40 @@ pub fn compare(a: Value, b: Value) -> int {
     match a {
         IntV(x) => match b {
             IntV(y) => if x < y { -1 } else if x > y { 1 } else { 0 },
-            _ => sign(number(a) - number(b))
+            FloatV(y) => compareLongFloat(x, y),
+            _ => order(number(a), number(b))
         },
-        FloatV(x) => sign(x - number(b)),
+        FloatV(x) => match b {
+            IntV(y) => 0 - compareLongFloat(y, x),
+            _ => order(x, number(b))
+        },
         Text(s) => compareText(s, text(b)),
         Flag(p) => compareText(text(a), text(b)),
         Missing => 0
     }
 }
 
-fn sign(d: float) -> int {
-    if d < 0 { -1 } else if d > 0 { 1 } else { 0 }
+// A long against a float exactly: 9007199254740993 is greater than
+// 9007199254740992.0. Rounding a long to a float keeps order, so a float that
+// compares unequal to it decides; one that compares equal is an integer in the
+// long range, recovered exactly from its 32- and 16-bit parts.
+pub fn compareLongFloat(x: long, y: float) -> int {
+    if y >= 9223372036854775807.0 { return -1 }    // 2^63, above every long
+    imut xd = x * 1.0
+    if xd < y { return -1 }
+    if xd > y { return 1 }
+    imut high = toInt(y / 4294967296.0)
+    imut rest = y - high * 4294967296.0
+    imut middle = toInt(rest / 65536.0)
+    imut low = toInt(rest - middle * 65536.0)
+    imut exact = high * 4294967296L + middle * 65536L + low
+    if x < exact { -1 } else if x > exact { 1 } else { 0 }
+}
+
+// Compared, not subtracted: a difference of two large floats overflows and one
+// of two tiny ones may round to zero.
+fn order(x: float, y: float) -> int {
+    if x < y { -1 } else if x > y { 1 } else { 0 }
 }
 
 pub fn compareText(a: string, b: string) -> int {

@@ -82,9 +82,30 @@ fn boundsAndValuesAreChecked() {
     testing.assertEq(helpers.column(c.records, "n"), "10", "the edges pass")
 }
 
+fn integerBoundsAreExact() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "n", "type": "int", "min": 9007199254740993, "max": 9223372036854775807}]}""")
+    imut c = helpers.csvOf(s, "n\n9007199254740992\n9007199254740993\n9223372036854775807\n")
+    testing.assertEq(helpers.problems(c), "line 2 n: must be at least 9007199254740993, got 9007199254740992", "one below an int64 bound")
+    testing.assertEq(helpers.column(c.records, "n"), "9007199254740993,9223372036854775807", "the edges pass")
+}
+
+fn aQuotedEmptyRecordIsNotABlankLine() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "v", "type": "int", "required": true}]}""")
+    imut c = helpers.csvOf(s, "v\n\"\"\n\n1\n")
+    testing.assertEq(helpers.problems(c), "line 2 v: is required", "the quoted record is checked")
+    testing.assertEq(toString(c.rows) + " " + toString(c.invalidRows), "2 1", "and counted; the blank line is not")
+}
+
+fn aJsonRecordThatIsNotAnObjectIsCountedWhereverItIs() {
+    imut c = helpers.jsonOf(helpers.staff(), "[1, null, {\"id\": 3}]")
+    testing.assertEq(toString(c.rows) + " " + toString(c.invalidRows) + " " + toString(len(c.records)), "3 2 1", "records 1 and 2 are rejected rows")
+}
+
 fn main() {
     testing.run("validate", [longsAreReadToTheirLimit, datesAreCalendarDates, everyProblemInARowIsReported,
                              emptyCellsAreMissingUnlessRequired, aRaggedRowIsRejectedAndTheRestIsChecked,
                              aQuotedLineBreakKeepsLineNumbersTrue, jsonFieldsAreCheckedByKind,
-                             unknownColumnsAreTheFilesProblem, unknownColumnsMayBeIgnored, boundsAndValuesAreChecked])
+                             unknownColumnsAreTheFilesProblem, unknownColumnsMayBeIgnored, boundsAndValuesAreChecked,
+                             integerBoundsAreExact, aQuotedEmptyRecordIsNotABlankLine,
+                             aJsonRecordThatIsNotAnObjectIsCountedWhereverItIs])
 }

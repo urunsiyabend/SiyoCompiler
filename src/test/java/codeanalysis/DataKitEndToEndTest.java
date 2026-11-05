@@ -905,6 +905,157 @@ class DataKitEndToEndTest {
         }
     }
 
+    // --- third review: numbers, counts and the output file ----------------------
+
+    private static final double[] EDGE_FLOATS = {1e-18, 2e-18, 1e-100, 5e-324, 0.0, -0.0, 0.1,
+            1.7976931348623157e308, -2.5e-300, 123456789.125, 9007199254740993.0};
+
+    private Path write(String name, String text) throws Exception {
+        Path path = tempDir.resolve(name);
+        Files.writeString(path, text, StandardCharsets.UTF_8);
+        return path;
+    }
+
+    @Test
+    void floatsSurviveTransformGroupAndReportExactly() throws Exception {
+        Path schema = write("x.schema.json", "{\"columns\": [{\"name\": \"x\", \"type\": \"float\"}]}");
+        StringBuilder csv = new StringBuilder("x\n");
+        for (double x : EDGE_FLOATS) csv.append(Double.toString(x)).append("\n");
+        Path data = write("x.csv", csv.toString());
+        // Distinct as numbers: -0.0 equals 0.0.
+        Set<Double> distinct = new HashSet<>();
+        for (double x : EDGE_FLOATS) distinct.add(x == 0.0 ? 0.0 : x);
+        for (String mode : MODES) {
+            CliParityTest.Result out = datakit(mode, "transform", data.toString(), "--schema", schema.toString());
+            assertEquals(0, out.exitCode(), mode + out.stderr());
+            List<String> cells = new ArrayList<>(List.of(out.stdout().split("\n")));
+            assertEquals("x", cells.remove(0));
+            assertEquals(EDGE_FLOATS.length, cells.size(), mode);
+            for (int i = 0; i < EDGE_FLOATS.length; i++) {
+                assertFalse(cells.get(i).contains("E"), mode + " plain: " + cells.get(i));
+                assertEquals(Double.doubleToRawLongBits(EDGE_FLOATS[i]), Double.doubleToRawLongBits(Double.parseDouble(cells.get(i))),
+                        mode + " CSV " + cells.get(i));
+            }
+            CliParityTest.Result json = datakit(mode, "transform", data.toString(), "--schema", schema.toString(), "--format", "json");
+            List<?> rows = (List<?>) StrictJson.parse(json.stdout());
+            for (int i = 0; i < EDGE_FLOATS.length; i++) {
+                double read = ((BigDecimal) ((Map<?, ?>) rows.get(i)).get("x")).doubleValue();
+                assertEquals(EDGE_FLOATS[i] == 0.0 ? 0.0 : EDGE_FLOATS[i], read == 0.0 ? 0.0 : read, mode + " JSON " + i);
+            }
+            Map<?, ?> grouped = (Map<?, ?>) StrictJson.parse(datakit(mode, "group", data.toString(), "--schema", schema.toString(),
+                    "--by", "x", "--json").stdout());
+            List<?> groups = (List<?>) grouped.get("groups");
+            assertEquals(distinct.size(), groups.size(), mode + " groups");
+            double previous = Double.NEGATIVE_INFINITY;
+            for (Object g : groups) {
+                double key = ((BigDecimal) ((Map<?, ?>) g).get("key")).doubleValue();
+                assertTrue(key > previous, mode + " groups ascend: " + key);
+                previous = key;
+            }
+            Map<?, ?> report = (Map<?, ?>) StrictJson.parse(datakit(mode, "report", data.toString(), "--schema", schema.toString(),
+                    "--json").stdout());
+            Map<?, ?> column = (Map<?, ?>) ((List<?>) report.get("columns")).get(0);
+            assertEquals(BigDecimal.valueOf(distinct.size()), column.get("distinct"), mode);
+            double sum = 0;
+            for (double x : EDGE_FLOATS) sum += x;
+            assertEquals(sum, ((BigDecimal) column.get("sum")).doubleValue(), mode + " sum");
+        }
+    }
+
+    @Test
+    void aFloatSumPastTheLargestFloatIsAnErrorNeverInfinity() throws Exception {
+        Path schema = write("big.schema.json", "{\"columns\": [{\"name\": \"k\", \"type\": \"string\"}, {\"name\": \"x\", \"type\": \"float\"}]}");
+        Path data = write("big.json", "[{\"k\": \"a\", \"x\": 1e308}, {\"k\": \"a\", \"x\": 1e308}]");
+        for (String mode : MODES) {
+            for (String[] args : List.of(new String[]{"group", data.toString(), "--schema", schema.toString(), "--by", "k", "--sum", "x", "--json"},
+                    new String[]{"report", data.toString(), "--schema", schema.toString(), "--json"})) {
+                CliParityTest.Result r = datakit(mode, args);
+                assertEquals(3, r.exitCode(), mode + " " + args[0]);
+                assertEquals("", r.stdout(), mode);
+                assertEquals("datakit: the sum of x is too large for a float", r.stderr().trim(), mode);
+            }
+        }
+    }
+
+    @Test
+    void integerBoundsAreComparedExactly() throws Exception {
+        java.math.BigInteger min = new java.math.BigInteger("9007199254740993");
+        java.math.BigInteger max = new java.math.BigInteger("9223372036854775806");
+        Path schema = write("n.schema.json", "{\"columns\": [{\"name\": \"n\", \"type\": \"int\", \"min\": " + min + ", \"max\": " + max + "}]}");
+        List<String> values = List.of("9007199254740992", "9007199254740993", "9007199254740994", "9223372036854775806",
+                "9223372036854775807", "-1", "0");
+        Path data = write("n.csv", "n\n" + String.join("\n", values) + "\n");
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < values.size(); i++) {
+            java.math.BigInteger v = new java.math.BigInteger(values.get(i));
+            if (v.compareTo(min) < 0) expected.add("line " + (i + 2) + ", n: must be at least " + min + ", got " + v);
+            else if (v.compareTo(max) > 0) expected.add("line " + (i + 2) + ", n: must be at most " + max + ", got " + v);
+        }
+        for (String mode : MODES) {
+            CliParityTest.Result r = datakit(mode, "validate", data.toString(), "--schema", schema.toString());
+            assertEquals(3, r.exitCode(), mode);
+            List<String> lines = new ArrayList<>(List.of(r.stdout().split("\n")));
+            lines.remove(lines.size() - 1);
+            assertEquals(expected, lines, mode);
+        }
+    }
+
+    @Test
+    void everyRejectedRecordIsCountedAndAQuotedEmptyRecordIsChecked() throws Exception {
+        Path schema = write("v.schema.json", "{\"columns\": [{\"name\": \"v\", \"type\": \"int\", \"required\": true}]}");
+        Path json = write("v.json", "[1, null, {\"v\": 1}, \"x\", {}]");
+        Path csv = write("v.csv", "v\r\n\"\"\r\n\r\n1\r\n");
+        for (String mode : MODES) {
+            Map<?, ?> j = (Map<?, ?>) StrictJson.parse(datakit(mode, "validate", json.toString(), "--schema", schema.toString(), "--json").stdout());
+            assertEquals(BigDecimal.valueOf(5), j.get("rows"), mode);
+            assertEquals(BigDecimal.valueOf(4), j.get("invalidRows"), mode);
+            assertEquals(BigDecimal.valueOf(1), j.get("validRows"), mode);
+            Map<?, ?> c = (Map<?, ?>) StrictJson.parse(datakit(mode, "validate", csv.toString(), "--schema", schema.toString(), "--json").stdout());
+            assertEquals(BigDecimal.valueOf(2), c.get("rows"), mode);
+            assertEquals(BigDecimal.valueOf(1), c.get("invalidRows"), mode);
+            assertEquals("is required", ((Map<?, ?>) ((List<?>) c.get("problems")).get(0)).get("message"), mode);
+        }
+    }
+
+    @Test
+    void problemsBeyondAHundredAreCountedNotListed() throws Exception {
+        Path schema = write("c.schema.json", "{\"columns\": [{\"name\": \"v\", \"type\": \"int\"}]}");
+        Path data = write("c.csv", "v\n" + "x\n".repeat(250));
+        for (String mode : MODES) {
+            CliParityTest.Result text = datakit(mode, "validate", data.toString(), "--schema", schema.toString());
+            List<String> lines = List.of(text.stdout().split("\n"));
+            assertEquals(102, lines.size(), mode);
+            assertEquals("... and 150 more", lines.get(100), mode);
+            assertEquals("invalid: 250 problems, 250 of 250 rows rejected", lines.get(101), mode);
+            Map<?, ?> j = (Map<?, ?>) StrictJson.parse(datakit(mode, "validate", data.toString(), "--schema", schema.toString(), "--json").stdout());
+            assertEquals(BigDecimal.valueOf(250), j.get("problemCount"), mode);
+            assertEquals(100, ((List<?>) j.get("problems")).size(), mode);
+        }
+    }
+
+    @Test
+    void anOutputPathThatIsALinkIsNeverFollowed() throws Exception {
+        Path sentinel = write("sentinel.txt", "KEEP\n");
+        String[] base = {"transform", PROJECT.resolve("fixtures/staff.csv").toString(), "--schema",
+                PROJECT.resolve("fixtures/staff.schema.json").toString(), "--out"};
+        for (String mode : MODES) {
+            Path link = tempDir.resolve("link-" + mode + ".csv");
+            Files.createSymbolicLink(link, sentinel);
+            Path dangling = tempDir.resolve("dangling-" + mode + ".csv");
+            Path nowhere = tempDir.resolve("nowhere-" + mode + ".csv");
+            Files.createSymbolicLink(dangling, nowhere);
+            for (Path target : List.of(link, dangling)) {
+                String[] args = java.util.Arrays.copyOf(base, base.length + 1);
+                args[base.length] = target.toString();
+                CliParityTest.Result r = datakit(mode, args);
+                assertEquals(2, r.exitCode(), mode + " " + target + r.stderr());
+                assertTrue(r.stderr().contains("refusing to overwrite"), r.stderr());
+            }
+            assertEquals("KEEP\n", Files.readString(sentinel), mode);
+            assertFalse(Files.exists(nowhere), mode);
+        }
+    }
+
     private CliParityTest.Result datakit(String mode, String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(mode);
