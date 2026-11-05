@@ -64,6 +64,7 @@ public class Evaluator {
             }
 
             BoundStatement s = block.getStatements().get(index);
+            try {
             switch (s.getType()) {
                 case VariableDeclaration -> {
                     evaluateVariableDeclaration((BoundVariableDeclaration) s);
@@ -75,13 +76,13 @@ public class Evaluator {
                 }
                 case GotoStatement -> {
                     BoundGotoStatement gs = (BoundGotoStatement) s;
-                    index = labelToIndex.get(gs.getLabel());
+                    index = jumpTarget(labelToIndex, gs.getLabel());
                 }
                 case ConditionalGotoStatement -> {
                     BoundConditionalGotoStatement cgs = (BoundConditionalGotoStatement) s;
                     boolean condition = (boolean) evaluateExpression(cgs.getCondition());
                     if (condition == cgs.getJumpIfTrue()) {
-                        index = labelToIndex.get(cgs.getLabel());
+                        index = jumpTarget(labelToIndex, cgs.getLabel());
                     }
                     else {
                         index++;
@@ -108,9 +109,37 @@ public class Evaluator {
                 }
                 default -> throw new Exception("Unexpected node: " + s.getType());
             };
+            } catch (BlockExit exit) {
+                if (exit.label == null) break;
+                Integer target = labelToIndex.get(exit.label);
+                if (target == null) throw exit;
+                index = target;
+            }
         }
 
         return _lastValue;
+    }
+
+    /**
+     * Leaves the expression being evaluated when a block nested in it — a
+     * match arm, a try body — returns, or jumps to a label of an enclosing
+     * block. An Error, so that a Siyo try on the way out does not take it for
+     * something the program raised: a break inside a try used to surface as a
+     * NullPointerException, which the program's own catch then handled.
+     */
+    private static final class BlockExit extends Error {
+        final LabelSymbol label;
+
+        BlockExit(LabelSymbol label) {
+            super(null, null, false, false);
+            this.label = label;
+        }
+    }
+
+    private static int jumpTarget(HashMap<LabelSymbol, Integer> labelToIndex, LabelSymbol label) {
+        Integer target = labelToIndex.get(label);
+        if (target == null) throw new BlockExit(label);
+        return target;
     }
 
     /**
@@ -604,7 +633,7 @@ public class Evaluator {
         try {
             BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
             evaluateBlock(tryBlock);
-        } catch (Exception e) {
+        } catch (Exception | StackOverflowError e) {
             // Bind whatever was raised: a thrown payload, else the Java message
             assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
@@ -856,7 +885,7 @@ public class Evaluator {
             BoundBlockStatement tryBlock = codeanalysis.lowering.Lowerer.lower(node.getTryBody());
             evaluateBlock(tryBlock);
             return _lastValue;
-        } catch (Exception e) {
+        } catch (Exception | StackOverflowError e) {
             assignVariable(node.getErrorVariable(), SiyoRuntime.errorPayload(e));
             BoundBlockStatement catchBlock = codeanalysis.lowering.Lowerer.lower(node.getCatchBody());
             evaluateBlock(catchBlock);
@@ -929,6 +958,9 @@ public class Evaluator {
         BoundBlockStatement lowered = _loweredArms.computeIfAbsent(preStatements,
                 pre -> codeanalysis.lowering.Lowerer.lower(new BoundBlockStatement(new java.util.ArrayList<>(pre))));
         evaluateBlock(lowered);
+        // A return inside the arm: neither the arm's tail nor whatever
+        // expression the match sits in may run.
+        if (_returnTriggered) throw new BlockExit(null);
     }
 
     private Object evaluateSpawnExpression(BoundSpawnExpression node) throws Exception {

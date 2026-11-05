@@ -168,6 +168,103 @@ class TaskFlowRegressionTest {
                 """, "ForInMapKeys");
     }
 
+    // --- T4: break, continue and return leave a block-bodied arm ---------------
+
+    @Test
+    void continueAndBreakLeaveAMatchArm() throws Exception {
+        assertBoth("1 3", """
+                type R = Good(int) | Skip | Stop
+                fn main() {
+                    mut seen = ""
+                    for r in [Good(1), Skip, Good(3), Stop, Good(5)] {
+                        match r {
+                            Good(v) => { seen = seen + toString(v) + " " },
+                            Skip => { continue },
+                            Stop => { break }
+                        }
+                    }
+                    println(trim(seen))
+                }
+                """, "ArmLoopJump");
+    }
+
+    @Test
+    void returnFromAnArmSkipsTheArmsTail() throws Exception {
+        assertBoth("1\nno effect\n2", """
+                mut effects = 0
+                fn effect() -> int {
+                    effects = effects + 1
+                    effects
+                }
+                fn f(n: int) -> int {
+                    match n {
+                        1 => {
+                            if n == 1 { return 1 }
+                            effect()
+                        },
+                        _ => 2
+                    }
+                }
+                fn main() {
+                    println(toString(f(1)))
+                    println(if effects == 0 { "no effect" } else { "tail ran" })
+                    println(toString(f(2)))
+                }
+                """, "ArmReturnTail");
+    }
+
+    @Test
+    void anArmJumpsOutOfAValueExpression() throws Exception {
+        assertBoth("1 skip 3", """
+                fn f(n: int) -> int {
+                    imut label = n + match n { 2 => { return -1 }, _ => 0 }
+                    label
+                }
+                fn main() {
+                    mut out = ""
+                    for n in [1, 2, 3] {
+                        imut v = match n { 2 => { out = out + "skip "
+                                                  continue }, _ => n }
+                        out = out + toString(v) + " "
+                    }
+                    println(trim(out))
+                }
+                """, "ArmJumpInValue");
+    }
+
+    @Test
+    void continueLeavesATryInsideALoop() throws Exception {
+        assertBoth("2", """
+                fn main() {
+                    mut c = 0
+                    for x in [1, 2, 3, 4, 5] {
+                        try {
+                            if x == 2 { continue }
+                            if x == 4 { break }
+                            c += 1
+                        } catch e { c = 100 }
+                    }
+                    println(toString(c))
+                }
+                """, "TryLoopJump");
+    }
+
+    // --- T8: a deep recursion can be caught, and on both backends --------------
+
+    @Test
+    void aStackOverflowIsCaughtTheSameWayOnBothBackends() throws Exception {
+        assertBoth("caught string StackOverflowError", """
+                fn deep(n: int) -> int { 1 + deep(n + 1) }
+                fn main() {
+                    try {
+                        println(toString(deep(0)))
+                    } catch e {
+                        println("caught " + typeOf(e) + " " + toString(e))
+                    }
+                }
+                """, "OverflowCatch");
+    }
+
     // --- T13: else if is a value, and void arms stay void ----------------------
 
     @Test
