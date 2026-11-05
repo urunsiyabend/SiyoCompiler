@@ -2486,7 +2486,10 @@ public class Binder {
         if (syntax.getBody() instanceof ExpressionStatementSyntax) {
             BoundStatement body = bindStatement(syntax.getBody());
             BoundBlockStatement block = new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
-            BoundSpawnExpression spawnExpr = new BoundSpawnExpression(block, java.util.Set.of());
+            // An actor's constructor runs right here. Any other call runs on its own
+            // thread and holds what it uses, as a block does.
+            java.util.Set<VariableSymbol> callCaptures = new java.util.LinkedHashSet<>();
+            BoundSpawnExpression spawnExpr = new BoundSpawnExpression(block, callCaptures);
 
             // If body is a struct constructor call, set return type for actor tracking
             if (body instanceof BoundExpressionStatement exprStmt) {
@@ -2497,6 +2500,12 @@ public class Binder {
                     spawnExpr.setActorTypeName(_typeResolver.resolveStructType(exprStmt.getExpression()) != null
                             ? _typeResolver.resolveStructType(exprStmt.getExpression()).getName() : null);
                 }
+            }
+            StructSymbol spawned = spawnExpr.getActorTypeName() != null ? _structTypes.get(spawnExpr.getActorTypeName()) : null;
+            if (spawned != null && spawned.isActor()) {
+                spawnExpr.setExpressionForm(true);
+            } else {
+                collectSpawnCaptures(block, callCaptures, new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>());
             }
             return spawnExpr;
         }
@@ -2541,17 +2550,16 @@ public class Binder {
     private void collectSpawnCaptures(BoundNode node, java.util.Set<VariableSymbol> captured,
                                        java.util.Set<VariableSymbol> mutableCaptures,
                                        java.util.Set<VariableSymbol> sharedContainerCaptures) {
-        // First: collect all locally declared variable NAMES in this body
-        java.util.Set<String> localVarNames = new java.util.HashSet<>();
+        // First: what this body declares, by symbol
         CaptureWalk declaredHere = new CaptureWalk();
         _captureWalk = declaredHere;
-        collectExternalRefs(node, java.util.Set.of(), new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>());
+        collectExternalRefs(node, new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>());
         _captureWalk = null;
         java.util.Set<VariableSymbol> enclosingSpawnLocals = _spawnLocals;
         _spawnLocals = declaredHere.declared;
 
         // Then: find referenced variables that are NOT local → these are captures
-        collectCapturedVarsFromBody(node, localVarNames, captured, mutableCaptures, sharedContainerCaptures);
+        collectCapturedVarsFromBody(node, captured, mutableCaptures, sharedContainerCaptures);
         _spawnLocals = enclosingSpawnLocals;
         // A function it calls may not be finished yet, so its captures are settled later too.
         declaredHere.captures = captured;
@@ -2570,34 +2578,17 @@ public class Binder {
         return "its";
     }
 
-    private void collectDeclaredVarNames(BoundNode node, java.util.Set<String> names) {
-        if (node instanceof BoundVariableDeclaration decl) {
-            names.add(decl.getVariable().getName());
-            collectDeclaredVarNames(decl.getInitializer(), names);
-        }
-        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
-        // Explicit traversal matching collectCapturedVarsFromBody
-        if (node instanceof BoundBlockStatement block) {
-            for (BoundStatement stmt : block.getStatements()) { collectDeclaredVarNames(stmt, names); }
-        } else if (node instanceof BoundExpressionStatement exprStmt) {
-            collectDeclaredVarNames(exprStmt.getExpression(), names);
-        } else if (node instanceof BoundScopeExpression scopeExpr) {
-            collectDeclaredVarNames(scopeExpr.getBody(), names);
-        } else {
-            for (var it = node.getChildren(); it.hasNext(); ) { collectDeclaredVarNames(it.next(), names); }
-        }
-    }
-
-    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<String> localVarNames,
-                                              java.util.Set<VariableSymbol> captured,
+    private void collectCapturedVarsFromBody(BoundNode node, java.util.Set<VariableSymbol> captured,
                                               java.util.Set<VariableSymbol> mutableCaptures,
                                               java.util.Set<VariableSymbol> sharedContainerCaptures) {
-        // What a closure or spawn nested here captures, this body has to hold for it.
-        if (node instanceof BoundLambdaExpression || node instanceof BoundSpawnExpression) {
+        // What a closure or block spawn nested here captures, this body has to hold
+        // for it. `spawn Box.new(x)` runs its call in this body, so it is walked.
+        if (node instanceof BoundLambdaExpression
+                || (node instanceof BoundSpawnExpression nestedSpawn && !nestedSpawn.isExpressionForm())) {
             java.util.Set<VariableSymbol> nested = node instanceof BoundLambdaExpression lambda
                     ? lambda.getCapturedVariables() : ((BoundSpawnExpression) node).getCapturedVariables();
             for (VariableSymbol variable : nested) {
-                collectCapturedVarsFromBody(new BoundVariableExpression(variable), localVarNames, captured,
+                collectCapturedVarsFromBody(new BoundVariableExpression(variable), captured,
                         mutableCaptures, sharedContainerCaptures);
             }
             return;
@@ -2605,7 +2596,7 @@ public class Binder {
         // Calling a nested function needs what that function holds on to.
         if (node instanceof BoundCallExpression call) {
             for (VariableSymbol variable : call.getFunction().getCapturedLocals()) {
-                collectCapturedVarsFromBody(new BoundVariableExpression(variable), localVarNames, captured,
+                collectCapturedVarsFromBody(new BoundVariableExpression(variable), captured,
                         mutableCaptures, sharedContainerCaptures);
             }
         }
@@ -2636,60 +2627,9 @@ public class Binder {
                 captured.add(var);
                 if (!var.isReadOnly()) { mutableCaptures.add(var); }
             }
-            collectCapturedVarsFromBody(assignExpr.getExpression(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
         }
-        // A write through a captured struct — `c.n += 1` — is a capture too.
-        // It used to be invisible here, so the check passed and the emitter
-        // crashed instead.
-        if (node instanceof BoundMemberAssignmentExpression memberAssign) {
-            collectCapturedVarsFromBody(memberAssign.getTarget(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            collectCapturedVarsFromBody(memberAssign.getValue(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        }
-        // Don't recurse into nested spawn/lambda
-        if (node instanceof BoundSpawnExpression || node instanceof BoundLambdaExpression) return;
-
-        // Explicit sub-expression traversal (many BoundNode.getChildren() return empty)
-        if (node instanceof BoundVariableDeclaration decl) {
-            collectCapturedVarsFromBody(decl.getInitializer(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundExpressionStatement exprStmt) {
-            collectCapturedVarsFromBody(exprStmt.getExpression(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundIndexExpression indexExpr) {
-            collectCapturedVarsFromBody(indexExpr.getTarget(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            collectCapturedVarsFromBody(indexExpr.getIndex(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundCallExpression callExpr) {
-            for (BoundExpression arg : callExpr.getArguments()) {
-                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            }
-        } else if (node instanceof BoundBinaryExpression binExpr) {
-            collectCapturedVarsFromBody(binExpr.getLeft(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            collectCapturedVarsFromBody(binExpr.getRight(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundUnaryExpression unaryExpr) {
-            collectCapturedVarsFromBody(unaryExpr.getOperand(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundConditionalGotoStatement condGoto) {
-            collectCapturedVarsFromBody(condGoto.getCondition(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundJavaMethodCallExpression javaCall) {
-            if (javaCall.getTarget() != null) collectCapturedVarsFromBody(javaCall.getTarget(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            for (BoundExpression arg : javaCall.getArguments()) {
-                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            }
-        } else if (node instanceof BoundClosureCallExpression closureCall) {
-            collectCapturedVarsFromBody(closureCall.getClosure(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            for (BoundExpression arg : closureCall.getArguments()) {
-                collectCapturedVarsFromBody(arg, localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            }
-        } else if (node instanceof BoundIndexAssignmentExpression idxAssign) {
-            collectCapturedVarsFromBody(idxAssign.getTarget(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            collectCapturedVarsFromBody(idxAssign.getIndex(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            collectCapturedVarsFromBody(idxAssign.getValue(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundMemberAccessExpression memberExpr) {
-            collectCapturedVarsFromBody(memberExpr.getTarget(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else if (node instanceof BoundScopeExpression scopeExpr) {
-            collectCapturedVarsFromBody(scopeExpr.getBody(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-        } else {
-            // Fallback: use getChildren() for anything not explicitly handled
-            for (var it = node.getChildren(); it.hasNext(); ) {
-                collectCapturedVarsFromBody(it.next(), localVarNames, captured, mutableCaptures, sharedContainerCaptures);
-            }
+        for (BoundNode operand : BoundOperands.of(node)) {
+            collectCapturedVarsFromBody(operand, captured, mutableCaptures, sharedContainerCaptures);
         }
     }
 
@@ -2795,7 +2735,7 @@ public class Binder {
         walk.declared.addAll(params);
         walk.captures = captured;
         _captureWalk = walk;
-        collectExternalRefs(node, java.util.Set.of(), captured, writtenCaptures);
+        collectExternalRefs(node, captured, writtenCaptures);
         _captureWalk = null;
         captured.removeAll(walk.declared);
         captured.addAll(walk.outerOnly());
@@ -2814,7 +2754,7 @@ public class Binder {
         java.util.Set<VariableSymbol> referenced = new java.util.LinkedHashSet<>();
         CaptureWalk walk = new CaptureWalk();
         _captureWalk = walk;
-        collectExternalRefs(body, java.util.Set.of(), referenced, new java.util.LinkedHashSet<>());
+        collectExternalRefs(body, referenced, new java.util.LinkedHashSet<>());
         _captureWalk = null;
         walk.declared.addAll(function.getParameters());
         for (VariableSymbol variable : referenced) {
@@ -2887,161 +2827,43 @@ public class Binder {
         return true;
     }
 
-    private void collectExternalRefs(BoundNode node, java.util.Set<String> localNames,
-                                      java.util.Set<VariableSymbol> captured) {
-        collectExternalRefs(node, localNames, captured, new java.util.LinkedHashSet<>());
-    }
-
-    private void collectExternalRefs(BoundNode node, java.util.Set<String> localNames,
-                                      java.util.Set<VariableSymbol> captured,
-                                      java.util.Set<VariableSymbol> writtenCaptures) {
-        // Composite nodes are reached both explicitly and through their children.
-        if (_captureWalk != null && !_captureWalk.visited.add(node)) return;
-        if (node instanceof BoundVariableExpression varExpr) {
-            if (!localNames.contains(varExpr.getVariable().getName())) {
-                captured.add(varExpr.getVariable());
-            }
+    /**
+     * Walks a function or lambda body for the variables it refers to and declares.
+     * A closure or spawn nested in it is not entered: what it captures, this body
+     * has to hold for it, and that is read from its own capture set.
+     */
+    private void collectExternalRefs(BoundNode node, java.util.Set<VariableSymbol> captured,
+                                     java.util.Set<VariableSymbol> writtenCaptures) {
+        // A node may be shared, as the tail of more than one rewritten form.
+        if (!_captureWalk.visited.add(node)) return;
+        if (node instanceof BoundVariableExpression variable) captured.add(variable.getVariable());
+        if (node instanceof BoundAssignmentExpression assignment) {
+            captured.add(assignment.getVariable());
+            writtenCaptures.add(assignment.getVariable());
         }
-        // What a nested closure, spawn or called function captures, this body has
-        // to hold for it, by symbol: a local of the same name here is another variable.
-        if (_captureWalk != null) {
-            if (node instanceof BoundLambdaExpression lambda) _captureWalk.sources.add(lambda.getCapturedVariables());
-            if (node instanceof BoundSpawnExpression spawn) _captureWalk.sources.add(spawn.getCapturedVariables());
-            if (node instanceof BoundCallExpression call) _captureWalk.sources.add(call.getFunction().getCapturedLocals());
-            if (node instanceof BoundVariableDeclaration declared) _captureWalk.declared.add(declared.getVariable());
-        }
-        // Forms whose children are not all reported, or that declare a variable.
-        if (node instanceof BoundTryCatchStatement tryCatch) {
-            if (_captureWalk != null) _captureWalk.declared.add(tryCatch.getErrorVariable());
-            collectExternalRefs(tryCatch.getTryBody(), localNames, captured, writtenCaptures);
-            collectExternalRefs(tryCatch.getCatchBody(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundTryExpression tryExpression) {
-            if (_captureWalk != null) _captureWalk.declared.add(tryExpression.getErrorVariable());
-            collectExternalRefs(tryExpression.getTryBody(), localNames, captured, writtenCaptures);
-            collectExternalRefs(tryExpression.getCatchBody(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundScopeExpression scopeExpression) {
-            collectExternalRefs(scopeExpression.getBody(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundForStatement forStatement) {
-            collectExternalRefs(forStatement.getInitializer(), localNames, captured, writtenCaptures);
-            collectExternalRefs(forStatement.getCondition(), localNames, captured, writtenCaptures);
-            collectExternalRefs(forStatement.getIterator(), localNames, captured, writtenCaptures);
-            collectExternalRefs(forStatement.getBody(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundWhileStatement whileStatement) {
-            collectExternalRefs(whileStatement.getCondition(), localNames, captured, writtenCaptures);
-            collectExternalRefs(whileStatement.getBody(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundIfStatement ifStatement) {
-            collectExternalRefs(ifStatement.getCondition(), localNames, captured, writtenCaptures);
-            collectExternalRefs(ifStatement.getThenStatement(), localNames, captured, writtenCaptures);
-            if (ifStatement.getElseStatement() != null) {
-                collectExternalRefs(ifStatement.getElseStatement(), localNames, captured, writtenCaptures);
-            }
-        }
+        if (node instanceof BoundVariableDeclaration declaration) _captureWalk.declared.add(declaration.getVariable());
+        if (node instanceof BoundTryCatchStatement tryCatch) _captureWalk.declared.add(tryCatch.getErrorVariable());
+        if (node instanceof BoundTryExpression tryExpression) _captureWalk.declared.add(tryExpression.getErrorVariable());
         if (node instanceof BoundMatchExpression match) {
-            collectExternalRefs(match.getTarget(), localNames, captured, writtenCaptures);
             for (BoundMatchExpression.BoundMatchArm arm : match.getArms()) {
-                if (arm.pattern() != null) collectExternalRefs(arm.pattern(), localNames, captured, writtenCaptures);
-                for (BoundStatement statement : arm.preStatements()) {
-                    collectExternalRefs(statement, localNames, captured, writtenCaptures);
-                }
-                collectExternalRefs(arm.body(), localNames, captured, writtenCaptures);
-                if (_captureWalk != null && arm.variant() != null) {
-                    for (VariableSymbol binding : arm.variant().bindings()) {
-                        if (binding != null) _captureWalk.declared.add(binding);
-                    }
+                if (arm.variant() == null) continue;
+                for (VariableSymbol binding : arm.variant().bindings()) {
+                    if (binding != null) _captureWalk.declared.add(binding);
                 }
             }
         }
-        if (node instanceof BoundAssignmentExpression assignExpr) {
-            if (!localNames.contains(assignExpr.getVariable().getName())) {
-                captured.add(assignExpr.getVariable());
-                writtenCaptures.add(assignExpr.getVariable());
-            }
-            collectExternalRefs(assignExpr.getExpression(), localNames, captured, writtenCaptures);
+        if (node instanceof BoundCallExpression call) _captureWalk.sources.add(call.getFunction().getCapturedLocals());
+        if (node instanceof BoundLambdaExpression lambda) {
+            _captureWalk.sources.add(lambda.getCapturedVariables());
+            return;
         }
-        if (node instanceof BoundExpressionStatement statement) {
-            collectExternalRefs(statement.getExpression(), localNames, captured, writtenCaptures);
+        // `spawn Box.new(x)` runs its call right here; only a block has its own captures.
+        if (node instanceof BoundSpawnExpression spawn && !spawn.isExpressionForm()) {
+            _captureWalk.sources.add(spawn.getCapturedVariables());
+            return;
         }
-        if (node instanceof BoundBlockStatement block) {
-            for (BoundStatement statement : block.getStatements()) {
-                collectExternalRefs(statement, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundVariableDeclaration declaration) {
-            collectExternalRefs(declaration.getInitializer(), localNames, captured, writtenCaptures);
-        }
-        // Several bound nodes report no children, so a capture used inside one
-        // was invisible here and the emitter crashed looking for a local that
-        // was never passed in. Each composite form is walked explicitly.
-        if (node instanceof BoundArrayLiteralExpression arrayLiteral) {
-            for (BoundExpression element : arrayLiteral.getElements()) {
-                collectExternalRefs(element, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundMapLiteralExpression mapLiteral) {
-            for (BoundExpression value : mapLiteral.getValues()) {
-                collectExternalRefs(value, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundStructLiteralExpression structLiteral) {
-            for (BoundExpression value : structLiteral.getFieldValues().values()) {
-                collectExternalRefs(value, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundCallExpression call) {
-            for (BoundExpression argument : call.getArguments()) {
-                collectExternalRefs(argument, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundJavaMethodCallExpression javaCall) {
-            if (javaCall.getTarget() != null) {
-                collectExternalRefs(javaCall.getTarget(), localNames, captured, writtenCaptures);
-            }
-            for (BoundExpression argument : javaCall.getArguments()) {
-                collectExternalRefs(argument, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundClosureCallExpression closureCall) {
-            collectExternalRefs(closureCall.getClosure(), localNames, captured, writtenCaptures);
-            for (BoundExpression argument : closureCall.getArguments()) {
-                collectExternalRefs(argument, localNames, captured, writtenCaptures);
-            }
-        }
-        if (node instanceof BoundBinaryExpression binary) {
-            collectExternalRefs(binary.getLeft(), localNames, captured, writtenCaptures);
-            collectExternalRefs(binary.getRight(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundUnaryExpression unary) {
-            collectExternalRefs(unary.getOperand(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundIndexExpression index) {
-            collectExternalRefs(index.getTarget(), localNames, captured, writtenCaptures);
-            collectExternalRefs(index.getIndex(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundIndexAssignmentExpression indexAssign) {
-            collectExternalRefs(indexAssign.getTarget(), localNames, captured, writtenCaptures);
-            collectExternalRefs(indexAssign.getIndex(), localNames, captured, writtenCaptures);
-            collectExternalRefs(indexAssign.getValue(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundMemberAccessExpression member) {
-            collectExternalRefs(member.getTarget(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundMemberAssignmentExpression memberAssign) {
-            collectExternalRefs(memberAssign.getTarget(), localNames, captured, writtenCaptures);
-            collectExternalRefs(memberAssign.getValue(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundConditionalGotoStatement conditionalGoto) {
-            collectExternalRefs(conditionalGoto.getCondition(), localNames, captured, writtenCaptures);
-        }
-        if (node instanceof BoundReturnStatement returnStatement && returnStatement.getExpression() != null) {
-            collectExternalRefs(returnStatement.getExpression(), localNames, captured, writtenCaptures);
-        }
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectExternalRefs(it.next(), localNames, captured, writtenCaptures);
+        for (BoundNode operand : BoundOperands.of(node)) {
+            collectExternalRefs(operand, captured, writtenCaptures);
         }
     }
 

@@ -1702,16 +1702,10 @@ public class Emitter {
     // ========== Lambda/Spawn Method Emission ==========
 
     private void collectLambdasAndSpawns(BoundNode node) {
-        if (node instanceof BoundLambdaExpression lambda) {
-            if (!_lambdas.contains(lambda)) _lambdas.add(lambda);
-            collectLambdasAndSpawns(lambda.getBody());
-        }
-        if (node instanceof BoundSpawnExpression spawn) {
-            if (!_spawns.contains(spawn)) _spawns.add(spawn);
-            collectLambdasAndSpawns(spawn.getBody());
-        }
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectLambdasAndSpawns(it.next());
+        if (node instanceof BoundLambdaExpression lambda && !_lambdas.contains(lambda)) _lambdas.add(lambda);
+        if (node instanceof BoundSpawnExpression spawn && !_spawns.contains(spawn)) _spawns.add(spawn);
+        for (BoundNode operand : BoundOperands.of(node)) {
+            collectLambdasAndSpawns(operand);
         }
     }
 

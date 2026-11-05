@@ -103,6 +103,40 @@ class CliParityTest {
     }
 
     @Test
+    void anImportedModulesNestedFunctionCapturesFromCompositeExpressions() throws Exception {
+        Files.writeString(tempDir.resolve("mu.siyo"), """
+                pub type R = A(int)
+                imut x = "module"
+                pub fn makeUnion() -> fn() -> R {
+                    imut n = 41
+                    fn k() -> R { A(n) }
+                    k
+                }
+                pub fn makeCast() -> fn() -> object {
+                    imut x = "local"
+                    fn k() -> object { x as String }
+                    k
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "mu"
+                fn main() {
+                    imut u = mu.makeUnion()
+                    match u() { A(v) => println(toString(v)) }
+                    imut c = mu.makeCast()
+                    println(toString(c()))
+                }
+                """);
+        Result interpreted = siyoc("interpret", main.toString());
+        assertEquals("41\nlocal", interpreted.stdout, interpreted.stderr);
+        Result compiled = siyoc("run", main.toString());
+        assertEquals(1, compiled.exitCode, compiled.stdout);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                compiled.stderr.contains("from the function around it"), compiled.stderr);
+    }
+
+    @Test
     void aMissingSourceFileIsReportedWithoutAStackTrace() throws Exception {
         String missing = tempDir.resolve("missing.siyo").toString();
         for (String mode : List.of("run", "interpret")) {

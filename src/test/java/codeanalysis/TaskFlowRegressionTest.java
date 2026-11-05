@@ -1674,6 +1674,226 @@ class TaskFlowRegressionTest {
                 """, "SpawnSettles");
     }
 
+    // --- T21: captures in composite expressions ------------------------------------
+
+    @Test
+    void aCaptureUsedOnlyAsAUnionArgumentIsHeld() throws Exception {
+        assertInterpreted("41\n42\n7", """
+                type R = A(int)
+                fn immutable() -> fn() -> R {
+                    imut x = 41
+                    fn k() -> R { A(x) }
+                    k
+                }
+                fn mutable() -> fn() -> R {
+                    mut x = 41
+                    fn k() -> R {
+                        x = x + 1
+                        A(x)
+                    }
+                    k
+                }
+                fn transitive() -> fn() -> R {
+                    imut x = 7
+                    fn read() -> int { x }
+                    fn k() -> R { A(read()) }
+                    k
+                }
+                fn show(r: R) { match r { A(v) => println(toString(v)) } }
+                fn main() {
+                    imut a = immutable()
+                    show(a())
+                    imut b = mutable()
+                    show(b())
+                    imut c = transitive()
+                    show(c())
+                }
+                """, "UnionArgumentCapture");
+    }
+
+    @Test
+    void aCaptureUsedOnlyAsACastOperandIsHeld() throws Exception {
+        assertInterpreted("local\nchanged\nvia", """
+                fn immutable() -> fn() -> object {
+                    imut x = "local"
+                    fn k() -> object { x as String }
+                    k
+                }
+                fn mutable() -> fn() -> object {
+                    mut x = "local"
+                    fn k() -> object {
+                        x = "changed"
+                        x as String
+                    }
+                    k
+                }
+                fn transitive() -> fn() -> object {
+                    imut x = "via"
+                    fn read() -> string { x as String }
+                    fn k() -> object { read() }
+                    k
+                }
+                fn main() {
+                    imut a = immutable()
+                    println(toString(a()))
+                    imut b = mutable()
+                    println(toString(b()))
+                    imut c = transitive()
+                    println(toString(c()))
+                }
+                """, "CastOperandCapture");
+    }
+
+    @Test
+    void compiledAMissedCaptureNeverReadsASameNamedGlobal() throws Exception {
+        for (String body : java.util.List.of("A(x)", "A(read())")) {
+            String source = """
+                    type R = A(int)
+                    imut x = 1
+                    fn make() -> fn() -> R {
+                        imut x = 41
+                        fn read() -> int { x }
+                        fn k() -> R { %s }
+                        k
+                    }
+                    fn main() {
+                        imut f = make()
+                        match f() { A(v) => println(toString(v)) }
+                    }
+                    """.formatted(body);
+            assertEquals("41", harness.interpret(source, "ShadowUnion"));
+            String compiled = compileFailure(source, "ShadowUnion");
+            org.junit.jupiter.api.Assertions.assertTrue(compiled.contains("from the function around it"), compiled);
+        }
+        String cast = """
+                imut x = "global"
+                fn make() -> fn() -> object {
+                    imut x = "local"
+                    fn k() -> object { x as String }
+                    k
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """;
+        assertEquals("local", harness.interpret(cast, "ShadowCast"));
+        String compiled = compileFailure(cast, "ShadowCast");
+        org.junit.jupiter.api.Assertions.assertTrue(compiled.contains("from the function around it"), compiled);
+    }
+
+    @Test
+    void aSpawnHoldsWhatACompositeExpressionUses() throws Exception {
+        assertInterpreted("41\nlocal\n41", """
+                type R = A(int)
+                fn main() {
+                    imut x = 41
+                    imut s = "local"
+                    scope {
+                        spawn {
+                            match A(x) { A(v) => println(toString(v)) }
+                        }
+                    }
+                    scope { spawn { println(toString(s as String)) } }
+                    scope { spawn { println(toString([x][0])) } }
+                }
+                """, "SpawnComposite");
+    }
+
+    @Test
+    void aSpawnMayNotHoldAMutableThroughACompositeExpression() throws Exception {
+        assertRejected("mut", """
+                type R = A(int)
+                fn main() {
+                    mut x = 41
+                    scope {
+                        spawn {
+                            match A(x) { A(v) => println(toString(v)) }
+                        }
+                    }
+                }
+                """, "SpawnCompositeMutable");
+    }
+
+    @Test
+    void aSpawnedCallHoldsItsArguments() throws Exception {
+        assertBoth("41\n42\n43", """
+                fn show(n: int) { println(toString(n)) }
+                fn inFunction() {
+                    imut x = 41
+                    scope { spawn show(x) }
+                }
+                fn inLambda() {
+                    imut x = 42
+                    imut f = fn() { scope { spawn show(x) } }
+                    f()
+                }
+                fn inBlockSpawn() {
+                    imut x = 43
+                    scope { spawn { scope { spawn show(x) } } }
+                }
+                fn main() {
+                    inFunction()
+                    inLambda()
+                    inBlockSpawn()
+                }
+                """, "SpawnedCall");
+    }
+
+    @Test
+    void anActorSpawnsConstructorArgumentIsACapture() throws Exception {
+        String actor = """
+                actor struct Held { n: int }
+                impl Held {
+                    fn new(v: int) -> Held { Held { n: v } }
+                    fn get(self) -> int { self.n }
+                }
+                """;
+        assertInterpreted("41", actor + """
+                fn make() -> fn() -> int {
+                    imut x = 41
+                    fn k() -> int {
+                        imut b = spawn Held.new(x)
+                        b.get()
+                    }
+                    k
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """, "ActorArgInFunction");
+        assertBoth("41", actor + """
+                fn make() -> fn() -> int {
+                    imut x = 41
+                    fn() -> int {
+                        imut b = spawn Held.new(x)
+                        b.get()
+                    }
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """, "ActorArgInLambda");
+        String shadowed = "imut x = 1\n" + actor + """
+                fn make() -> fn() -> int {
+                    imut x = 41
+                    fn k() -> int {
+                        imut b = spawn Held.new(x)
+                        b.get()
+                    }
+                    k
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """;
+        String compiled = compileFailure(shadowed, "ActorArgShadow");
+        org.junit.jupiter.api.Assertions.assertTrue(compiled.contains("from the function around it"), compiled);
+    }
+
     @Test
     void aForLoopInALambdaKeepsItsOwnCounters() throws Exception {
         assertBoth("3\n3\n7", """
