@@ -327,4 +327,87 @@ class DataKitRegressionTest {
                 }
                 """, "IsFloat");
     }
+
+    // --- G5: std/csv -----------------------------------------------------------
+
+    private static final String SHOW_CSV = """
+            import "std/csv"
+            import "std/strings"
+            fn show(text: string) -> string {
+                match csv.parse(text) {
+                    Table(rows) => {
+                        mut parts: string[] = []
+                        for row in rows {
+                            mut cells: string[] = []
+                            for cell in row { push(cells, "[" + replace(replace(cell, "\\r", "CR"), "\\n", "LF") + "]") }
+                            push(parts, toString(len(row)) + ":" + strings.join(cells, ""))
+                        }
+                        "rows " + toString(len(rows)) + " " + strings.join(parts, " ")
+                    },
+                    BadCsv(why) => "bad " + why
+                }
+            }
+            """;
+
+    @Test
+    void csvReadsQuotedFieldsLineEndingsAndAByteOrderMark() throws Exception {
+        assertBoth(String.join("\n",
+                        "rows 2 2:[a][b] 2:[c][d]",
+                        "rows 2 2:[a][b] 2:[c][d]",
+                        "rows 2 3:[a,1][say \"hi\"][] 1:[x]",
+                        "rows 2 2:[twoCRLFlines][z] 1:[]",
+                        "rows 1 2:[a][b]",
+                        "rows 0 ",
+                        "rows 0 ",
+                        "rows 1 3:[a][][]",
+                        "rows 3 1:[a] 1:[] 1:[b]",
+                        "rows 2 1:[a] 1:[b]",
+                        "rows 1 1:[\"]"),
+                SHOW_CSV + """
+                fn main() {
+                    println(show("a,b\\nc,d\\n"))
+                    println(show("a,b\\r\\nc,d"))
+                    println(show("\\"a,1\\",\\"say \\"\\"hi\\"\\"\\",\\"\\"\\nx"))
+                    println(show("\\"two\\r\\nlines\\",z\\n\\"\\"\\n"))
+                    println(show(chr(65279) + "a,b"))
+                    println(show(""))
+                    println(show(chr(65279)))
+                    println(show("a,,"))
+                    println(show("a\\n\\nb"))
+                    println(show("a\\rb\\r"))
+                    println(show("\\"\\"\\"\\""))
+                }
+                """, "CsvReads");
+    }
+
+    @Test
+    void csvReportsMalformedQuotingWithItsLine() throws Exception {
+        assertBoth(String.join("\n",
+                        "bad line 1: text after the closing quote of a field",
+                        "bad line 2: a quoted field is not closed",
+                        "bad line 3: a quote inside an unquoted field",
+                        "bad line 3: text after the closing quote of a field"),
+                SHOW_CSV + """
+                fn main() {
+                    println(show("a,\\"b\\"c"))
+                    println(show("a\\n\\"open,\\nstill open"))
+                    println(show("a\\nb\\nc\\"d"))
+                    println(show("\\"multi\\nline\\nfield\\"x"))
+                }
+                """, "CsvMalformed");
+    }
+
+    @Test
+    void csvFormatRowQuotesWhatNeedsItAndRoundTrips() throws Exception {
+        assertBoth(String.join("\n",
+                        "plain,\"a,b\",\"say \"\"x\"\"\",\"two\nlines\",\" pad\",,1.5",
+                        "rows 1 7:[plain][a,b][say \"x\"][twoLFlines][ pad][][1.5]"),
+                SHOW_CSV + """
+                fn main() {
+                    imut line = csv.formatRow(["plain", "a,b", "say \\"x\\"", "two\\nlines", " pad", "", "1.5"])
+                    println(line)
+                    println(show(line))
+                }
+                """, "CsvFormat");
+    }
 }
