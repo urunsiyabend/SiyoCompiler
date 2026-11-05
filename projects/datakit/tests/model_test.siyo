@@ -1,0 +1,33 @@
+import "std/testing"
+import "model"
+
+fn plainNeverUsesAnExponent() {
+    testing.assertEq(model.plain(100000000000000000000.0), "100000000000000000000.0", "large")
+    testing.assertEq(model.plain(0.1), "0.1", "shortest")
+    testing.assertEq(model.plain(1.0 / 3.0), "0.3333333333333333", "repeating")
+    testing.assertEq(model.plain(0.000001), "0.000001", "small")
+    testing.assertEq(model.plain(-2.5), "-2.5", "negative")
+    testing.assertEq(model.plain(-0.0), "0.0", "negative zero")
+    testing.assertEq(model.plain(3.0), "3.0", "whole")
+}
+
+fn compareOrdersEachKindAndMissingLast() {
+    testing.assertEq(toString(model.compare(IntV(2), IntV(10))), "-1", "ints by value")
+    testing.assertEq(toString(model.compare(Text("10"), Text("2"))), "-1", "text as text")
+    testing.assertEq(toString(model.compare(FloatV(2.5), IntV(2))), "1", "mixed numbers")
+    testing.assertEq(toString(model.compare(Missing, IntV(2))) + toString(model.compare(IntV(2), Missing)) + toString(model.compare(Missing, Missing)),
+        "1-10", "missing last")
+    testing.assertEq(toString(model.compare(Flag(false), Flag(true))), "-1", "false first")
+    testing.assertEq(toString(model.compare(IntV(9223372036854775807L), IntV(9223372036854775806L))), "1", "longs exactly")
+}
+
+fn safeEscapesWhatATerminalWouldObey() {
+    testing.assertEq(model.safe("a" + chr(27) + "[31m" + chr(7)), "a\\u001b[31m\\u0007", "C0")
+    testing.assertEq(model.safe(chr(155) + chr(127)), "\\u009b\\u007f", "C1 and DEL")
+    testing.assertEq(model.safe("x" + chr(8238) + "y" + chr(8294)), "x\\u202ey\\u2066", "bidirectional controls")
+    testing.assertEq(model.safe("café, naïve"), "café, naïve", "letters stay")
+}
+
+fn main() {
+    testing.run("model", [plainNeverUsesAnExponent, compareOrdersEachKindAndMissingLast, safeEscapesWhatATerminalWouldObey])
+}

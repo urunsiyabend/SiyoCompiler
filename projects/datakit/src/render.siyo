@@ -1,0 +1,239 @@
+// Everything DataKit prints. Text is for people and escapes control characters;
+// JSON is for programs and goes through json.stringify; CSV is data.
+
+import "std/json"
+import "std/csv"
+import "std/strings"
+import "model"
+import "validate"
+import "stats"
+// Profile.top holds pipeline Groups, which only resolve here when pipeline is imported too (PAIN_POINTS D-transitive).
+import "pipeline"
+
+// At most this many problems are listed; the counts always cover all of them.
+imut SHOWN = 100
+
+fn problemLine(p: Problem) -> string {
+    imut location = if p.column == "" { p.place } else { p.place + ", " + p.column }
+    model.safe(location) + ": " + model.safe(p.message)
+}
+
+pub fn problemsText(c: Checked) -> string {
+    mut out = ""
+    mut n = 0
+    for p in c.problems {
+        if n == SHOWN { break }
+        out = out + problemLine(p) + "\n"
+        n += 1
+    }
+    if len(c.problems) > SHOWN {
+        out = out + "... and " + toString(len(c.problems) - SHOWN) + " more\n"
+    }
+    out
+}
+
+pub fn validateText(s: Schema, c: Checked) -> string {
+    if len(c.problems) == 0 {
+        return "ok: " + toString(c.rows) + " rows, " + toString(len(s.columns)) + " columns\n"
+    }
+    problemsText(c) + "invalid: " + toString(len(c.problems)) + " " + plural(len(c.problems), "problem", "problems")
+        + ", " + toString(c.invalidRows) + " of " + toString(c.rows) + " rows rejected\n"
+}
+
+fn plural(n: int, one: string, many: string) -> string {
+    if n == 1 { one } else { many }
+}
+
+pub fn validateJson(c: Checked) -> string {
+    mut problems: object[] = []
+    mut n = 0
+    for p in c.problems {
+        if n == SHOWN { break }
+        n += 1
+        mut m: map = {}
+        m["row"] = p.row
+        m["place"] = p.place
+        m["column"] = if p.column == "" { null } else { p.column }
+        m["message"] = p.message
+        push(problems, m)
+    }
+    mut out: map = {}
+    out["valid"] = len(c.problems) == 0
+    out["rows"] = c.rows
+    out["validRows"] = len(c.records)
+    out["invalidRows"] = c.invalidRows
+    out["problemCount"] = len(c.problems)
+    out["problems"] = problems
+    json.stringify(out)
+}
+
+// A value as JSON holds it: a number, a string, a boolean or null.
+fn jsonValue(v: Value) -> object {
+    match v {
+        IntV(n) => n,
+        FloatV(x) => x,
+        Text(s) => s,
+        Flag(b) => b,
+        Missing => null
+    }
+}
+
+pub fn rowsCsv(columns: Array<string>, records: Array<Record>) -> string {
+    imut out = strings.builder()
+    out.append(csv.formatRow(columns) + "\n")
+    for r in records {
+        mut cells: Array<string> = []
+        for name in columns { push(cells, model.text(r.cells[name])) }
+        out.append(csv.formatRow(cells) + "\n")
+    }
+    toString(out)
+}
+
+pub fn rowsJson(columns: Array<string>, records: Array<Record>) -> string {
+    mut rows: object[] = []
+    for r in records {
+        mut m: map = {}
+        for name in columns { m[name] = jsonValue(r.cells[name]) }
+        push(rows, m)
+    }
+    json.stringify(rows)
+}
+
+fn keyText(v: Value) -> string {
+    if model.isMissing(v) { "(missing)" } else { model.safe(model.text(v)) }
+}
+
+fn amount(v: Value) -> string {
+    match v {
+        IntV(n) => toString(n),
+        FloatV(x) => strings.formatFloat(x, 2),
+        Missing => "-",
+        _ => model.safe(model.text(v))
+    }
+}
+
+pub fn groupText(by: string, sum: string, groups: Array<GroupStat>) -> string {
+    mut rows: Array<Array<string>> = []
+    if sum == "" {
+        push(rows, [model.safe(by), "count"])
+        for g in groups { push(rows, [keyText(g.key), toString(g.count)]) }
+    } else {
+        push(rows, [model.safe(by), "count", "present", "sum", "min", "max", "mean"])
+        for g in groups {
+            push(rows, [keyText(g.key), toString(g.count), toString(g.present), amount(g.sum),
+                        amount(g.min), amount(g.max), amount(g.mean)])
+        }
+    }
+    table(rows)
+}
+
+// Columns padded to their widest cell, two spaces apart; numbers would align
+// better on the right, but a key is text.
+fn table(rows: Array<Array<string>>) -> string {
+    mut widths: Array<int> = []
+    for row in rows {
+        for mut i = 0 i < len(row) i = i + 1 {
+            if i >= len(widths) { push(widths, 0) }
+            if len(row[i]) > widths[i] { widths[i] = len(row[i]) }
+        }
+    }
+    imut out = strings.builder()
+    for row in rows {
+        mut line = ""
+        for mut i = 0 i < len(row) i = i + 1 {
+            line = line + (if i == len(row) - 1 { row[i] } else { strings.padRight(row[i], widths[i] + 2, " ") })
+        }
+        out.append(line + "\n")
+    }
+    toString(out)
+}
+
+pub fn groupJson(by: string, sum: string, groups: Array<GroupStat>) -> string {
+    mut list: object[] = []
+    for g in groups {
+        mut m: map = {}
+        m["key"] = jsonValue(g.key)
+        m["count"] = g.count
+        if sum != "" {
+            m["present"] = g.present
+            m["sum"] = jsonValue(g.sum)
+            m["min"] = jsonValue(g.min)
+            m["max"] = jsonValue(g.max)
+            m["mean"] = jsonValue(g.mean)
+        }
+        push(list, m)
+    }
+    mut out: map = {}
+    out["by"] = by
+    out["sum"] = if sum == "" { null } else { sum }
+    out["groups"] = list
+    json.stringify(out)
+}
+
+pub fn reportText(s: Schema, rows: int, profiles: Array<Profile>) -> string {
+    imut title = if s.name == "" { "report" } else { "report for " + model.safe(s.name) }
+    imut out = strings.builder()
+    out.append(title + ": " + toString(rows) + " rows\n")
+    for p in profiles {
+        imut c = p.column
+        out.append("\n" + model.safe(c.name) + " (" + c.kind + "): " + toString(p.present) + " present, "
+            + toString(p.missing) + " missing, " + toString(p.distinct) + " distinct\n")
+        if model.isNumeric(c) && p.present > 0 {
+            out.append("  min " + amount(p.stats.min) + "  max " + amount(p.stats.max) + "  sum " + amount(p.stats.sum)
+                + "  mean " + amount(p.stats.mean) + "\n")
+        }
+        if c.kind == "date" && p.present > 0 {
+            out.append("  earliest " + p.earliest + "  latest " + p.latest + "\n")
+        }
+        if c.kind == "bool" {
+            out.append("  true " + toString(p.trues) + "  false " + toString(p.falses) + "\n")
+        }
+        for g in p.top {
+            out.append("  " + toString(len(g.items)) + "x " + model.safe(g.key) + "\n")
+        }
+    }
+    toString(out)
+}
+
+pub fn reportJson(s: Schema, rows: int, profiles: Array<Profile>) -> string {
+    mut columns: object[] = []
+    for p in profiles {
+        imut c = p.column
+        mut m: map = {}
+        m["name"] = c.name
+        m["type"] = c.kind
+        m["present"] = p.present
+        m["missing"] = p.missing
+        m["distinct"] = p.distinct
+        if model.isNumeric(c) {
+            m["min"] = jsonValue(p.stats.min)
+            m["max"] = jsonValue(p.stats.max)
+            m["sum"] = jsonValue(p.stats.sum)
+            m["mean"] = jsonValue(p.stats.mean)
+        }
+        if c.kind == "date" {
+            m["earliest"] = if p.earliest == "" { null } else { p.earliest }
+            m["latest"] = if p.latest == "" { null } else { p.latest }
+        }
+        if c.kind == "bool" {
+            m["true"] = p.trues
+            m["false"] = p.falses
+        }
+        if c.kind == "string" {
+            mut top: object[] = []
+            for g in p.top {
+                mut t: map = {}
+                t["value"] = g.key
+                t["count"] = len(g.items)
+                push(top, t)
+            }
+            m["top"] = top
+        }
+        push(columns, m)
+    }
+    mut out: map = {}
+    out["name"] = if s.name == "" { null } else { s.name }
+    out["rows"] = rows
+    out["columns"] = columns
+    json.stringify(out)
+}

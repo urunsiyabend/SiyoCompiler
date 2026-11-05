@@ -1,0 +1,110 @@
+// A data file in, raw rows out: CSV with a header row, or a JSON array of
+// objects. Nothing is typed here; a CSV cell is text and a JSON field is
+// whatever the document holds.
+
+import "std/io"
+import "std/json"
+import "std/csv"
+import "std/path"
+import "model"
+
+pub struct RawRow {
+    row: int,                      // the line it starts on, or its position in the array
+    place: string,                 // "line 4" or "record 3"
+    fields: Map<string, object>,
+    fromText: bool                 // CSV: every field is text to be parsed
+}
+
+pub struct RawData {
+    columns: Array<string>,        // the header, or every key in first-seen order
+    rows: Array<RawRow>,
+    problems: Array<Problem>
+}
+
+pub type Read = Data(RawData) | Unreadable(string)
+
+pub fn load(file: string) -> Read {
+    if !io.isFile(file) { return Unreadable("cannot read " + file) }
+    imut text = io.readText(file)
+    imut ext = toLower(path.extension(file))
+    if ext == ".csv" { return Data(fromCsv(text)) }
+    if ext == ".json" { return Data(fromJson(text)) }
+    Unreadable("cannot tell the format of " + file + ": expected a .csv or .json file")
+}
+
+fn broken(why: string) -> RawData {
+    RawData { columns: [], rows: [], problems: [Problem { row: 0, place: "file", column: "", message: why }] }
+}
+
+pub fn fromCsv(text: string) -> RawData {
+    match csv.parse(text) {
+        BadCsv(why) => broken("malformed CSV: " + why),
+        Table(table) => {
+            if len(table) == 0 { return broken("the file is empty: a CSV file needs a header row") }
+            mut problems: Array<Problem> = []
+            imut header = table[0].cells
+            mut seen: Set<string> = #{}
+            for name in header {
+                if trim(name) == "" {
+                    push(problems, Problem { row: 1, place: "line 1", column: "", message: "a header names an empty column" })
+                } else if seen.has(name) {
+                    push(problems, Problem { row: 1, place: "line 1", column: name, message: "the header names this column twice" })
+                }
+                seen.add(name)
+            }
+            mut rows: Array<RawRow> = []
+            mut r = 1
+            while r < len(table) {
+                imut row = table[r]
+                r += 1
+                imut place = "line " + toString(row.line)
+                // A blank line holds no data, wherever it is.
+                if len(row.cells) == 1 && row.cells[0] == "" { continue }
+                if len(row.cells) != len(header) {
+                    push(problems, Problem { row: row.line, place: place, column: "",
+                        message: "has " + toString(len(row.cells)) + " fields, the header has " + toString(len(header)) })
+                    continue
+                }
+                mut fields: Map<string, object> = {}
+                for mut i = 0 i < len(header) i = i + 1 { fields[header[i]] = row.cells[i] }
+                push(rows, RawRow { row: row.line, place: place, fields: fields, fromText: true })
+            }
+            RawData { columns: header, rows: rows, problems: problems }
+        }
+    }
+}
+
+pub fn fromJson(text: string) -> RawData {
+    match json.parseValue(text) {
+        Malformed(why) => broken("malformed JSON: " + why),
+        Document(doc) => {
+            if typeOf(doc) != "array" { return broken("a JSON data file must be an array of objects, got " + typeOf(doc)) }
+            imut items: object[] = doc
+            mut problems: Array<Problem> = []
+            mut rows: Array<RawRow> = []
+            mut columns: Array<string> = []
+            mut seen: Set<string> = #{}
+            mut n = 0
+            for item in items {
+                n += 1
+                imut place = "record " + toString(n)
+                if typeOf(item) != "map" {
+                    push(problems, Problem { row: n, place: place, column: "", message: "a record must be an object, got " + typeOf(item) })
+                    continue
+                }
+                imut m: map = item
+                mut fields: Map<string, object> = {}
+                for k in m {
+                    imut key = toString(k)
+                    fields[key] = m[k]
+                    if !seen.has(key) {
+                        seen.add(key)
+                        push(columns, key)
+                    }
+                }
+                push(rows, RawRow { row: n, place: place, fields: fields, fromText: false })
+            }
+            RawData { columns: columns, rows: rows, problems: problems }
+        }
+    }
+}

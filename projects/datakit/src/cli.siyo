@@ -1,0 +1,142 @@
+// Command-line parsing: argv in, Options or a usage error out. Nothing here
+// reads a file; whether a column exists is checked once the schema is loaded.
+
+import "std/strings"
+
+pub struct Options {
+    command: string,
+    data: string,
+    schema: string,
+    json: bool,
+    wheres: Array<string>,
+    select: string,          // "" for every column
+    sort: string,            // "" for file order
+    descending: bool,
+    limit: int,              // -1 for no limit
+    format: string,          // csv | json
+    out: string,             // "" for standard output
+    by: string,
+    sum: string
+}
+
+pub type Parsed = Opts(Options) | Usage(string) | Help
+
+pub fn usage() -> string {
+    """usage: datakit <command> DATA --schema SCHEMA [options]
+
+commands:
+  validate   check DATA against SCHEMA and list every problem
+  transform  filter, sort and select valid rows, written as CSV or JSON
+  group      count rows by one column, and sum another
+  report     profile every column: counts, ranges, frequent values
+
+options:
+  --schema FILE      the JSON schema DATA is checked against (required)
+  --json             validate, group, report: print JSON instead of text
+  --where COND       transform: keep rows where COND holds; repeatable, all must hold.
+                     COND is COLUMN=VALUE, or != >= <= > <; an empty VALUE means missing
+  --select A,B       transform: write these columns, in this order (default: all)
+  --sort COL[:desc]  transform: order by COL; missing values come last
+  --limit N          transform: at most N rows
+  --format csv|json  transform: output format (default: from --out, else csv)
+  --out FILE         transform: write to FILE, which must not exist (default: standard output)
+  --by COL           group: the column to group by (required)
+  --sum COL          group: a number column to total in each group
+
+DATA is a .csv file with a header row, or a .json array of objects.
+
+exit codes: 0 ok, 1 usage error, 2 a file cannot be read or written, 3 invalid data or schema"""
+}
+
+fn isCommand(name: string) -> bool {
+    name == "validate" || name == "transform" || name == "group" || name == "report"
+}
+
+// Which command may be given which flag.
+fn allows(command: string, flag: string) -> bool {
+    if flag == "--schema" { return true }
+    if flag == "--json" { return command != "transform" }
+    if flag == "--where" || flag == "--select" || flag == "--sort" || flag == "--limit"
+        || flag == "--format" || flag == "--out" { return command == "transform" }
+    if flag == "--by" || flag == "--sum" { return command == "group" }
+    false
+}
+
+fn takesValue(flag: string) -> bool {
+    flag != "--json"
+}
+
+pub fn parseArgs(args: string[]) -> Parsed {
+    if len(args) == 0 { return Usage("no command given") }
+    imut command = args[0]
+    if command == "help" || command == "--help" || command == "-h" { return Help }
+    if !isCommand(command) { return Usage("unknown command \"" + command + "\"") }
+    mut o = Options { command: command, data: "", schema: "", json: false, wheres: [], select: "", sort: "",
+                      descending: false, limit: -1, format: "", out: "", by: "", sum: "" }
+    mut given: Set<string> = #{}
+    mut i = 1
+    while i < len(args) {
+        imut a = args[i]
+        i += 1
+        if !startsWith(a, "-") || a == "-" {
+            if o.data != "" { return Usage("only one DATA file is read, got \"" + o.data + "\" and \"" + a + "\"") }
+            o.data = a
+            continue
+        }
+        if !allows(command, a) {
+            if allows("transform", a) || allows("group", a) || allows("validate", a) {
+                return Usage(a + " does not apply to " + command)
+            }
+            return Usage("unknown flag \"" + a + "\"")
+        }
+        if a != "--where" && given.has(a) { return Usage(a + " is given twice") }
+        given.add(a)
+        if !takesValue(a) {
+            o.json = true
+            continue
+        }
+        // A flag is never taken as another flag's value: `--out --json` would
+        // otherwise write a file called --json.
+        if i >= len(args) || startsWith(args[i], "--") { return Usage(a + " needs a value") }
+        imut v = args[i]
+        i += 1
+        if v == "" { return Usage(a + " needs a value") }
+        if a == "--schema" { o.schema = v }
+        else if a == "--where" { push(o.wheres, v) }
+        else if a == "--select" { o.select = v }
+        else if a == "--sort" {
+            o.sort = v
+            if endsWith(v, ":desc") {
+                o.sort = substring(v, 0, len(v) - 5)
+                o.descending = true
+            } else if endsWith(v, ":asc") {
+                o.sort = substring(v, 0, len(v) - 4)
+            }
+            if o.sort == "" { return Usage("--sort needs a column, got \"" + v + "\"") }
+        }
+        else if a == "--limit" {
+            if !strings.isInt(v) || parseInt(v) < 0 {
+                return Usage("--limit needs a whole number of rows, got \"" + v + "\"")
+            }
+            o.limit = parseInt(v)
+        }
+        else if a == "--format" {
+            if v != "csv" && v != "json" { return Usage("--format must be csv or json, got \"" + v + "\"") }
+            o.format = v
+        }
+        else if a == "--out" { o.out = v }
+        else if a == "--by" { o.by = v }
+        else if a == "--sum" { o.sum = v }
+    }
+    if o.data == "" { return Usage(command + " needs a DATA file") }
+    if o.schema == "" { return Usage(command + " needs --schema") }
+    if command == "group" && o.by == "" { return Usage("group needs --by") }
+    if command == "transform" {
+        imut implied = if endsWith(toLower(o.out), ".json") { "json" } else if endsWith(toLower(o.out), ".csv") { "csv" } else { "" }
+        if o.format == "" { o.format = if implied == "" { "csv" } else { implied } }
+        else if implied != "" && implied != o.format {
+            return Usage("--format " + o.format + " does not match --out " + o.out)
+        }
+    }
+    Opts(o)
+}

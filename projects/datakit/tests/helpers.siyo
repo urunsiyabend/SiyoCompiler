@@ -1,0 +1,52 @@
+// What the test files share: a schema and checked data from text, in one call.
+
+import "model"
+import "schema"
+import "source"
+import "validate"
+
+pub fn schemaOf(text: string) -> Schema {
+    match schema.parse(text, "s.json") {
+        Ok(s) => { return s },
+        Rejected(problems) => { throw "schema rejected: " + toString(problems) }
+    }
+}
+
+imut STAFF = """{"columns": [
+  {"name": "id", "type": "int", "required": true},
+  {"name": "dept", "type": "string"},
+  {"name": "pay", "type": "float"},
+  {"name": "start", "type": "date"},
+  {"name": "remote", "type": "bool"}]}"""
+
+pub fn staff() -> Schema { schemaOf(STAFF) }
+
+pub fn csvOf(s: Schema, text: string) -> Checked {
+    validate.check(s, source.fromCsv(text))
+}
+
+pub fn jsonOf(s: Schema, text: string) -> Checked {
+    validate.check(s, source.fromJson(text))
+}
+
+// Each problem as "place column: message", joined by " | ".
+pub fn problems(c: Checked) -> string {
+    mut out = ""
+    for p in c.problems {
+        if out != "" { out = out + " | " }
+        out = out + p.place + " " + p.column + ": " + p.message
+    }
+    out
+}
+
+// One column of every record, as text, joined by commas.
+pub fn column(records: Array<Record>, name: string) -> string {
+    mut out = ""
+    mut first = true
+    for r in records {
+        if !first { out = out + "," }
+        first = false
+        out = out + model.text(r.cells[name])
+    }
+    out
+}

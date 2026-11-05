@@ -1,0 +1,96 @@
+// What transform does to valid records: keep those matching every condition,
+// order them, take the first N, and choose the columns written.
+//
+//   --where dept=eng   --where salary>=1000   --where end=      (end is missing)
+//   --sort salary:desc --select id,name --limit 10
+
+import "std/strings"
+import "model"
+import "pipeline"
+import "validate"
+
+pub struct Condition { column: Column, op: string, value: Value }
+
+// Not called Parsed: cli exports a Parsed, and two imported types of one name
+// collide in the importer (PAIN_POINTS G12).
+pub type Outcome<T> = Good(T) | Bad(string)
+
+imut OPERATORS = ["!=", ">=", "<=", "=", ">", "<"]
+
+pub fn condition(s: Schema, text: string) -> Outcome<Condition> {
+    // The earliest operator wins, so `a=b>c` compares a with "b>c".
+    mut at = -1
+    mut op = ""
+    for candidate in OPERATORS {
+        imut i = indexOf(text, candidate)
+        if i > 0 && (at < 0 || i < at || (i == at && len(candidate) > len(op))) {
+            at = i
+            op = candidate
+        }
+    }
+    if at < 0 { return Bad("--where needs COLUMN=VALUE, or one of != >= <= > <, got \"" + text + "\"") }
+    imut name = substring(text, 0, at)
+    imut written = substring(text, at + len(op), len(text))
+    match model.column(s, name) {
+        None => Bad("--where names a column the schema does not have: \"" + name + "\""),
+        Some(c) => {
+            if op != "=" && op != "!=" && (c.kind == "bool" || written == "") {
+                return Bad("--where " + name + op + written + ": cannot order " + (if written == "" { "a missing value" } else { "true and false" }))
+            }
+            match valueOf(c, written) {
+                Bad(why) => Bad("--where " + name + op + written + ": " + why),
+                Good(v) => Good(Condition { column: c, op: op, value: v })
+            }
+        }
+    }
+}
+
+// A value written on the command line, read the way the column reads a CSV cell.
+fn valueOf(c: Column, s: string) -> Outcome<Value> {
+    if s == "" { return Good(Missing) }
+    if c.kind == "int" {
+        if !validate.isLong(s) { return Bad("not an integer") }
+        return Good(IntV(parseLong(s)))
+    }
+    if c.kind == "float" {
+        if !strings.isFloat(s) { return Bad("not a number") }
+        return Good(FloatV(parseFloat(s)))
+    }
+    if c.kind == "bool" {
+        if s == "true" { return Good(Flag(true)) }
+        if s == "false" { return Good(Flag(false)) }
+        return Bad("not true or false")
+    }
+    if c.kind == "date" && !validate.isDate(s) { return Bad("not a date written YYYY-MM-DD") }
+    Good(Text(s))
+}
+
+pub fn matches(r: Record, c: Condition) -> bool {
+    imut v = r.cells[c.column.name]
+    imut missing = model.isMissing(v) || model.isMissing(c.value)
+    if c.op == "=" { return model.compare(v, c.value) == 0 }
+    if c.op == "!=" { return model.compare(v, c.value) != 0 }
+    // Nothing is greater or less than a missing value.
+    if missing { return false }
+    imut d = model.compare(v, c.value)
+    if c.op == ">" { d > 0 } else if c.op == "<" { d < 0 } else if c.op == ">=" { d >= 0 } else { d <= 0 }
+}
+
+pub fn filter(records: Array<Record>, conditions: Array<Condition>) -> Array<Record> {
+    pipeline.keep(records, fn(r: Record) -> bool {
+        mut all = true
+        for c in conditions { if !matches(r, c) { all = false } }
+        all
+    })
+}
+
+// Missing sorts last whichever way the rest is ordered; ties keep file order.
+pub fn order(records: Array<Record>, by: Column, descending: bool) -> Array<Record> {
+    imut name = by.name
+    pipeline.sortBy(records, fn(a: Record, b: Record) -> int {
+        imut x = a.cells[name]
+        imut y = b.cells[name]
+        if model.isMissing(x) || model.isMissing(y) { return model.compare(x, y) }
+        if descending { model.compare(y, x) } else { model.compare(x, y) }
+    })
+}
