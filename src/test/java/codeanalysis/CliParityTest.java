@@ -52,6 +52,38 @@ class CliParityTest {
     }
 
     @Test
+    void aProgramMayRecurseDeeply() throws Exception {
+        Path file = tempDir.resolve("deep.siyo");
+        Files.writeString(file, """
+                fn deep(n: int) -> int { if n == 0 { 0 } else { 1 + deep(n - 1) } }
+                fn forever(n: int) -> int { 1 + forever(n + 1) }
+                fn main() {
+                    println(toString(deep(100000)))
+                    try { forever(0) } catch e { println(toString(e)) }
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals("100000\nStackOverflowError", result.stdout, mode + ": " + result.stderr);
+            assertEquals(0, result.exitCode, mode);
+        }
+    }
+
+    @Test
+    void anUncaughtErrorExitsOneOnTheProgramThread() throws Exception {
+        Path file = tempDir.resolve("boom.siyo");
+        Files.writeString(file, """
+                fn forever(n: int) -> int { 1 + forever(n + 1) }
+                fn main() { println(toString(forever(0))) }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, file.toString());
+            assertEquals(1, result.exitCode, mode);
+            org.junit.jupiter.api.Assertions.assertTrue(result.stderr.contains("StackOverflowError"), mode);
+        }
+    }
+
+    @Test
     void anImportedModulesStateIsInitialisedWhenInterpreted() throws Exception {
         Files.writeString(tempDir.resolve("base.siyo"), """
                 pub mut greeting = "hello"
