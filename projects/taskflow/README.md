@@ -63,7 +63,8 @@ One or more files, which are merged. A file is an array of tasks, or an object:
 | `owner` | string | none | |
 | `deps` | array of ids | none | what this task needs |
 
-A dependency may be in another file. `null` reads as absent. An unknown field is
+A dependency may be in another file, and `task` must name a task in one of the files
+even when `needs` is empty or absent. `null` reads as absent. An unknown field is
 an error, since a typo like `dep` would otherwise produce a wrong plan silently.
 
 ## Commands

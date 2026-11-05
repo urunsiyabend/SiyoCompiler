@@ -9,7 +9,7 @@ and reports status. Everything it hit is recorded with a reproducer in
 The planned generics, interface and tooling work moves to 0.10.0: TaskFlow did not
 need it, and the release is built from what was demonstrated.
 
-2,384 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
+2,418 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
 on both backends under a C locale against goldens, and generated graphs are checked
 against rules worked out independently of the application.
 
@@ -42,8 +42,19 @@ the interpreter, which the program's own `catch` then handled as its own error.
 its side effects. `break` and `continue` in a block arm used to crash.
 
 A closure nested in a closure, and a function declared inside a function, read outer
-locals only because they were global. They now capture them properly when interpreted.
-Compiled, both are still an internal compiler error.
+locals only because they were global. They now capture them lexically: a nested
+function returned from its parent keeps the variables it refers to, and shares a mutable
+one with its parent. A closure in a closure reading a local, reading a global or
+writing a local, `scope` reading a captured variable inside a lambda, and a `for` inside
+a lambda, internal compiler errors in 0.8.0, now also work compiled. A lambda also tells
+an inner local from an outer variable of the same name. A nested `fn` using its parent's locals is reported as not compiled
+yet; with a same-named global it used to read the global silently.
+
+**Nested functions of one name are separate functions.** Two functions each declaring
+a nested `k` shared the last one's body, and a nested `helper` replaced a top-level
+`helper`, on both backends. Declaring one twice in a block with one signature is now an
+error, and a nested name is no longer reachable from outside its scope, such as
+`module.inner()`.
 
 **A declared `long` is a long from the start.** `mut h: long = 0` stayed an int and
 wrapped at 2^31.
@@ -169,9 +180,13 @@ Found by TaskFlow and deliberately left for later (see PAIN_POINTS.md):
 - `imut v = m["missing"]` on a `Map<string, int>`: compiled NullPointerException,
   interpreted `null`. Ask with `m.has(k)` first.
 - An uncaught `throw` prints a Java stack trace, a different one per backend.
-- Closure conversion is incomplete compiled. A closure in a closure, a `fn` in a `fn`
-  reading its locals, a `for` or `scope`/`spawn` inside a lambda, and a loop around
-  `scope { spawn { } }` are located internal compiler errors; interpreted they work.
+- Closure conversion has gaps compiled. A `fn` in a function that uses that function's
+  locals is reported as not compiled yet. Any loop around `scope { spawn { } }` is an
+  internal compiler error. A lambda reading a top-level `mut` or capturing `self`, one
+  created in a `spawn`, and one capturing a `mut` parameter fail at load or run time. All
+  work interpreted; PAIN_POINTS.md D10 lists what does compile.
+- A float read at a declared long through an erased value raises compiled and holds
+  the float interpreted.
 - A value-returning function that reaches its end with no value gives the type's
   default compiled and the last value evaluated interpreted.
 
