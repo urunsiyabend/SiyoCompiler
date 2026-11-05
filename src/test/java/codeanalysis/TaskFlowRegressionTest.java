@@ -1009,4 +1009,86 @@ class TaskFlowRegressionTest {
                 }
                 """, "ContinueInSpawn");
     }
+
+    // --- T19: second review --------------------------------------------------------
+
+    @Test
+    void aFloatReadAtADeclaredLongIsAnErrorNotATruncation() throws Exception {
+        String source = """
+                fn main() {
+                    imut o: object = 1.5
+                    imut r = try {
+                        imut a: long = o
+                        "read " + toString(a)
+                    } catch e { "refused" }
+                    println(r)
+                }
+                """;
+        assertEquals("refused", harness.run(source, "LongFromFloat"));
+    }
+
+    @Test
+    void anIfWhoseArmsBothLeaveMayInitialiseAVariable() throws Exception {
+        assertBoth("3\n4\ncaught", """
+                fn f(k: int) -> int {
+                    imut v = if k > 0 { return 3 } else { return 4 }
+                    v
+                }
+                fn g(k: int) -> int {
+                    imut v = if k > 0 { throw "up" } else { throw "down" }
+                    v
+                }
+                fn main() {
+                    println(toString(f(1)))
+                    println(toString(f(0)))
+                    imut r = try { toString(g(1)) } catch e { "caught" }
+                    println(r)
+                }
+                """, "BothArmsLeave");
+    }
+
+    @Test
+    void aLiteralArgumentOrFieldWidensToItsDeclaredElementType() throws Exception {
+        assertBoth("0.5\n0.25", """
+                struct S { xs: Array<float> }
+                fn p(a: float[]) -> float { a[0] / a[1] }
+                fn main() {
+                    println(toString(p([1, 2])))
+                    imut s = S { xs: [1, 4] }
+                    println(toString(s.xs[0] / s.xs[1]))
+                }
+                """, "LiteralArgumentWidening");
+    }
+
+    @Test
+    void numbersCompareByValue() throws Exception {
+        assertBoth("true false true true", """
+                import "std/math"
+                fn main() {
+                    imut nan = 0.0 / 0.0
+                    imut zero = 0.0
+                    imut neg = -0.0
+                    println(toString(5L == 5) + " " + toString(nan == nan) + " "
+                        + toString(zero == neg) + " " + toString(5 != 6L))
+                }
+                """, "NumericEquality");
+    }
+
+    @Test
+    void aTryTailWithAValueBesideAVoidCatchIsRejected() throws Exception {
+        assertRejected("cannot mix void and value arms", """
+                fn se() -> int { 1 }
+                fn f() -> int { try { se() } catch e { println("x") } }
+                fn main() { println(toString(f())) }
+                """, "TryMixedTail");
+    }
+
+    @Test
+    void anArgumentWithNoValueIsReportedOnce() throws Exception {
+        assertRejected("no value", """
+                fn v() { }
+                fn takes(n: int) -> int { n }
+                fn main() { println(toString(takes(v()))) }
+                """, "VoidArgumentOnce");
+    }
 }

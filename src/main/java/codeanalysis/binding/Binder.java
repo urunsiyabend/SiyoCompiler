@@ -884,6 +884,13 @@ public class Binder {
             elseExpr = new BoundUnitExpression();
         }
 
+        // Neither arm comes back, so what follows is unreachable and needs no
+        // real value: `imut v = if a { return 3 } else { return 4 }` is valid.
+        if (diverges(thenPre, thenExpr) && diverges(elsePre, elseExpr)) {
+            thenExpr = new BoundLiteralExpression(null);
+            elseExpr = new BoundLiteralExpression(null);
+        }
+
         // An arm that throws has no value, so the type comes from the other one.
         boolean thenDiverges = diverges(thenPre, thenExpr);
         Class<?> resultType = thenDiverges ? elseExpr.getClassType() : thenExpr.getClassType();
@@ -1941,7 +1948,12 @@ public class Binder {
         for (int i = 0; i < boundArguments.size(); i++) {
             BoundExpression argument = boundArguments.get(i);
             ParameterSymbol parameter = function.getParameters().get(i);
-            requireValue(argument, syntax.getArguments().get(i));
+            if (argument.getClassType() == null) {
+                requireValue(argument, syntax.getArguments().get(i));
+                continue;
+            }
+            argument = widenLiteral(argument, parameter.getDeclaredTypeName());
+            boundArguments.set(i, argument);
 
             // A narrower number is a value of the wider parameter's type, so it
             // is widened rather than rejected: half(5) reaches half(x: float).
@@ -2405,7 +2417,8 @@ public class Binder {
             if (structType.hasField(fieldName)) {
                 // A field widens like a parameter: `r: long` given 0 holds a long,
                 // and reading an Integer back as one failed at run time.
-                fieldValue = widenTo(fieldValue, structType.getFieldType(fieldName));
+                fieldValue = widenLiteral(widenTo(fieldValue, structType.getFieldType(fieldName)),
+                        structType.getFieldTypeName(fieldName));
             }
             if (!structType.hasField(fieldName)) {
                 reportNoSuchField(field.getFieldName().getSpan(), structType, fieldName);
@@ -3471,6 +3484,10 @@ public class Binder {
         if (statement instanceof BoundTryCatchStatement tryCatch) {
             BoundStatement tryBody = implicitReturnOf(tryCatch.getTryBody(), returnType);
             BoundStatement catchBody = implicitReturnOf(tryCatch.getCatchBody(), returnType);
+            if ((tryBody == null && endsInValue(tryCatch.getCatchBody()))
+                    || (catchBody == null && endsInValue(tryCatch.getTryBody()))) {
+                _diagnostics.reportError(new codeanalysis.text.TextSpan(0, 1), MIXED_ARMS);
+            }
             if (tryBody == null || catchBody == null) return null;
             return new BoundTryCatchStatement(tryBody, tryCatch.getErrorVariable(), catchBody);
         }

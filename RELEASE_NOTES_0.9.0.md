@@ -9,7 +9,7 @@ and reports status. Everything it hit is recorded with a reproducer in
 The planned generics, interface and tooling work moves to 0.10.0: TaskFlow did not
 need it, and the release is built from what was demonstrated.
 
-2,377 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
+2,384 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
 on both backends under a C locale against goldens, and generated graphs are checked
 against rules worked out independently of the application.
 
@@ -47,6 +47,9 @@ Compiled, both are still an internal compiler error.
 
 **A declared `long` is a long from the start.** `mut h: long = 0` stayed an int and
 wrapped at 2^31.
+
+**Numbers compare by value.** `5L == 5` was false, `NaN == NaN` true and `0.0 == -0.0`
+false; compiled had each right.
 
 **A stack overflow can be caught.** Compiled it could; interpreted it ended the
 process. Recursion depth still differs by backend: see below.
@@ -166,8 +169,11 @@ Found by TaskFlow and deliberately left for later (see PAIN_POINTS.md):
 - `imut v = m["missing"]` on a `Map<string, int>`: compiled NullPointerException,
   interpreted `null`. Ask with `m.has(k)` first.
 - An uncaught `throw` prints a Java stack trace, a different one per backend.
-- Compiled, a closure nested in a closure, or a `fn` declared in a `fn` reading its
-  locals, is a located internal compiler error. Interpreted they work.
+- Closure conversion is incomplete compiled. A closure in a closure, a `fn` in a `fn`
+  reading its locals, a `for` or `scope`/`spawn` inside a lambda, and a loop around
+  `scope { spawn { } }` are located internal compiler errors; interpreted they work.
+- A value-returning function that reaches its end with no value gives the type's
+  default compiled and the last value evaluated interpreted.
 
 And still open from before: a module-qualified type annotation, a mixed array literal
 annotated `object[]`, `error(msg)` not diverging, no date/time module, generic

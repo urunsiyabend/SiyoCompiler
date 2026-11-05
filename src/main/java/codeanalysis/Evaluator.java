@@ -507,8 +507,8 @@ public class Evaluator {
             case RightShift -> (int) left >> (int) right;
             case LogicalAnd -> (boolean) left && (boolean) right;
             case LogicalOr -> (boolean) left || (boolean) right;
-            case Equals -> java.util.Objects.equals(left, right);
-            case NotEquals -> !java.util.Objects.equals(left, right);
+            case Equals -> valuesEqual(left, right);
+            case NotEquals -> !valuesEqual(left, right);
             case LessThan -> {
                 if (left instanceof String l && right instanceof String r) yield l.compareTo(r) < 0;
                 if (left instanceof Double || right instanceof Double) yield ((Number) left).doubleValue() < ((Number) right).doubleValue();
@@ -942,6 +942,15 @@ public class Evaluator {
         if (target == Long.class) return number.longValue();
         if (target == Integer.class) return number.intValue();
         return value;
+    }
+
+    /** Numbers compare by value as compiled ones do: {@code 5L == 5}, {@code 0.0 == -0.0}, and NaN equals nothing. */
+    private static boolean valuesEqual(Object left, Object right) {
+        if (left instanceof Number l && right instanceof Number r) {
+            if (l instanceof Double || r instanceof Double) return l.doubleValue() == r.doubleValue();
+            return l.longValue() == r.longValue();
+        }
+        return java.util.Objects.equals(left, right);
     }
 
     private static long toLong(Object val) {

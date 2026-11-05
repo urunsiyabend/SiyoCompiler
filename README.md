@@ -319,7 +319,7 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2377 tests across 40 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2384 tests across 40 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
@@ -352,8 +352,9 @@ These are tracked for future releases — see [FUTURE.md](FUTURE.md):
   a program whose depth comes from its input should keep its own stack.
 - A `try` expression used as an operand (`"x" + try { ... } catch e { ... }`) fails
   verification compiled. Assign it to a variable first.
-- Compiled, a closure nested in a closure, or a `fn` declared in a `fn` reading its
-  locals, is a located internal compiler error. Interpreted they work.
+- Closure conversion is incomplete compiled: a closure in a closure, a `fn` in a `fn`
+  reading its locals, a `for` or `scope`/`spawn` inside a lambda, and a loop around
+  `scope { spawn { } }` are located internal compiler errors. Interpreted they work.
 - No package manager, formatter, or LSP server.
 
 ## Contributing

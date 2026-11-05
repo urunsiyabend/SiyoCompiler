@@ -442,6 +442,11 @@ public class SiyoRuntime {
             java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
+    /** A value read at a declared long: a long, or an int that was never widened. */
+    public static long unboxLong(Object value) {
+        return value instanceof Integer i ? i : (Long) value;
+    }
+
     /** What a for loop walks over an erased value: a map's keys, a set's elements, an array itself. */
     public static Object iterable(Object value) {
         if (value instanceof SiyoMap map) return map.keys();

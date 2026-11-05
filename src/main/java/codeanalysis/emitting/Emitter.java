@@ -2983,10 +2983,10 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/Boolean");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Boolean", "booleanValue", "()Z", false);
         } else if (type == Long.class) {
-            // Through Number: an erased container may hold a narrower number
-            // that was never widened, such as an int added to a Set<long>.
-            _mv.visitTypeInsn(CHECKCAST, "java/lang/Number");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "longValue", "()J", false);
+            // An erased container may hold an int that was never widened, such
+            // as one added to a Set<long>. A float is still an error, not truncated.
+            _mv.visitMethodInsn(INVOKESTATIC, "codeanalysis/SiyoRuntime", "unboxLong",
+                    "(Ljava/lang/Object;)J", false);
         } else if (type == Double.class) {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/Number");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "doubleValue", "()D", false);

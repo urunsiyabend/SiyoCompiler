@@ -62,6 +62,19 @@ class CliParityTest {
     }
 
     @Test
+    void aSourceReachedThroughASymbolicLinkStillRuns() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(Path.of("/bin/sh")));
+        Path fifoSource = tempDir.resolve("hello.siyo");
+        Files.writeString(fifoSource, "fn main() { println(\"hi\") }\n");
+        Path link = tempDir.resolve("link.siyo");
+        Files.createSymbolicLink(link, fifoSource);
+        for (String mode : List.of("run", "interpret")) {
+            assertEquals("hi", siyoc(mode, link.toString()).stdout, mode);
+        }
+        assertEquals(1, siyoc("run", tempDir.toString() + "/nope.siyo").exitCode);
+    }
+
+    @Test
     void runawayRecursionIsCatchableOnBothBackends() throws Exception {
         Path file = tempDir.resolve("deep.siyo");
         Files.writeString(file, """
