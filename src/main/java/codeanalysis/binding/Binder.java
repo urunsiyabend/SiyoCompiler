@@ -147,6 +147,8 @@ public class Binder {
     }
 
     private BoundStatement bindStatementInternal(StatementSyntax syntax) {
+        // Everything declared outside any function, a method included, is a global.
+        if (_currentFunction == null) _fileLevelScope = _scope;
         return switch (syntax.getType()) {
             case BlockStatement -> bindBlockStatement((BlockStatementSyntax)syntax);
             case ExpressionStatement -> bindExpressionStatement((ExpressionStatementSyntax)syntax);
@@ -200,7 +202,8 @@ public class Binder {
             } else if (statementSyntax instanceof JavaImportStatementSyntax javaImportSyntax) {
                 bindJavaImportStatement(javaImportSyntax);
             } else if (statementSyntax instanceof FunctionDeclarationSyntax funcSyntax) {
-                _moduleHandler.registerFunctionDeclaration(funcSyntax);
+                if (_currentFunction != null) _hoistedNested.put(funcSyntax, declareNestedFunction(funcSyntax));
+                else _moduleHandler.registerFunctionDeclaration(funcSyntax);
             } else if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
                 _moduleHandler.registerStructDeclaration(structSyntax);
             } else if (statementSyntax instanceof EnumDeclarationSyntax enumSyntax) {
@@ -1680,7 +1683,7 @@ public class Binder {
         ArrayList<BoundStatement> stmts = new ArrayList<>();
         stmts.add(bodyStmt);
         BoundBlockStatement body = new BoundBlockStatement(stmts);
-        return new BoundLambdaExpression(params, body, func.getReturnType(), java.util.Collections.emptySet());
+        return new BoundLambdaExpression(params, body, func.getReturnType(), func.getCapturedLocals());
     }
 
     /**
@@ -1723,6 +1726,31 @@ public class Binder {
      * @param syntax The function declaration syntax to bind.
      * @return A bound expression statement (functions are bound but not executed during declaration).
      */
+    /** Numbers nested functions across modules, so no two symbols compare equal. */
+    private static final java.util.concurrent.atomic.AtomicInteger NESTED_FUNCTIONS =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Nested functions a block has declared ahead of binding them, so they can call each other. */
+    private final Map<FunctionDeclarationSyntax, FunctionSymbol> _hoistedNested = new java.util.IdentityHashMap<>();
+
+    /**
+     * Declares a function nested in another. It is its own function, whatever else
+     * shares its name: symbols compare by name, so two of them used to share one
+     * body, and a nested helper replaced a top-level one. It is called by its
+     * written name in the scope it is declared in, and known by a unique one
+     * everywhere else.
+     */
+    private FunctionSymbol declareNestedFunction(FunctionDeclarationSyntax syntax) {
+        String name = syntax.getIdentifier().getData();
+        FunctionSymbol function = _moduleHandler.functionSymbolFor(syntax,
+                name + FunctionSymbol.NESTED_MARK + NESTED_FUNCTIONS.getAndIncrement());
+        function.setDeclarationSpan(syntax.getIdentifier().getSpan());
+        if (!_scope.tryDeclareFunction(name, function)) {
+            _diagnostics.reportFunctionAlreadyDeclared(syntax.getIdentifier().getSpan(), name);
+        }
+        return function;
+    }
+
     private BoundStatement bindFunctionDeclaration(FunctionDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
         // A type parameter stands for a type throughout the declaration, so it
@@ -1761,9 +1789,11 @@ public class Binder {
             }
         }
 
-        // Use pre-registered function symbol if available (resolve by arg count for overloads)
         FunctionSymbol function;
-        if (_scope.tryLookupFunction(name)) {
+        if (_currentFunction != null) {
+            function = _hoistedNested.remove(syntax);
+            if (function == null) function = declareNestedFunction(syntax);
+        } else if (_scope.tryLookupFunction(name)) {
             function = _scope.lookupFunction(name, parameters.size());
             if (function == null) function = _scope.lookupFunction(name);
         } else {
@@ -1831,6 +1861,7 @@ public class Binder {
         }
         BoundBlockStatement boundBody = applyImplicitReturn(
                 new BoundBlockStatement(statements), function.getReturnType(), function.getDeclaredReturnTypeName());
+        if (previousFunction != null) collectFunctionCaptures(function, boundBody);
 
         // Store the function body for evaluation
         _functionBodies.put(function, boundBody);
@@ -2512,11 +2543,23 @@ public class Binder {
                                        java.util.Set<VariableSymbol> sharedContainerCaptures) {
         // First: collect all locally declared variable NAMES in this body
         java.util.Set<String> localVarNames = new java.util.HashSet<>();
-        collectDeclaredVarNames(node, localVarNames);
+        CaptureWalk declaredHere = new CaptureWalk();
+        _captureWalk = declaredHere;
+        collectExternalRefs(node, java.util.Set.of(), new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>());
+        _captureWalk = null;
+        java.util.Set<VariableSymbol> enclosingSpawnLocals = _spawnLocals;
+        _spawnLocals = declaredHere.declared;
 
         // Then: find referenced variables that are NOT local → these are captures
         collectCapturedVarsFromBody(node, localVarNames, captured, mutableCaptures, sharedContainerCaptures);
+        _spawnLocals = enclosingSpawnLocals;
+        // A function it calls may not be finished yet, so its captures are settled later too.
+        declaredHere.captures = captured;
+        _captureWalks.add(declaredHere);
     }
+
+    /** What the spawn body being walked declares, by symbol; a same-named variable outside is still captured. */
+    private java.util.Set<VariableSymbol> _spawnLocals = java.util.Set.of();
 
     /** A type name a Siyo programmer would recognise, for diagnostics. */
     private static String describeType(Class<?> type) {
@@ -2559,10 +2602,17 @@ public class Binder {
             }
             return;
         }
+        // Calling a nested function needs what that function holds on to.
+        if (node instanceof BoundCallExpression call) {
+            for (VariableSymbol variable : call.getFunction().getCapturedLocals()) {
+                collectCapturedVarsFromBody(new BoundVariableExpression(variable), localVarNames, captured,
+                        mutableCaptures, sharedContainerCaptures);
+            }
+        }
         // Variable reference → check if captured
         if (node instanceof BoundVariableExpression varExpr) {
             VariableSymbol var = varExpr.getVariable();
-            if (!localVarNames.contains(var.getName())) {
+            if (!_spawnLocals.contains(var)) {
                 captured.add(var);
                 // Reject mutable variables (except channels, actor handles, Object/dynamic types, and synthetic loop vars)
                 if (!var.isReadOnly() && var.getType() != SiyoChannel.class
@@ -2582,7 +2632,7 @@ public class Binder {
         }
         if (node instanceof BoundAssignmentExpression assignExpr) {
             VariableSymbol var = assignExpr.getVariable();
-            if (!localVarNames.contains(var.getName())) {
+            if (!_spawnLocals.contains(var)) {
                 captured.add(var);
                 if (!var.isReadOnly()) { mutableCaptures.add(var); }
             }
@@ -2739,22 +2789,102 @@ public class Binder {
     private void collectCapturedVars(BoundNode node, List<ParameterSymbol> params,
                                       java.util.Set<VariableSymbol> captured,
                                       java.util.Set<VariableSymbol> writtenCaptures) {
-        // First pass: collect all locally declared variable names
-        java.util.Set<String> localNames = new java.util.HashSet<>();
-        for (ParameterSymbol p : params) localNames.add(p.getName());
-        collectLocalVarNames(node, localNames);
-
-        // Second pass: find references to variables not declared locally
-        collectExternalRefs(node, localNames, captured, writtenCaptures);
+        // By symbol: a local of the same name in some inner block is another variable,
+        // and treating a name as local hid a read of the outer one in the same body.
+        CaptureWalk walk = new CaptureWalk();
+        walk.declared.addAll(params);
+        walk.captures = captured;
+        _captureWalk = walk;
+        collectExternalRefs(node, java.util.Set.of(), captured, writtenCaptures);
+        _captureWalk = null;
+        captured.removeAll(walk.declared);
+        captured.addAll(walk.outerOnly());
+        walk.holdsGlobals = true;
+        _captureWalks.add(walk);
     }
 
-    private void collectLocalVarNames(BoundNode node, java.util.Set<String> names) {
-        if (node instanceof BoundVariableDeclaration varDecl) {
-            names.add(varDecl.getVariable().getName());
+    /**
+     * Works out which of its parent's variables a nested function holds on to:
+     * everything it refers to that it does not declare itself, short of the
+     * globals. Going by the symbol rather than the name keeps its own locals,
+     * bindings and catch variables out and its parent's in, whatever they are
+     * called. A mutable one moves into a cell, as for a lambda.
+     */
+    private void collectFunctionCaptures(FunctionSymbol function, BoundBlockStatement body) {
+        java.util.Set<VariableSymbol> referenced = new java.util.LinkedHashSet<>();
+        CaptureWalk walk = new CaptureWalk();
+        _captureWalk = walk;
+        collectExternalRefs(body, java.util.Set.of(), referenced, new java.util.LinkedHashSet<>());
+        _captureWalk = null;
+        walk.declared.addAll(function.getParameters());
+        for (VariableSymbol variable : referenced) {
+            if (!walk.declared.contains(variable) && isOuterLocal(variable)) function.getCapturedLocals().add(variable);
         }
-        for (var it = node.getChildren(); it.hasNext(); ) {
-            collectLocalVarNames(it.next(), names);
+        walk.captures = function.getCapturedLocals();
+        _captureWalks.add(walk);
+        settleCaptures();
+        for (VariableSymbol variable : function.getCapturedLocals()) {
+            if (!variable.isReadOnly()) variable.setCell(true);
         }
+    }
+
+    /**
+     * One walk over a function or lambda body. A body's captures include those of
+     * what it calls and of closures inside it, which may not be complete yet: a
+     * lambda inside k that calls k is bound before k's body is finished. So the walk
+     * is kept, and settled again when a nested function is finished.
+     */
+    private static final class CaptureWalk {
+        final java.util.Set<BoundNode> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        final java.util.Set<VariableSymbol> declared = new java.util.HashSet<>();
+        final java.util.List<java.util.Set<VariableSymbol>> sources = new java.util.ArrayList<>();
+        java.util.Set<VariableSymbol> captures;
+        /** A lambda passes globals on to the closures inside it; a named function reads them directly. */
+        boolean holdsGlobals;
+
+        /** What the sources capture that this body does not declare. */
+        java.util.Set<VariableSymbol> outerOnly() {
+            java.util.Set<VariableSymbol> result = new java.util.LinkedHashSet<>();
+            for (java.util.Set<VariableSymbol> source : sources) {
+                for (VariableSymbol variable : source) {
+                    if (!declared.contains(variable)) result.add(variable);
+                }
+            }
+            return result;
+        }
+    }
+
+    private CaptureWalk _captureWalk;
+    private final java.util.List<CaptureWalk> _captureWalks = new java.util.ArrayList<>();
+
+    private void settleCaptures() {
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (CaptureWalk walk : _captureWalks) {
+                for (VariableSymbol variable : walk.outerOnly()) {
+                    boolean outerLocal = isOuterLocal(variable);
+                    if ((outerLocal || walk.holdsGlobals) && walk.captures.add(variable)) {
+                        grew = true;
+                        if (outerLocal && !variable.isReadOnly()) variable.setCell(true);
+                    }
+                }
+            }
+        }
+    }
+
+    /** The scope around the outermost function being bound: what it holds are globals. */
+    private BoundScope _fileLevelScope;
+
+    /** A local of some function, rather than a global or a module's variable: what has to be captured. */
+    private boolean isOuterLocal(VariableSymbol variable) {
+        if (variable.getOwnerClass() != null) return false;
+        for (BoundScope scope = _fileLevelScope; scope != null; scope = scope.getParent()) {
+            for (VariableSymbol global : scope.getDeclaredVariables()) {
+                if (global == variable) return false;
+            }
+        }
+        return true;
     }
 
     private void collectExternalRefs(BoundNode node, java.util.Set<String> localNames,
@@ -2765,16 +2895,66 @@ public class Binder {
     private void collectExternalRefs(BoundNode node, java.util.Set<String> localNames,
                                       java.util.Set<VariableSymbol> captured,
                                       java.util.Set<VariableSymbol> writtenCaptures) {
+        // Composite nodes are reached both explicitly and through their children.
+        if (_captureWalk != null && !_captureWalk.visited.add(node)) return;
         if (node instanceof BoundVariableExpression varExpr) {
             if (!localNames.contains(varExpr.getVariable().getName())) {
                 captured.add(varExpr.getVariable());
             }
         }
-        // What a nested closure or spawn captures, this one has to hold for it.
-        java.util.Set<VariableSymbol> nested = node instanceof BoundLambdaExpression lambda ? lambda.getCapturedVariables()
-                : node instanceof BoundSpawnExpression spawn ? spawn.getCapturedVariables() : java.util.Set.of();
-        for (VariableSymbol variable : nested) {
-            if (!localNames.contains(variable.getName())) captured.add(variable);
+        // What a nested closure, spawn or called function captures, this body has
+        // to hold for it, by symbol: a local of the same name here is another variable.
+        if (_captureWalk != null) {
+            if (node instanceof BoundLambdaExpression lambda) _captureWalk.sources.add(lambda.getCapturedVariables());
+            if (node instanceof BoundSpawnExpression spawn) _captureWalk.sources.add(spawn.getCapturedVariables());
+            if (node instanceof BoundCallExpression call) _captureWalk.sources.add(call.getFunction().getCapturedLocals());
+            if (node instanceof BoundVariableDeclaration declared) _captureWalk.declared.add(declared.getVariable());
+        }
+        // Forms whose children are not all reported, or that declare a variable.
+        if (node instanceof BoundTryCatchStatement tryCatch) {
+            if (_captureWalk != null) _captureWalk.declared.add(tryCatch.getErrorVariable());
+            collectExternalRefs(tryCatch.getTryBody(), localNames, captured, writtenCaptures);
+            collectExternalRefs(tryCatch.getCatchBody(), localNames, captured, writtenCaptures);
+        }
+        if (node instanceof BoundTryExpression tryExpression) {
+            if (_captureWalk != null) _captureWalk.declared.add(tryExpression.getErrorVariable());
+            collectExternalRefs(tryExpression.getTryBody(), localNames, captured, writtenCaptures);
+            collectExternalRefs(tryExpression.getCatchBody(), localNames, captured, writtenCaptures);
+        }
+        if (node instanceof BoundScopeExpression scopeExpression) {
+            collectExternalRefs(scopeExpression.getBody(), localNames, captured, writtenCaptures);
+        }
+        if (node instanceof BoundForStatement forStatement) {
+            collectExternalRefs(forStatement.getInitializer(), localNames, captured, writtenCaptures);
+            collectExternalRefs(forStatement.getCondition(), localNames, captured, writtenCaptures);
+            collectExternalRefs(forStatement.getIterator(), localNames, captured, writtenCaptures);
+            collectExternalRefs(forStatement.getBody(), localNames, captured, writtenCaptures);
+        }
+        if (node instanceof BoundWhileStatement whileStatement) {
+            collectExternalRefs(whileStatement.getCondition(), localNames, captured, writtenCaptures);
+            collectExternalRefs(whileStatement.getBody(), localNames, captured, writtenCaptures);
+        }
+        if (node instanceof BoundIfStatement ifStatement) {
+            collectExternalRefs(ifStatement.getCondition(), localNames, captured, writtenCaptures);
+            collectExternalRefs(ifStatement.getThenStatement(), localNames, captured, writtenCaptures);
+            if (ifStatement.getElseStatement() != null) {
+                collectExternalRefs(ifStatement.getElseStatement(), localNames, captured, writtenCaptures);
+            }
+        }
+        if (node instanceof BoundMatchExpression match) {
+            collectExternalRefs(match.getTarget(), localNames, captured, writtenCaptures);
+            for (BoundMatchExpression.BoundMatchArm arm : match.getArms()) {
+                if (arm.pattern() != null) collectExternalRefs(arm.pattern(), localNames, captured, writtenCaptures);
+                for (BoundStatement statement : arm.preStatements()) {
+                    collectExternalRefs(statement, localNames, captured, writtenCaptures);
+                }
+                collectExternalRefs(arm.body(), localNames, captured, writtenCaptures);
+                if (_captureWalk != null && arm.variant() != null) {
+                    for (VariableSymbol binding : arm.variant().bindings()) {
+                        if (binding != null) _captureWalk.declared.add(binding);
+                    }
+                }
+            }
         }
         if (node instanceof BoundAssignmentExpression assignExpr) {
             if (!localNames.contains(assignExpr.getVariable().getName())) {

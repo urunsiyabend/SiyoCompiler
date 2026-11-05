@@ -327,6 +327,12 @@ public class Emitter {
     private void emitFunction(ClassWriter cw, FunctionSymbol function, BoundBlockStatement body, String className) {
         if (BuiltinFunctions.isBuiltin(function)) return;
         if (function.getModuleName() != null) return;
+        // Closure conversion for a named function is not done yet. Emitting one
+        // anyway would read a global of the same name, if there is one, silently.
+        if (function.uncompiledCapture() != null) {
+            _diagnostics.reportError(function.getDeclarationSpan(), function.uncompiledCapture());
+            return;
+        }
 
         String methodName = function.getName().replace('.', '$');
         String descriptor = getFunctionDescriptor(function);
@@ -365,7 +371,7 @@ public class Emitter {
             // user gets a located diagnostic naming the function, not a stack
             // trace from inside the compiler.
             _diagnostics.reportInternalCompilerError(currentSpan(),
-                    "function '" + function.getName() + "'", describeFailure(e));
+                    "function '" + function.getWrittenName() + "'", describeFailure(e));
             return;
         }
         _mv.visitEnd();
@@ -712,10 +718,7 @@ public class Emitter {
 
     private boolean isCapturedVar(VariableSymbol var) {
         if (_spawnCapturedVars == null) return false;
-        for (VariableSymbol cv : _spawnCapturedVars) {
-            if (cv.getName().equals(var.getName())) return true;
-        }
-        return false;
+        return _spawnCapturedVars.contains(var);
     }
 
     private void emitAssignmentExpression(BoundAssignmentExpression node) {

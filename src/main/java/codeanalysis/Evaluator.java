@@ -263,9 +263,9 @@ public class Evaluator {
 
     /**
      * Stores a value under a variable, in the current frame when the variable
-     * is local to it and in the globals otherwise. A local of a caller is
-     * reached by a function declared inside it, which nothing else passes the
-     * variable to.
+     * is local to it and in the globals otherwise. A function declared inside
+     * another reaches its parent's locals on the frame below it: the parent's
+     * own when called by name, a closure's captures when called through one.
      *
      * @param variable The variable.
      * @param value    The value to store.
@@ -294,11 +294,7 @@ public class Evaluator {
      * @return The cell, or null when the variable has no storage yet.
      */
     private Object[] findCell(VariableSymbol variable) {
-        if (!_callStack.isEmpty()) {
-            StackFrame frame = _callStack.peek();
-            if (frame.getLocals().get(variable) instanceof Object[] cell) return cell;
-        }
-        return _globals.get(canonical(variable)) instanceof Object[] cell ? cell : null;
+        return lookupStorage(variable) instanceof Object[] cell ? cell : null;
     }
 
     /**
@@ -1171,9 +1167,18 @@ public class Evaluator {
         for (VariableSymbol var : node.getCapturedVariables()) {
             // A cell is captured as itself, so a write on either side is shared;
             // everything else is captured by value.
-            capturedVars.put(var, var.isCell() ? lookupStorage(var) : lookupVariable(var));
+            capturedVars.put(var, var.isCell() ? cellOf(var) : lookupVariable(var));
         }
         return new SiyoClosure(node.getParameters(), node.getBody(), capturedVars, node.getReturnType());
+    }
+
+    /** The cell holding a captured variable. A parameter is passed bare, so it gets one on first capture. */
+    private Object cellOf(VariableSymbol variable) {
+        Object storage = lookupStorage(variable);
+        if (storage instanceof Object[]) return storage;
+        Object[] cell = {storage};
+        storeVariable(variable, cell);
+        return cell;
     }
 
     private Object siyoArrayToJavaArray(SiyoArray arr, Class<?> componentType) {

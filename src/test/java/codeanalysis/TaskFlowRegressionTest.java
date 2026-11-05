@@ -1014,6 +1014,7 @@ class TaskFlowRegressionTest {
 
     @Test
     void aFloatReadAtADeclaredLongIsAnErrorNotATruncation() throws Exception {
+        // Compiled only: the interpreter holds the float, as it did in 0.8.0 (D15).
         String source = """
                 fn main() {
                     imut o: object = 1.5
@@ -1090,5 +1091,715 @@ class TaskFlowRegressionTest {
                 fn takes(n: int) -> int { n }
                 fn main() { println(toString(takes(v()))) }
                 """, "VoidArgumentOnce");
+    }
+
+    // --- T20: a named function nested in a function captures lexically ------------
+    //
+    // Interpreted only: compiled, a nested fn reading its parent's locals is still
+    // an internal compiler error (PAIN_POINTS.md D10).
+
+    private void assertInterpreted(String expected, String source, String className) throws Exception {
+        assertEquals(expected, harness.interpret(source, className));
+    }
+
+    @Test
+    void anEscapedNamedFunctionKeepsAnImmutableCapture() throws Exception {
+        assertInterpreted("41\n42", """
+                fn make() -> fn() -> int {
+                    imut x = 41
+                    fn inner() -> int { x }
+                    inner
+                }
+                fn makeSum() -> fn() -> int {
+                    imut x = 41
+                    fn inner() -> int { x + 1 }
+                    inner
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                    imut g = makeSum()
+                    println(toString(g()))
+                }
+                """, "EscapedNamedImmutable");
+    }
+
+    @Test
+    void anEscapedNamedFunctionSharesAMutableCapture() throws Exception {
+        assertInterpreted("1\n2\n1", """
+                fn make() -> fn() -> int {
+                    mut n = 0
+                    fn bump() -> int {
+                        n = n + 1
+                        n
+                    }
+                    bump
+                }
+                fn main() {
+                    imut a = make()
+                    imut b = make()
+                    println(toString(a()))
+                    println(toString(a()))
+                    println(toString(b()))
+                }
+                """, "EscapedNamedMutable");
+    }
+
+    @Test
+    void aNamedFunctionAndItsParentSeeTheSameVariable() throws Exception {
+        assertInterpreted("2\n12\n13", """
+                fn run() {
+                    mut n = 1
+                    fn bump() -> int {
+                        n = n + 1
+                        n
+                    }
+                    imut escaped = bump
+                    println(toString(bump()))
+                    n = 11
+                    println(toString(escaped()))
+                    println(toString(bump()))
+                }
+                fn main() { run() }
+                """, "NamedSharesWithParent");
+    }
+
+    @Test
+    void anEscapedNamedFunctionKeepsTheFrameItWasMadeIn() throws Exception {
+        // Called while another activation of the parent is on the stack, the
+        // function reads its own x, not the nearest one.
+        assertInterpreted("1 2", """
+                fn make(x: int, other: fn() -> int) -> string {
+                    fn read() -> int { x }
+                    if x == 2 { return toString(other()) + " " + toString(read()) }
+                    return make(2, read)
+                }
+                fn nothing() -> int { 0 }
+                fn main() { println(make(1, nothing)) }
+                """, "NamedLexicalNotDynamic");
+    }
+
+    @Test
+    void aParameterIsCapturedLikeALocal() throws Exception {
+        assertInterpreted("8\n9\n10", """
+                fn adder(mut base: int) -> fn(int) -> int {
+                    fn add(n: int) -> int {
+                        base = base + 1
+                        base + n
+                    }
+                    add
+                }
+                fn main() {
+                    imut f = adder(5)
+                    println(toString(f(2)))
+                    println(toString(f(2)))
+                    println(toString(f(2)))
+                }
+                """, "NamedCapturesParameter");
+    }
+
+    @Test
+    void aNamedFunctionCarriesWhatItsSiblingsAndChildrenNeed() throws Exception {
+        assertInterpreted("7\n7\n7", """
+                fn viaSibling() -> fn() -> int {
+                    imut x = 7
+                    fn read() -> int { x }
+                    fn viaRead() -> int { read() }
+                    viaRead
+                }
+                fn viaChild() -> fn() -> int {
+                    imut x = 7
+                    fn outer() -> int {
+                        fn inner() -> int { x }
+                        inner()
+                    }
+                    outer
+                }
+                fn viaLambda() -> fn() -> int {
+                    imut x = 7
+                    fn read() -> int { x }
+                    fn() -> int { read() }
+                }
+                fn main() {
+                    imut a = viaSibling()
+                    println(toString(a()))
+                    imut b = viaChild()
+                    println(toString(b()))
+                    imut c = viaLambda()
+                    println(toString(c()))
+                }
+                """, "NamedTransitive");
+    }
+
+    @Test
+    void aNamedFunctionMayRecurseAfterEscaping() throws Exception {
+        assertInterpreted("6", """
+                fn make() -> fn(int) -> int {
+                    imut step = 1
+                    fn sum(n: int) -> int {
+                        if n == 0 { return 0 }
+                        n + sum(n - step)
+                    }
+                    sum
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f(3)))
+                }
+                """, "NamedRecursion");
+    }
+
+    @Test
+    void aNamedFunctionsOwnLocalIsNotACapture() throws Exception {
+        // Its x shadows the parent's, in blocks, match arms and catch clauses too.
+        assertInterpreted("5 9 3", """
+                type K = A(int)
+                fn make() -> fn() -> string {
+                    imut x = 1
+                    imut e = 2
+                    imut v = 3
+                    fn inner() -> string {
+                        imut x = 5
+                        imut caught = try { throw 9 } catch e { e }
+                        imut bound = match A(3) { A(v) => v }
+                        toString(x) + " " + toString(caught) + " " + toString(bound)
+                    }
+                    inner
+                }
+                fn main() {
+                    imut f = make()
+                    println(f())
+                }
+                """, "NamedOwnLocals");
+    }
+
+    @Test
+    void aSpawnMayCallANamedFunctionThatCaptures() throws Exception {
+        assertInterpreted("4", """
+                fn run() {
+                    imut x = 4
+                    fn read() -> int { x }
+                    scope { spawn { println(toString(read())) } }
+                }
+                fn main() { run() }
+                """, "NamedInSpawn");
+    }
+
+    @Test
+    void aNamedFunctionThatCapturesNothingStillRunsOnBothBackends() throws Exception {
+        assertBoth("3\n8", """
+                imut G = 5
+                fn f() -> int {
+                    fn inner(n: int) -> int { n + 1 }
+                    inner(2)
+                }
+                fn pick() -> fn() -> int {
+                    fn read() -> int { G + 3 }
+                    read
+                }
+                fn main() {
+                    println(toString(f()))
+                    imut p = pick()
+                    println(toString(p()))
+                }
+                """, "NamedNoCaptures");
+    }
+
+    @Test
+    void nestedFunctionsOfOneNameAreSeparateFunctions() throws Exception {
+        assertBoth("1 2 10 20 1", """
+                fn helper() -> int { 1 }
+                fn a() -> int {
+                    fn helper() -> int { 2 }
+                    helper()
+                }
+                fn b() -> int {
+                    fn k() -> int { 10 }
+                    k()
+                }
+                fn c() -> int {
+                    fn k() -> int { 20 }
+                    k()
+                }
+                fn main() {
+                    println(toString(helper()) + " " + toString(a()) + " " + toString(b()) + " "
+                        + toString(c()) + " " + toString(helper()))
+                }
+                """, "NestedSameNames");
+    }
+
+    @Test
+    void anOverloadedNestedFunctionPicksByArgumentCount() throws Exception {
+        assertBoth("1 3", """
+                fn f() -> string {
+                    fn g(a: int) -> int { a }
+                    fn g(a: int, b: int) -> int { a + b }
+                    toString(g(1)) + " " + toString(g(1, 2))
+                }
+                fn main() { println(f()) }
+                """, "NestedOverload");
+    }
+
+    @Test
+    void aNestedFunctionDeclaredTwiceInOneBlockIsRejected() throws Exception {
+        assertRejected("already", """
+                fn f() -> int {
+                    fn g() -> int { 1 }
+                    fn g() -> int { 2 }
+                    g()
+                }
+                fn main() { println(toString(f())) }
+                """, "NestedDuplicate");
+    }
+
+    @Test
+    void aNestedFunctionMayBeDeclaredInAnyBlock() throws Exception {
+        assertBoth("3\n4\n5\n6\n7\n8", """
+                fn main() {
+                    if true {
+                        fn a() -> int { 3 }
+                        println(toString(a()))
+                    }
+                    for i in [1] {
+                        fn a() -> int { 4 }
+                        println(toString(a()))
+                    }
+                    mut n = 0
+                    while n < 1 {
+                        fn a() -> int { 5 }
+                        println(toString(a()))
+                        n += 1
+                    }
+                    {
+                        fn a() -> int { 6 }
+                        println(toString(a()))
+                    }
+                    try {
+                        fn a() -> int { 7 }
+                        println(toString(a()))
+                    } catch e { println("no") }
+                    imut viaLambda = fn() -> int {
+                        fn a() -> int { 8 }
+                        a()
+                    }
+                    println(toString(viaLambda()))
+                }
+                """, "NestedInAnyBlock");
+    }
+
+    @Test
+    void functionsInABlockMayCallEachOtherAheadOfDeclaration() throws Exception {
+        assertBoth("9", """
+                fn main() {
+                    if true {
+                        fn a() -> int { b() }
+                        fn b() -> int { 9 }
+                        println(toString(a()))
+                    }
+                }
+                """, "NestedForwardCall");
+    }
+
+    @Test
+    void aNestedFunctionNamedLambdaDoesNotCollideWithAClosure() throws Exception {
+        assertBoth("8 7", """
+                fn main() {
+                    fn lambda() -> int { 8 }
+                    imut f = fn() -> int { 7 }
+                    println(toString(lambda()) + " " + toString(f()))
+                }
+                """, "NestedNamedLambda");
+    }
+
+    @Test
+    void aCaptureMayBeReadOnlyInsideAnyForm() throws Exception {
+        assertInterpreted("8\n8\n8\n8\n8\n8", """
+                type K = A(int)
+                fn inTry() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int { try { return x } catch e { return 0 } }
+                    k
+                }
+                fn inCatch() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int { try { throw 1 } catch e { return x } }
+                    k
+                }
+                fn inFor() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int {
+                        mut t = 0
+                        for mut i = 0 i < x i = i + 1 { t = t + 1 }
+                        t
+                    }
+                    k
+                }
+                fn inMatch() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int { match A(1) { A(v) => { x } } }
+                    k
+                }
+                fn inIf() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int { if x > 0 { return x } else { return 0 } }
+                    k
+                }
+                fn inScope() -> fn() -> int {
+                    imut x = 8
+                    fn k() -> int {
+                        mut seen = 0
+                        scope { seen = x }
+                        seen
+                    }
+                    k
+                }
+                fn main() {
+                    for f in [inTry(), inCatch(), inFor(), inMatch(), inIf(), inScope()] { println(toString(f())) }
+                }
+                """, "CaptureInAnyForm");
+    }
+
+    @Test
+    void aLambdaInsideAFunctionThatItCallsSeesTheFunctionsCaptures() throws Exception {
+        assertInterpreted("6", """
+                fn make() -> fn(int) -> int {
+                    imut step = 1
+                    fn sum(n: int) -> int {
+                        if n == 0 { return 0 }
+                        imut again = fn() -> int { sum(n - step) }
+                        n + again()
+                    }
+                    sum
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f(3)))
+                }
+                """, "LambdaCallsEnclosingFunction");
+    }
+
+    @Test
+    void aSameNamedLocalDoesNotHideACaptureOfACalledFunction() throws Exception {
+        assertInterpreted("104\n51", """
+                fn viaLambda() -> fn() -> int {
+                    imut x = 5
+                    fn k() -> int { x }
+                    fn() -> int {
+                        imut x = 99
+                        k() + x
+                    }
+                }
+                fn viaFunction() -> fn() -> int {
+                    imut x = 1
+                    fn k() -> int { x }
+                    fn m() -> fn() -> int {
+                        imut x = 50
+                        fn n() -> int { x + k() }
+                        n
+                    }
+                    m()
+                }
+                fn main() {
+                    imut a = viaLambda()
+                    println(toString(a()))
+                    imut b = viaFunction()
+                    println(toString(b()))
+                }
+                """, "SameNamedLocalHides");
+    }
+
+    @Test
+    void compiledANestedFunctionUsingItsParentsLocalsIsReportedNotMiscompiled() throws Exception {
+        // It used to read a global of the same name silently when one existed.
+        String source = """
+                imut x = 1
+                fn make() -> fn() -> int {
+                    imut x = 2
+                    fn k() -> int { x }
+                    k
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """;
+        assertEquals("2", harness.interpret(source, "NestedGlobalShadow"));
+        String compiled = compileFailure(source, "NestedGlobalShadow");
+        org.junit.jupiter.api.Assertions.assertTrue(compiled.contains("from the function around it"), compiled);
+    }
+
+    @Test
+    void aGlobalIsNotCapturedByANestedFunction() throws Exception {
+        // Compiled too: it reads no parent local. A write must reach the global.
+        assertInterpreted("1\n2\n3", """
+                mut g = 0
+                fn make() -> fn() -> int {
+                    fn bump() -> int {
+                        g = g + 1
+                        g
+                    }
+                    bump
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                    println(toString(f()))
+                    g = g + 1
+                    println(toString(g))
+                }
+                """, "GlobalNotCaptured");
+    }
+
+    @Test
+    void aLambdaMayDeclareLocalsInsideTryAndScope() throws Exception {
+        assertBoth("1\n7\n2\n9", """
+                type K = A(int)
+                fn main() {
+                    imut l = fn() -> int {
+                        try {
+                            imut y = 1
+                            return y
+                        } catch e { return 0 }
+                    }
+                    println(toString(l()))
+                    imut c = fn() -> int {
+                        try { throw 7 } catch e { return e }
+                    }
+                    println(toString(c()))
+                    imut s = fn() -> int {
+                        mut seen = 0
+                        scope {
+                            imut z = 2
+                            seen = z
+                        }
+                        seen
+                    }
+                    println(toString(s()))
+                    imut m = fn() -> int { match A(9) { A(v) => { imut w = v
+                        w } } }
+                    println(toString(m()))
+                }
+                """, "LambdaLocalsInForms");
+    }
+
+    @Test
+    void aLambdaTellsAnInnerLocalFromAnOuterVariableOfTheSameName() throws Exception {
+        assertBoth("9\n3\n16\n5 3\n2 1", """
+                imut g = 1
+                fn main() {
+                    imut e = 3
+                    imut caught = fn() -> int {
+                        try { throw 9 } catch e { println(toString(e)) }
+                        e
+                    }
+                    println(toString(caught()))
+                    imut x = 1
+                    imut scoped = fn() -> int {
+                        mut t = 0
+                        scope {
+                            imut x = 7
+                            imut y = 8
+                            t = x + y
+                        }
+                        t + x
+                    }
+                    println(toString(scoped()))
+                    imut y = 3
+                    imut blocked = fn() -> string {
+                        mut inner = 0
+                        if true {
+                            imut y = 5
+                            inner = y
+                        }
+                        toString(inner) + " " + toString(y)
+                    }
+                    println(blocked())
+                    imut overGlobal = fn() -> string {
+                        mut inner = 0
+                        if true {
+                            imut g = 2
+                            inner = g
+                        }
+                        toString(inner) + " " + toString(g)
+                    }
+                    println(overGlobal())
+                }
+                """, "LambdaSameNames");
+    }
+
+    @Test
+    void aSpawnTellsAnInnerLocalFromAnOuterVariableOfTheSameName() throws Exception {
+        String source = """
+                fn main() {
+                    imut x = 3
+                    scope {
+                        spawn {
+                            if x == 3 {
+                                imut x = 9
+                                println(toString(x))
+                            }
+                            println(toString(x))
+                        }
+                    }
+                }
+                """;
+        assertEquals("9\n3", harness.interpret(source, "SpawnSameNames"));
+    }
+
+    @Test
+    void aSpawnInsideAFunctionItCallsSeesTheFunctionsCaptures() throws Exception {
+        assertInterpreted("1\n1\n5", """
+                fn run() {
+                    imut x = 1
+                    fn k(n: int) -> int {
+                        if n > 0 {
+                            scope { spawn { println(toString(k(n - 1))) } }
+                        }
+                        x
+                    }
+                    println(toString(k(1)))
+                }
+                fn sibling() {
+                    imut y = 5
+                    if true {
+                        fn a() { scope { spawn { println(toString(b())) } } }
+                        fn b() -> int { y }
+                        a()
+                    }
+                }
+                fn main() {
+                    run()
+                    sibling()
+                }
+                """, "SpawnSettles");
+    }
+
+    @Test
+    void aForLoopInALambdaKeepsItsOwnCounters() throws Exception {
+        assertBoth("3\n3\n7", """
+                fn main() {
+                    imut forIn = fn() -> int {
+                        mut t = 0
+                        for k in [1, 2] { t = t + k }
+                        t
+                    }
+                    println(toString(forIn()))
+                    imut cFor = fn() -> int {
+                        mut t = 0
+                        for mut i = 0 i < 3 i = i + 1 { t = t + 1 }
+                        t
+                    }
+                    println(toString(cFor()))
+                    imut base = 4
+                    imut captures = fn() -> int {
+                        mut t = base
+                        for k in [1, 2] { t = t + k }
+                        t
+                    }
+                    println(toString(captures()))
+                }
+                """, "ForInLambda");
+    }
+
+    @Test
+    void aClosureInAClosureMayReadAGlobalAndALocal() throws Exception {
+        assertBoth("11\n11\n4\n2", """
+                imut G = 11
+                fn viaFunction() -> int {
+                    imut l = fn() -> int {
+                        imut g = fn() -> int { G }
+                        g()
+                    }
+                    l()
+                }
+                fn main() {
+                    println(toString(viaFunction()))
+                    imut l = fn() -> int {
+                        imut g = fn() -> int { G }
+                        g()
+                    }
+                    println(toString(l()))
+                    imut a = 4
+                    imut m = fn() -> int {
+                        imut g = fn() -> int { a }
+                        g()
+                    }
+                    println(toString(m()))
+                    mut n = 1
+                    imut w = fn() {
+                        imut i = fn() { n = n + 1 }
+                        i()
+                    }
+                    w()
+                    println(toString(n))
+                }
+                """, "ClosureInClosure");
+    }
+
+    @Test
+    void aLambdaInANestedFunctionMayReadAGlobal() throws Exception {
+        assertBoth("5\n6", """
+                imut G = 5
+                mut M = 6
+                fn f() -> int {
+                    fn k() -> int {
+                        imut l = fn() -> int { G }
+                        l()
+                    }
+                    k()
+                }
+                fn g() -> int {
+                    fn k() -> int {
+                        imut l = fn() -> int { 6 }
+                        l()
+                    }
+                    k()
+                }
+                fn main() {
+                    println(toString(f()))
+                    println(toString(g()))
+                }
+                """, "LambdaInNestedReadsGlobal");
+    }
+
+    @Test
+    void aNestedFunctionInAMethodMayReadAGlobalWhateverComesFirst() throws Exception {
+        assertBoth("2", """
+                mut M = 2
+                struct S { v: int }
+                impl S {
+                    fn m(self) -> int {
+                        fn h() -> int { M }
+                        h()
+                    }
+                }
+                fn main() {
+                    imut s = S { v: 1 }
+                    println(toString(s.m()))
+                }
+                """, "NestedInMethodReadsGlobal");
+    }
+
+    @Test
+    void aLocalDoesNotLeakIntoTheGlobals() throws Exception {
+        // The bug this replaces: a local reachable with no frame holding it.
+        assertInterpreted("1\n2", """
+                fn first() -> fn() -> int {
+                    imut x = 1
+                    fn read() -> int { x }
+                    read
+                }
+                fn second() -> fn() -> int {
+                    imut x = 2
+                    fn read2() -> int { x }
+                    read2
+                }
+                fn main() {
+                    imut a = first()
+                    imut b = second()
+                    println(toString(a()))
+                    println(toString(b()))
+                }
+                """, "NoLeakToGlobals");
     }
 }

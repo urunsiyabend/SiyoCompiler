@@ -267,6 +267,16 @@ public class Compilation {
                 emitter.registerActorType(entry.getKey());
             }
         }
+        // An imported module is emitted when it is first loaded, too late to report.
+        for (ModuleSymbol module : getRegistry().getAllModules()) {
+            for (FunctionSymbol function : module.getFunctionBodies().keySet()) {
+                if (function.uncompiledCapture() != null) {
+                    _emitDiagnostics = new DiagnosticBox();
+                    _emitDiagnostics.reportError(new codeanalysis.text.TextSpan(0, 0), function.uncompiledCapture());
+                    return null;
+                }
+            }
+        }
         byte[] bytecode;
         try {
             bytecode = emitter.emit(className);

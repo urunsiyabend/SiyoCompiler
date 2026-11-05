@@ -52,6 +52,57 @@ class CliParityTest {
     }
 
     @Test
+    void nestedFunctionsOfOneNameInDifferentModulesAreSeparate() throws Exception {
+        Files.writeString(tempDir.resolve("ma.siyo"), """
+                pub fn one() -> int {
+                    fn inner() -> int { 1 }
+                    inner()
+                }
+                """);
+        Files.writeString(tempDir.resolve("mb.siyo"), """
+                pub fn two() -> int {
+                    fn inner() -> int { 2 }
+                    inner()
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "ma"
+                import "mb"
+                fn three() -> int {
+                    fn inner() -> int { 3 }
+                    inner()
+                }
+                fn main() { println(toString(ma.one()) + " " + toString(mb.two()) + " " + toString(three())) }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, main.toString());
+            assertEquals("1 2 3", result.stdout, mode + ": " + result.stderr);
+        }
+    }
+
+    @Test
+    void aModulesNestedFunctionUsingItsParentsLocalsIsReportedCompiled() throws Exception {
+        Files.writeString(tempDir.resolve("mm.siyo"), """
+                pub fn one() -> int {
+                    imut a = 1
+                    fn inner() -> int { a + 1 }
+                    inner()
+                }
+                """);
+        Path main = tempDir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "mm"
+                fn main() { println(toString(mm.one())) }
+                """);
+        Result compiled = siyoc("run", main.toString());
+        assertEquals(1, compiled.exitCode);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                compiled.stderr.contains("Function 'inner' uses 'a' from the function around it"), compiled.stderr);
+        assertEquals("2", siyoc("interpret", main.toString()).stdout);
+    }
+
+    @Test
     void aMissingSourceFileIsReportedWithoutAStackTrace() throws Exception {
         String missing = tempDir.resolve("missing.siyo").toString();
         for (String mode : List.of("run", "interpret")) {
