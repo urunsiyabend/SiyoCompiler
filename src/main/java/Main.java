@@ -22,29 +22,7 @@ import codeanalysis.syntax.SyntaxTree;
 public class Main {
     private static final String VERSION = "0.8.0";
 
-    /**
-     * The stack a program runs on. The JVM's default of about 1 MB let a
-     * recursive walk get a few thousand calls deep, so a dependency chain of
-     * 5,000 tasks overflowed. The memory is only committed if it is reached.
-     */
-    private static final long PROGRAM_STACK_BYTES = 512L * 1024 * 1024;
-
-    public static void main(String[] args) throws InterruptedException {
-        Thread program = new Thread(null, () -> {
-            try {
-                dispatch(args);
-            } catch (Throwable e) {
-                // On the JVM's own main thread this ended the process with status 1.
-                e.printStackTrace(System.err);
-                System.err.flush();
-                System.exit(1);
-            }
-        }, "main", PROGRAM_STACK_BYTES);
-        program.start();
-        program.join();
-    }
-
-    private static void dispatch(String[] args) {
+    public static void main(String[] args) {
         useUtf8Output();
         if (System.getenv("SIYO_DEBUG") != null) {
             System.err.println("[debug] args=" + java.util.Arrays.toString(args));
