@@ -52,6 +52,16 @@ class CliParityTest {
     }
 
     @Test
+    void aMissingSourceFileIsReportedWithoutAStackTrace() throws Exception {
+        String missing = tempDir.resolve("missing.siyo").toString();
+        for (String mode : List.of("run", "interpret")) {
+            Result result = siyoc(mode, missing);
+            assertEquals(1, result.exitCode, mode);
+            assertEquals("siyoc: cannot read " + missing, result.stderr, mode);
+        }
+    }
+
+    @Test
     void runawayRecursionIsCatchableOnBothBackends() throws Exception {
         Path file = tempDir.resolve("deep.siyo");
         Files.writeString(file, """

@@ -239,6 +239,7 @@ public class Main {
     }
 
     private static void compileAndRun(String path) {
+        requireSourceFile(path);
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
             loadOwningProject(absPath);
@@ -383,7 +384,16 @@ public class Main {
         }
     }
 
+    /** A missing source file is the user's mistake, not a stack trace. */
+    private static void requireSourceFile(String path) {
+        if (!java.nio.file.Files.isRegularFile(java.nio.file.Paths.get(path))) {
+            System.err.println("siyoc: cannot read " + path);
+            System.exit(1);
+        }
+    }
+
     private static void runFile(String path) {
+        requireSourceFile(path);
         try {
             String absPath = java.nio.file.Paths.get(path).toAbsolutePath().toString();
             loadOwningProject(absPath);
