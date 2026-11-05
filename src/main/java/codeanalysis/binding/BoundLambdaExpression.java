@@ -26,6 +26,16 @@ public class BoundLambdaExpression extends BoundExpression {
         _capturedVariables = capturedVariables;
     }
 
+    private String _returnTypeName;
+
+    /** The return type as the lambda wrote it, such as Box<Array<float>>, or null. */
+    public String getReturnTypeName() { return _returnTypeName; }
+
+    public BoundLambdaExpression withReturnTypeName(String returnTypeName) {
+        _returnTypeName = returnTypeName;
+        return this;
+    }
+
     public List<ParameterSymbol> getParameters() { return _parameters; }
     public BoundBlockStatement getBody() { return _body; }
     public Class<?> getReturnType() { return _returnType; }

@@ -1038,4 +1038,70 @@ fn main() {
                 }
                 """, "GenericMapLiteral");
     }
+
+    @Test
+    void aBoxGetterReturnsItsArgumentsElementsMapsAndScalars(@TempDir Path dir) throws Exception {
+        // Final gate: g(b: Box<T>) -> T given a Box<Array<float>> lost the
+        // element type, so v[0] * 2 raised compiled and gave 3.0 interpreted.
+        assertBoth("3.0 5.0 5.0\n3.0 5.0 \n3.0\n3.0 3.0\n4\n1", """
+struct Box<T>{value:T}
+struct R { n: int }
+fn g<T>(b: Box<T>) -> T { b.value }
+fn keep<T>(xs: Array<T>) -> Array<T> { xs }
+fn main() {
+    imut a: Box<Array<float>> = Box { value: [1.5, 2.5] }
+    imut v = g(a)
+    imut w = v
+    println(toString(v[0] * 2) + " " + toString(w[1] * 2) + " " + toString(g(a)[1] * 2))
+    for x in g(a) { print(toString(x * 2) + " ") }
+    println("")
+    imut s = g(Box { value: 1.5 })
+    println(toString(s * 2))
+    imut m: Box<Map<string, float>> = Box { value: {"k": 1.5} }
+    imut mv = g(m)
+    println(toString(mv["k"] * 2) + " " + toString(g(m)["k"] * 2))
+    imut rs = g(Box { value: [R { n: 4 }] })
+    println(toString(rs[0].n))
+    println(toString(len(keep([1.5]))))
+}
+                """, "BoxGetters");
+        assertBoth("3.0", """
+                struct Box<T> { value: T }
+                fn h<T>(b: Box<Array<T>>) -> Array<T> { b.value }
+                fn main() {
+                    imut b: Box<Array<float>> = Box { value: [1.5] }
+                    imut v = h(b)
+                    println(toString(v[0] * 2))
+                }
+                """, "BoxArrayGetter");
+        Files.writeString(dir.resolve("lib.siyo"), "pub struct Box<T> { value: T }\npub fn g<T>(b: Box<T>) -> T { b.value }\n");
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                fn main() {
+                    imut a: Box<Array<float>> = Box { value: [1.5] }
+                    imut v = lib.g(a)
+                    imut w = v
+                    println(toString(w[0] * 2))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("3.0", result.stdout(), mode + ": " + result.stderr());
+        }
+    }
+
+    @Test
+    void aBoxMadeByALambdaKeepsItsArgumentForAGetter() throws Exception {
+        assertBoth("3.0 3.0 3.0", """
+                struct Box<T> { value: T }
+                fn g<T>(b: Box<T>) -> T { b.value }
+                fn main() {
+                    imut ha = fn(x: float) -> Box<Array<float>> { Box { value: [x] } }
+                    imut b = ha(1.5)
+                    imut hm = fn(x: float) -> Box<Map<string, float>> { Box { value: {"k": x} } }
+                    println(toString(g(b)[0] * 2) + " " + toString(g(ha(1.5))[0] * 2) + " " + toString(g(hm(1.5))["k"] * 2))
+                }
+                """, "LambdaBoxGetter");
+    }
 }

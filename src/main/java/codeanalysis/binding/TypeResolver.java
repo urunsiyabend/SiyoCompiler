@@ -98,6 +98,14 @@ public class TypeResolver {
             }
             return "Array<" + common + ">";
         }
+        // A call through a closure whose signature names a generic struct:
+        // ha(x) with ha: fn(float) -> Box<Array<float>>.
+        if (expr instanceof BoundClosureCallExpression closureCall
+                && closureCall.getClosure() instanceof BoundVariableExpression callee) {
+            var signature = codeanalysis.FunctionTypeSignature.parse(callee.getVariable().getDeclaredTypeName());
+            String returned = signature != null ? signature.getReturnTypeName() : null;
+            return mentionsGenericStruct(returned) ? returned : null;
+        }
         // filter keeps its elements, and so the generic struct they are.
         if (expr instanceof BoundCallExpression filtered && filtered.getFunction() == BuiltinFunctions.FILTER
                 && !filtered.getArguments().isEmpty()) {
@@ -194,6 +202,30 @@ public class TypeResolver {
             return trustedTypeArgument(name);
         }
         return name;
+    }
+
+    // Calls whose bare T result was bound through a generic struct argument.
+    private final java.util.Set<BoundCallExpression> _boundThroughStruct =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    public void markBoundThroughStruct(BoundCallExpression call) {
+        _boundThroughStruct.add(call);
+    }
+
+    public boolean isBoundThroughStruct(BoundCallExpression call) {
+        return _boundThroughStruct.contains(call);
+    }
+
+    // Variables holding an array a Box<T> getter returned, whose element type is known.
+    private final java.util.Set<VariableSymbol> _elementsFromStruct =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    public void markElementsFromStruct(VariableSymbol var) {
+        _elementsFromStruct.add(var);
+    }
+
+    public boolean hasElementsFromStruct(VariableSymbol var) {
+        return _elementsFromStruct.contains(var);
     }
 
     /** Whether a type name mentions a struct that declares type parameters: Box<float>, Array<Box<int>>. */
@@ -614,6 +646,12 @@ public class TypeResolver {
             // whatever the function returned, which is erased.
             if (callExpr.getFunction() == BuiltinFunctions.FILTER) {
                 return resolveArrayElementType(callExpr.getArguments().get(0));
+            }
+            // g(b: Box<T>) -> T given a Box<Array<float>>: the struct's argument
+            // is known and its field read checked, so its elements are floats.
+            if (_boundThroughStruct.contains(callExpr) && callExpr.getResultTypeName() != null) {
+                Class<?> elemType = lookupElementType(callExpr.getResultTypeName());
+                if (elemType != null) return elemType;
             }
             Class<?> returnElementType = callExpr.getFunction().getReturnElementType();
             if (returnElementType != null) return returnElementType;

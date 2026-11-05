@@ -418,7 +418,8 @@ public class Binder {
                 || initializer instanceof BoundMemberAccessExpression
                 || initializer instanceof BoundStructLiteralExpression
                 || initializer instanceof BoundArrayLiteralExpression
-                || initializer instanceof BoundVariableExpression) {
+                || initializer instanceof BoundVariableExpression
+                || initializer instanceof BoundClosureCallExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
             // A field or a literal is followed only for the struct identity it
             // carries, as in imut its = g.items on a Group<Row>.
@@ -504,6 +505,14 @@ public class Binder {
             StructSymbol elemStruct = _typeResolver.resolveStructTypeFromCollection(initializer);
             if (elemStruct != null) _typeResolver.trackArrayType(variableSymbol, elemType, elemStruct);
             else _typeResolver.trackArrayType(variableSymbol, elemType);
+            if (_typeResolver.isBoundThroughStruct(callExpr2)) _typeResolver.markElementsFromStruct(variableSymbol);
+        } else if (initializer instanceof BoundVariableExpression source && source.getClassType() == SiyoArray.class
+                && _typeResolver.hasElementsFromStruct(source.getVariable())) {
+            // An alias of what a Box<T> getter returned keeps its elements' type;
+            // any other alias stays as 0.9.0 had it.
+            _typeResolver.trackArrayType(variableSymbol, _typeResolver.resolveArrayElementType(source),
+                    _typeResolver.resolveStructTypeFromCollection(source));
+            _typeResolver.markElementsFromStruct(variableSymbol);
         } else if (initializer instanceof BoundStructLiteralExpression structLit) {
             _typeResolver.trackStructType(variableSymbol, structLit.getStructType());
         } else if (initializer.getClassType() == codeanalysis.SiyoUnion.class) {
@@ -1761,6 +1770,9 @@ public class Binder {
             parameterTypeNames.add(declared != null ? declared : siyoTypeName(parameter.getType()));
         }
         String returnTypeName = lambda.getReturnType() == null ? null : siyoTypeName(lambda.getReturnType());
+        // A generic struct's arguments are kept in the signature, so a call
+        // through the name knows them: fn(object) -> Box<Array<float>>.
+        if (_typeResolver.mentionsGenericStruct(lambda.getReturnTypeName())) returnTypeName = lambda.getReturnTypeName();
         return codeanalysis.FunctionTypeSignature.encode(parameterTypeNames, returnTypeName);
     }
 
@@ -2197,7 +2209,7 @@ public class Binder {
         }
 
         GenericResult generic = inferGenericResultType(function, boundArguments);
-        return new BoundCallExpression(function, boundArguments, generic.type(), generic.typeName());
+        return genericCall(function, boundArguments, generic);
     }
 
     /**
@@ -2233,20 +2245,32 @@ public class Binder {
         // The result's own class is what 0.9.0 gave it, so identity(5) + 1 still
         // adds; a struct or sum type result is also known by name.
         Class<?> resultType = legacyGenericResultType(function, arguments);
-        // A bare T bound through a generic struct argument, g(b: Box<T>) -> T
-        // given a Box<float>: the struct's type argument is known, and the
-        // call's result is read checked on both backends, so it is a float.
-        if (resultType == null && typeParameters.contains(returnTypeName)) {
+        // A bare T, or a container written over the parameters (Array<T>,
+        // Map<K, V>), bound through a generic struct argument: g(b: Box<T>) -> T
+        // given a Box<Array<float>>, or h(b: Box<Array<T>>) -> Array<T>. The
+        // struct's argument is known and its reads checked on both backends.
+        String returnBase = TypeResolver.genericBaseName(TypeResolver.canonicalTypeName(returnTypeName));
+        boolean overParameters = typeParameters.contains(returnTypeName)
+                || (("Array".equals(returnBase) || "Map".equals(returnBase) || "Set".equals(returnBase))
+                    && TypeResolver.typeArgumentsOf(TypeResolver.canonicalTypeName(returnTypeName)).stream()
+                        .allMatch(argument -> typeParameters.contains(argument) || !TypeResolver.mentionsAny(argument, typeParameters)));
+        if (resultType == null || !typeParameters.contains(returnTypeName)) {
             Map<String, String> throughStructs = new HashMap<>();
             for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
                 String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
                 if (!_typeResolver.mentionsGenericStruct(parameterTypeName)) continue;
                 TypeResolver.unify(parameterTypeName, typeNameOf(arguments.get(i)), typeParameters, throughStructs);
             }
-            String bound = throughStructs.get(returnTypeName);
-            Class<?> boundType = bound == null || bound.equals("object") ? null : _typeResolver.lookupType(bound);
-            if (boundType != null && boundType != Object.class && bindings.getOrDefault(returnTypeName, bound).equals(bound)) {
-                return new GenericResult(boundType, bound);
+            boolean allBound = overParameters;
+            for (String parameter : typeParameters) {
+                if (!TypeResolver.mentionsAny(returnTypeName, List.of(parameter))) continue;
+                String bound = throughStructs.get(parameter);
+                if (bound == null || bound.equals("object") || !bindings.getOrDefault(parameter, bound).equals(bound)) allBound = false;
+            }
+            if (allBound && !throughStructs.isEmpty()) {
+                String name = TypeResolver.substitute(returnTypeName, typeParameters, throughStructs);
+                Class<?> boundType = _typeResolver.lookupType(name);
+                if (boundType != null && boundType != Object.class) return new GenericResult(boundType, name, true);
             }
         }
         Class<?> named = _typeResolver.lookupType(resultTypeName);
@@ -2295,8 +2319,19 @@ public class Binder {
     }
 
     /** What a generic call produces: its type, and that type written out. */
-    private record GenericResult(Class<?> type, String typeName) {
+    private record GenericResult(Class<?> type, String typeName, boolean throughStruct) {
+        GenericResult(Class<?> type, String typeName) {
+            this(type, typeName, false);
+        }
+
         static final GenericResult NONE = new GenericResult(null, null);
+    }
+
+    /** A generic call, its result typed and, when bound through a generic struct, recorded as such. */
+    private BoundCallExpression genericCall(FunctionSymbol function, List<BoundExpression> arguments, GenericResult generic) {
+        BoundCallExpression call = new BoundCallExpression(function, arguments, generic.type(), generic.typeName());
+        if (generic.throughStruct()) _typeResolver.markBoundThroughStruct(call);
+        return call;
     }
 
     /**
@@ -3058,7 +3093,8 @@ public class Binder {
         BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(
                 applyImplicitReturn(blockBody, returnType));
 
-        return new BoundLambdaExpression(parameters, loweredBody, returnType, captured);
+        return new BoundLambdaExpression(parameters, loweredBody, returnType, captured)
+                .withReturnTypeName(syntax.getTypeClause() != null ? syntax.getTypeClause().getIdentifier().getData() : null);
     }
 
     private void collectCapturedVars(BoundNode node, List<ParameterSymbol> params,
@@ -3300,7 +3336,7 @@ public class Binder {
                 }
 
                 GenericResult generic = inferGenericResultType(func, boundArgs);
-                return new BoundCallExpression(func, boundArgs, generic.type(), generic.typeName());
+                return genericCall(func, boundArgs, generic);
             }
 
             // Check if target is a Java class (static method or constructor)
@@ -3477,7 +3513,7 @@ public class Binder {
             callArguments.add(widenTo(arguments.get(i), function.getParameters().get(i + 1).getType()));
         }
         GenericResult generic = inferGenericResultType(function, callArguments);
-        return new BoundCallExpression(function, callArguments, generic.type(), generic.typeName());
+        return genericCall(function, callArguments, generic);
     }
 
     /**
