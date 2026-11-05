@@ -3,21 +3,24 @@ import java "java.io.BufferedReader"
 import java "java.io.FileReader"
 import java "java.io.File"
 import java "java.lang.System"
+import java "java.lang.StringBuilder"
 import java "codeanalysis.SiyoRuntime"
 
 pub fn readFile(path: string) -> string {
     mut reader = BufferedReader.new(FileReader.new(path))
-    mut result = ""
+    mut result = StringBuilder.new()
+    mut first = true
     mut line = reader.readLine()
     while line != null {
-        if len(result) > 0 {
-            result = result + "\n"
+        if !first {
+            result.append("\n")
         }
-        result = result + line
+        first = false
+        result.append(line)
         line = reader.readLine()
     }
     reader.close()
-    return result
+    return toString(result)
 }
 
 // Writes a line to standard error, where a CLI's diagnostics belong.

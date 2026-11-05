@@ -1,4 +1,5 @@
 import java "java.lang.StringBuilder"
+import java "codeanalysis.SiyoRuntime"
 
 pub fn builder() -> object {
     return StringBuilder.new()
@@ -9,22 +10,28 @@ pub fn lines(s: string) -> string[] {
 }
 
 pub fn join(arr: string[], sep: string) -> string {
-    mut result = ""
+    mut result = StringBuilder.new()
     for mut i = 0 i < len(arr) i = i + 1 {
         if i > 0 {
-            result = result + sep
+            result.append(sep)
         }
-        result = result + arr[i]
+        result.append(arr[i])
     }
-    return result
+    return toString(result)
 }
 
 pub fn repeat(s: string, n: int) -> string {
-    mut result = ""
+    mut result = StringBuilder.new()
     for mut i = 0 i < n i = i + 1 {
-        result = result + s
+        result.append(s)
     }
-    return result
+    return toString(result)
+}
+
+// Whether parseInt can read s: an optional minus and digits, that fit an int.
+// parseInt itself answers 0 for anything else, which is also a number.
+pub fn isInt(s: string) -> bool {
+    return SiyoRuntime.isInt(s)
 }
 
 pub fn padLeft(s: string, width: int, ch: string) -> string {

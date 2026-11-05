@@ -511,6 +511,60 @@ class TaskFlowRegressionTest {
                 """, "JsonStruct");
     }
 
+    // --- T12: strings.isInt, and joining without a quadratic cost --------------
+
+    @Test
+    void isIntTellsWhatParseIntCanRead() throws Exception {
+        assertBoth("true true true false false false false false false", """
+                import "std/strings"
+                fn main() {
+                    mut out: string[] = []
+                    for s in ["12", "-7", "2147483647", "2147483648", "12x", "", " 1", "1.5", "-"] {
+                        push(out, toString(strings.isInt(s)))
+                    }
+                    println(strings.join(out, " "))
+                }
+                """, "IsInt");
+    }
+
+    @Test
+    void readFileKeepsLeadingBlankLines() throws Exception {
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("tf", ".txt");
+        try {
+            java.nio.file.Files.writeString(file, "\n\nab\r\nc\n");
+            String path = file.toString().replace("\\", "\\\\");
+            assertBoth("[, , ab, c]", """
+                    import "std/io"
+                    fn main() { println(toString(split(io.readFile("%s"), "\\n"))) }
+                    """.formatted(path), "ReadFileBlank");
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    void readingAndJoiningALargeTextIsNotQuadratic() throws Exception {
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("tf", ".txt");
+        try {
+            String path = file.toString().replace("\\", "\\\\");
+            String source = """
+                    import "std/io"
+                    import "std/strings"
+                    fn main() {
+                        mut lines: string[] = []
+                        for mut i = 0 i < 300000 i = i + 1 { push(lines, "line number " + toString(i)) }
+                        io.writeFile("%s", strings.join(lines, "\\n"))
+                        println(toString(len(split(io.readFile("%s"), "\\n"))))
+                        println(toString(len(strings.repeat("xy", 1000000))))
+                    }
+                    """.formatted(path, path);
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(60),
+                    () -> assertBoth("300000\n2000000", source, "LargeText"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+    }
+
     // --- T13: else if is a value, and void arms stay void ----------------------
 
     @Test
