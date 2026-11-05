@@ -9,7 +9,7 @@ and reports status. Everything it hit is recorded with a reproducer in
 The planned generics, interface and tooling work moves to 0.10.0: TaskFlow did not
 need it, and the release is built from what was demonstrated.
 
-2,737 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
+2,743 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
 on both backends under a C locale against goldens, and generated graphs are checked
 against rules worked out independently of the application.
 
@@ -48,7 +48,9 @@ one with its parent. A closure in a closure reading a local, reading a global or
 writing a local, `scope` reading a captured variable inside a lambda, and a `for` inside
 a lambda, internal compiler errors in 0.8.0, now also work compiled. A lambda also tells
 an inner local from an outer variable of the same name, and a capture may be used from
-any form, a union argument, a cast, an actor's constructor and a spawned call among them. A lambda inside
+any form, a union argument, a cast, an actor's constructor and a spawned call among them.
+A spawned call follows the rules of a spawn block: `spawn change(xs)` may not share a `mut`
+binding or a mutable container, and a channel or an actor handle may be passed. A lambda inside
 a `spawn` compiles too. A nested `fn` using its parent's locals is reported as not compiled
 yet; with a same-named global it used to read the global silently.
 

@@ -315,6 +315,9 @@ spawn_expression
     : 'spawn' block          // bare `spawn { ... }` is allowed outside `scope { }`
                              // and runs as a fire-and-forget virtual thread.
     | 'spawn' call_expression// `spawn Actor.new(...)` to start an actor
+    // Any other call runs on its own thread, under the rules of a spawn block: it may
+    // not hold a `mut` binding or a mutable container. An actor constructor runs where
+    // it is spawned.
 
 struct_literal
     : IDENTIFIER '{' (IDENTIFIER ':' expression ',')* '}'
