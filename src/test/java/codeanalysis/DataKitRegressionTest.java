@@ -337,10 +337,11 @@ class DataKitRegressionTest {
                 match csv.parse(text) {
                     Table(rows) => {
                         mut parts: string[] = []
-                        for row in rows {
+                        for r in rows {
+                            imut row = r.cells
                             mut cells: string[] = []
                             for cell in row { push(cells, "[" + replace(replace(cell, "\\r", "CR"), "\\n", "LF") + "]") }
-                            push(parts, toString(len(row)) + ":" + strings.join(cells, ""))
+                            push(parts, toString(r.line) + "/" + toString(len(row)) + ":" + strings.join(cells, ""))
                         }
                         "rows " + toString(len(rows)) + " " + strings.join(parts, " ")
                     },
@@ -352,17 +353,17 @@ class DataKitRegressionTest {
     @Test
     void csvReadsQuotedFieldsLineEndingsAndAByteOrderMark() throws Exception {
         assertBoth(String.join("\n",
-                        "rows 2 2:[a][b] 2:[c][d]",
-                        "rows 2 2:[a][b] 2:[c][d]",
-                        "rows 2 3:[a,1][say \"hi\"][] 1:[x]",
-                        "rows 2 2:[twoCRLFlines][z] 1:[]",
-                        "rows 1 2:[a][b]",
+                        "rows 2 1/2:[a][b] 2/2:[c][d]",
+                        "rows 2 1/2:[a][b] 2/2:[c][d]",
+                        "rows 2 1/3:[a,1][say \"hi\"][] 2/1:[x]",
+                        "rows 2 1/2:[twoCRLFlines][z] 3/1:[]",
+                        "rows 1 1/2:[a][b]",
                         "rows 0 ",
                         "rows 0 ",
-                        "rows 1 3:[a][][]",
-                        "rows 3 1:[a] 1:[] 1:[b]",
-                        "rows 2 1:[a] 1:[b]",
-                        "rows 1 1:[\"]"),
+                        "rows 1 1/3:[a][][]",
+                        "rows 3 1/1:[a] 2/1:[] 3/1:[b]",
+                        "rows 2 1/1:[a] 2/1:[b]",
+                        "rows 1 1/1:[\"]"),
                 SHOW_CSV + """
                 fn main() {
                     println(show("a,b\\nc,d\\n"))
@@ -401,7 +402,7 @@ class DataKitRegressionTest {
     void csvFormatRowQuotesWhatNeedsItAndRoundTrips() throws Exception {
         assertBoth(String.join("\n",
                         "plain,\"a,b\",\"say \"\"x\"\"\",\"two\nlines\",\" pad\",,1.5",
-                        "rows 1 7:[plain][a,b][say \"x\"][twoLFlines][ pad][][1.5]"),
+                        "rows 1 1/7:[plain][a,b][say \"x\"][twoLFlines][ pad][][1.5]"),
                 SHOW_CSV + """
                 fn main() {
                     imut line = csv.formatRow(["plain", "a,b", "say \\"x\\"", "two\\nlines", " pad", "", "1.5"])

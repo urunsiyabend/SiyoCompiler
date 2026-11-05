@@ -5,14 +5,19 @@
 // is skipped. Rows are returned as written: one with a different number of
 // fields from the next is not a syntax error, so the caller decides what it is.
 
-pub type CsvResult = Table(Array<Array<string>>) | BadCsv(string)
+// A row and the line it starts on, which a quoted line break makes differ from
+// its position among the rows.
+pub struct CsvRow { line: int, cells: Array<string> }
+
+pub type CsvResult = Table(Array<CsvRow>) | BadCsv(string)
 
 pub fn parse(text: string) -> CsvResult {
     imut n = len(text)
-    mut rows: Array<Array<string>> = []
+    mut rows: Array<CsvRow> = []
     mut row: Array<string> = []
     mut i = 0
     mut line = 1
+    mut rowLine = 1
     if n > 0 && substring(text, 0, 1) == chr(65279) { i = 1 }
     if i >= n { return Table(rows) }
     while true {
@@ -64,7 +69,7 @@ pub fn parse(text: string) -> CsvResult {
         }
         push(row, value)
         if i >= n {
-            push(rows, row)
+            push(rows, CsvRow { line: rowLine, cells: row })
             break
         }
         imut c = substring(text, i, i + 1)
@@ -73,15 +78,16 @@ pub fn parse(text: string) -> CsvResult {
             if i >= n {
                 // A comma ending the text leaves one more, empty, field.
                 push(row, "")
-                push(rows, row)
+                push(rows, CsvRow { line: rowLine, cells: row })
                 break
             }
             continue
         }
         if c == "\r" && i + 1 < n && substring(text, i + 1, i + 2) == "\n" { i += 2 } else { i += 1 }
         line += 1
-        push(rows, row)
+        push(rows, CsvRow { line: rowLine, cells: row })
         row = []
+        rowLine = line
         if i >= n { break }
     }
     Table(rows)
