@@ -319,7 +319,7 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2418 tests across 40 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2737 tests across 41 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
@@ -354,9 +354,9 @@ These are tracked for future releases — see [FUTURE.md](FUTURE.md):
   verification compiled. Assign it to a variable first.
 - Closure conversion has gaps compiled: a `fn` in a function that uses that function's
   locals is reported as not compiled yet, any loop around `scope { spawn { } }` is an
-  internal compiler error, and a lambda reading a top-level `mut` or capturing `self`,
-  created in a `spawn`, or capturing a `mut` parameter fails at load or run time. All work
-  interpreted.
+  internal compiler error, and a lambda reading a top-level `mut`, capturing `self`,
+  capturing a `mut` parameter or walking an `imut` captured map or set fails at load or run time.
+  All work interpreted.
 - No package manager, formatter, or LSP server.
 
 ## Contributing

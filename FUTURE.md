@@ -269,7 +269,7 @@ task files — and fixing what it hit. See `RELEASE_NOTES_0.9.0.md` and
 - **JSON.** The parser follows RFC 8259, rejects duplicate keys and limits nesting;
   `stringify` writes structs and sets as data.
 - **Performance.** `io.readFile`, `strings.join` and `strings.repeat` are linear.
-- 2,418 tests pass, up from 2,243
+- 2,737 tests pass, up from 2,243
 
 ---
 

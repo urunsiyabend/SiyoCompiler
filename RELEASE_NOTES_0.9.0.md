@@ -9,7 +9,7 @@ and reports status. Everything it hit is recorded with a reproducer in
 The planned generics, interface and tooling work moves to 0.10.0: TaskFlow did not
 need it, and the release is built from what was demonstrated.
 
-2,418 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
+2,737 tests pass, up from 2,243. TaskFlow is part of `mvn verify`: its CLI runs
 on both backends under a C locale against goldens, and generated graphs are checked
 against rules worked out independently of the application.
 
@@ -47,7 +47,9 @@ function returned from its parent keeps the variables it refers to, and shares a
 one with its parent. A closure in a closure reading a local, reading a global or
 writing a local, `scope` reading a captured variable inside a lambda, and a `for` inside
 a lambda, internal compiler errors in 0.8.0, now also work compiled. A lambda also tells
-an inner local from an outer variable of the same name. A nested `fn` using its parent's locals is reported as not compiled
+an inner local from an outer variable of the same name, and a capture may be used from
+any form, a union argument, a cast, an actor's constructor and a spawned call among them. A lambda inside
+a `spawn` compiles too. A nested `fn` using its parent's locals is reported as not compiled
 yet; with a same-named global it used to read the global silently.
 
 **Nested functions of one name are separate functions.** Two functions each declaring
@@ -182,9 +184,9 @@ Found by TaskFlow and deliberately left for later (see PAIN_POINTS.md):
 - An uncaught `throw` prints a Java stack trace, a different one per backend.
 - Closure conversion has gaps compiled. A `fn` in a function that uses that function's
   locals is reported as not compiled yet. Any loop around `scope { spawn { } }` is an
-  internal compiler error. A lambda reading a top-level `mut` or capturing `self`, one
-  created in a `spawn`, and one capturing a `mut` parameter fail at load or run time. All
-  work interpreted; PAIN_POINTS.md D10 lists what does compile.
+  internal compiler error. A lambda reading a top-level `mut`, capturing `self`, capturing
+  a `mut` parameter, or walking an `imut` captured map or set fails at load or run time. All work
+  interpreted; PAIN_POINTS.md D10 lists what does compile.
 - A float read at a declared long through an erased value raises compiled and holds
   the float interpreted.
 - A value-returning function that reaches its end with no value gives the type's
