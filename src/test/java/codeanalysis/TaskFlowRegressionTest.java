@@ -692,4 +692,85 @@ class TaskFlowRegressionTest {
                 }
                 """, "ForInErased");
     }
+
+    // --- T16: a recursive call has locals of its own, interpreted --------------
+
+    @Test
+    void aRecursiveCallDoesNotDisturbItsCallersLoop() throws Exception {
+        assertBoth("0 sees 1\n0 sees 2", """
+                fn walk(n: int, kids: Array<Array<int>>) {
+                    for w in kids[n] {
+                        println(toString(n) + " sees " + toString(w))
+                        if w > 0 { walk(w, kids) }
+                    }
+                }
+                fn main() { walk(0, [[1, 2], [], []]) }
+                """, "RecursionLoop");
+    }
+
+    @Test
+    void aRecursiveCallDoesNotDisturbItsCallersLocals() throws Exception {
+        assertBoth("120", """
+                fn fact(n: int) -> int {
+                    imut before = n
+                    if n == 0 { return 1 }
+                    imut below = fact(n - 1)
+                    before * below
+                }
+                fn main() { println(toString(fact(5))) }
+                """, "RecursionLocals");
+    }
+
+    @Test
+    void aRecursiveCallDoesNotDisturbBindingsOrCatchVariables() throws Exception {
+        assertBoth("3 2 1\nouter", """
+                type L = Cons(int, L) | End
+                fn sum(l: L) -> string {
+                    match l {
+                        End => "",
+                        Cons(head, tail) => {
+                            imut rest = sum(tail)
+                            trim(toString(head) + " " + rest)
+                        }
+                    }
+                }
+                fn nested(n: int) -> string {
+                    try {
+                        throw "outer"
+                    } catch e {
+                        if n > 0 { nested(n - 1) }
+                        toString(e)
+                    }
+                }
+                fn main() {
+                    println(sum(Cons(3, Cons(2, Cons(1, End)))))
+                    println(nested(2))
+                }
+                """, "RecursionBindings");
+    }
+
+    @Test
+    void aGlobalIsStillSharedAndAClosureStillCaptures() throws Exception {
+        assertBoth("2\n7\n9", """
+                mut count = 0
+                fn bump() { count = count + 1 }
+                fn counter() -> fn() -> int {
+                    mut n = 6
+                    fn() -> int {
+                        n = n + 1
+                        n
+                    }
+                }
+                fn main() {
+                    bump()
+                    bump()
+                    println(toString(count))
+                    imut c = counter()
+                    println(toString(c()))
+                    imut k = 9
+                    imut f = fn() -> int { k }
+                    println(toString(f()))
+                }
+                """, "GlobalsAndCaptures");
+    }
 }

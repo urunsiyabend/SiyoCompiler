@@ -248,7 +248,10 @@ public class Evaluator {
 
     /**
      * Stores a value under a variable, in the current frame when the variable
-     * is local to it and in the globals otherwise.
+     * is local to it and in the globals otherwise. A variable that no frame or
+     * global holds yet and no module owns is being declared here. Such locals
+     * used to go to the globals, so a recursive call overwrote its caller's
+     * locals and loop counters.
      *
      * @param variable The variable.
      * @param value    The value to store.
@@ -257,7 +260,8 @@ public class Evaluator {
         if (!_callStack.isEmpty()) {
             StackFrame frame = _callStack.peek();
             // Check if it's a local variable (including parameters)
-            if (frame.getLocals().containsKey(variable) || isParameter(variable, frame.getFunction())) {
+            if (frame.getLocals().containsKey(variable) || isParameter(variable, frame.getFunction())
+                    || (variable.getOwnerClass() == null && !_globals.containsKey(variable))) {
                 frame.getLocals().put(variable, value);
                 return;
             }
