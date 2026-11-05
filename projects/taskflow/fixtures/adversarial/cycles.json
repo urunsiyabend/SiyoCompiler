@@ -1,0 +1,11 @@
+{"tasks": [
+  {"id": "c", "deps": ["a"]},
+  {"id": "a", "deps": ["b"]},
+  {"id": "b", "deps": ["c", "x"]},
+  {"id": "x"},
+  {"id": "self", "deps": ["self"]},
+  {"id": "p", "deps": ["q", "r"]},
+  {"id": "q", "deps": ["p"]},
+  {"id": "r", "deps": ["p"]},
+  {"id": "downstream", "deps": ["a"]}
+]}

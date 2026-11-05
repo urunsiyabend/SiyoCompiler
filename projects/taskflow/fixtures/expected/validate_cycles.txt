@@ -1,0 +1,4 @@
+cycle: a -> b -> c -> a
+cycle: p -> q -> p
+cycle: self -> self
+invalid: 3 problems

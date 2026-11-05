@@ -1,0 +1,58 @@
+// Where a project stands, computed from its tasks and its plan.
+
+import "model"
+import "graph"
+import "plan"
+import "report"
+
+pub fn compute(p: Project, g: Graph) -> Status {
+    imut pl = plan.build(p.tasks, g, 0, "")
+    mut counts: Map<string, int> = {"done": 0, "doing": 0, "todo": 0, "failed": 0}
+    mut hoursDone: long = 0
+    mut hoursLeft: long = 0
+    mut doing: Array<Task> = []
+    mut failed: Array<Task> = []
+    mut warnings: Array<string> = []
+    for t in p.tasks {
+        counts[t.status] = counts[t.status] + 1
+        if t.status == "done" {
+            hoursDone += t.estimate
+            for d in t.deps {
+                if p.byId[d].status != "done" {
+                    push(warnings, t.id + " is done but needs " + d + ", which is " + p.byId[d].status)
+                }
+            }
+        } else {
+            hoursLeft += t.estimate
+        }
+        if t.status == "doing" {
+            push(doing, t)
+            for d in t.deps {
+                if p.byId[d].status != "done" {
+                    push(warnings, t.id + " is running but needs " + d + ", which is " + p.byId[d].status)
+                }
+            }
+        }
+        if t.status == "failed" { push(failed, t) }
+    }
+    mut ready: Array<Task> = []
+    if len(pl.batches) > 0 {
+        for t in pl.batches[0] { if t.status == "todo" { push(ready, t) } }
+    }
+    imut total = len(p.tasks)
+    Status {
+        name: p.name,
+        counts: counts,
+        total: total,
+        percentDone: if total == 0 { 100 } else { counts["done"] * 100 / total },
+        hoursDone: hoursDone,
+        hoursLeft: hoursLeft,
+        ready: ready,
+        doing: doing,
+        failed: failed,
+        blocked: pl.blocked,
+        critical: pl.critical,
+        criticalHours: pl.criticalHours,
+        warnings: warnings
+    }
+}

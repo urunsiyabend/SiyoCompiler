@@ -1,0 +1,2 @@
+fixtures/adversarial/trailing_garbage.json: json: unexpected trailing input at position 25 ('t')
+invalid: 1 problem

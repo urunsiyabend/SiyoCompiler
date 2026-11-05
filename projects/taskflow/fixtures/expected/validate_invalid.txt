@@ -1,0 +1,30 @@
+fixtures/adversarial/invalid.json: unknown field "extra"
+fixtures/adversarial/invalid.json: "project" must be a string, got int
+fixtures/adversarial/invalid.json: tasks[0]: unknown field "dep"
+fixtures/adversarial/invalid.json: tasks[1]: duplicate task id "ok", already declared in fixtures/adversarial/invalid.json
+fixtures/adversarial/invalid.json: tasks[2]: a task needs a non-empty "id"
+fixtures/adversarial/invalid.json: tasks[3]: a task needs a non-empty "id"
+fixtures/adversarial/invalid.json: tasks[4]: "id" must be a string, got int
+fixtures/adversarial/invalid.json: tasks[4]: a task needs a non-empty "id"
+fixtures/adversarial/invalid.json: tasks[5]: a task must be an object, got int
+fixtures/adversarial/invalid.json: tasks[6]: a task must be an object, got null
+fixtures/adversarial/invalid.json: tasks[7]: "status" must be todo, doing, done or failed, got "DONE"
+fixtures/adversarial/invalid.json: tasks[8]: "title" must be a string, got int
+fixtures/adversarial/invalid.json: tasks[8]: "priority" must be an integer, got string
+fixtures/adversarial/invalid.json: tasks[8]: "estimate" must be an integer, got float
+fixtures/adversarial/invalid.json: tasks[8]: "owner" must be a string, got array
+fixtures/adversarial/invalid.json: tasks[9]: "priority" must be between -1000000 and 1000000, got 1000001
+fixtures/adversarial/invalid.json: tasks[9]: "estimate" must be between 0 and 1000000, got -1
+fixtures/adversarial/invalid.json: tasks[10]: "priority" must be between -1000000 and 1000000, got 99999999999
+fixtures/adversarial/invalid.json: tasks[10]: "estimate" must be an integer, got float
+fixtures/adversarial/invalid.json: tasks[11]: "deps" must be an array of task ids, got string
+fixtures/adversarial/invalid.json: tasks[12].deps[1]: repeats "ok"
+fixtures/adversarial/invalid.json: tasks[12].deps[2]: must be a task id, got int
+fixtures/adversarial/invalid.json: tasks[12].deps[3]: must be a task id, got null
+fixtures/adversarial/invalid.json: dependencies[1]: a dependency needs a non-empty "task"
+fixtures/adversarial/invalid.json: dependencies[2]: unknown field "why"
+fixtures/adversarial/invalid.json: dependencies[2]: "needs" must be an array of task ids, got string
+fixtures/adversarial/invalid.json: dependencies[3]: a dependency must be an object, got int
+fixtures/adversarial/invalid.json: dependencies[0]: unknown task "ghost2"
+fixtures/adversarial/invalid.json: task "deps2": depends on unknown task "ghost"
+invalid: 29 problems

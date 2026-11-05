@@ -1,0 +1,25 @@
+import "std/testing"
+import "heap"
+
+fn takesInOrder() {
+    mut h: Array<int> = []
+    for v in [5, 1, 4, 1, 9, 2, 8, 0, 3, 7, 6] { heap.insert(h, v) }
+    mut out: Array<int> = []
+    while len(h) > 0 { push(out, heap.take(h)) }
+    testing.assertEq(toString(out), "[0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9]", "sorted")
+}
+
+fn survivesInterleavedUse() {
+    mut h: Array<int> = []
+    heap.insert(h, 3)
+    heap.insert(h, 1)
+    testing.assertEq(toString(heap.take(h)), "1", "first")
+    heap.insert(h, 0)
+    testing.assertEq(toString(heap.take(h)), "0", "second")
+    testing.assertEq(toString(heap.take(h)), "3", "third")
+    testing.assertEq(toString(len(h)), "0", "empty")
+}
+
+fn main() {
+    testing.run("heap", [takesInOrder, survivesInterleavedUse])
+}

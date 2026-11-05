@@ -1,0 +1,9 @@
+[
+  {"id": "z", "priority": 1, "estimate": 2},
+  {"id": "m", "priority": 1, "estimate": 2},
+  {"id": "a", "priority": 1, "estimate": 2},
+  {"id": "q", "priority": 9, "estimate": 0},
+  {"id": "n", "status": "doing", "priority": -9, "estimate": 2},
+  {"id": "end1", "deps": ["z", "m", "a"], "estimate": 3},
+  {"id": "end2", "deps": ["a", "n", "q"], "estimate": 3}
+]

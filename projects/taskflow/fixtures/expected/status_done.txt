@@ -1,0 +1,7 @@
+status of finished
+2 tasks, 100% done
+  done   2
+  doing  0
+  todo   0
+  failed 0
+hours: 3 done, 0 left

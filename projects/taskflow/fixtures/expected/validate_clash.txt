@@ -1,0 +1,3 @@
+fixtures/adversarial/clash_b.json: project "name" differs from "other" in fixtures/adversarial/clash_a.json
+fixtures/adversarial/clash_b.json: tasks[0]: duplicate task id "a", already declared in fixtures/adversarial/clash_a.json
+invalid: 2 problems

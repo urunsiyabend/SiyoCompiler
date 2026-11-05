@@ -1,0 +1,1 @@
+{"project":"release-0.9","total":9,"counts":{"done":2,"doing":1,"todo":6,"failed":0},"percentDone":22,"hoursDone":12,"hoursLeft":30,"running":["binder"],"ready":["stdlib"],"failed":[],"blocked":[],"criticalPath":["binder","emitter","notes","ship"],"criticalHours":18,"warnings":[]}

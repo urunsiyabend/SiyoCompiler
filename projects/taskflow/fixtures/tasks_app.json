@@ -1,0 +1,10 @@
+[
+  {"id": "api", "title": "HTTP API", "priority": 2, "estimate": 8, "deps": ["schema"], "owner": "lin"},
+  {"id": "schema", "title": "Database schema", "status": "done", "estimate": 3, "owner": "lin"},
+  {"id": "ui", "title": "Web UI", "priority": 2, "estimate": 13, "owner": "noor"},
+  {"id": "auth", "title": "Sign-in", "status": "failed", "estimate": 5, "owner": "sam"},
+  {"id": "admin", "title": "Admin console", "estimate": 5},
+  {"id": "e2e", "title": "End-to-end suite", "priority": 5, "estimate": 4},
+  {"id": "launch", "title": "Launch", "priority": 100, "estimate": 0},
+  {"id": "beta", "title": "Beta programme", "status": "doing", "estimate": 2, "deps": ["schema"]}
+]

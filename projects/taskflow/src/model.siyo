@@ -1,0 +1,32 @@
+// What every other module talks about: tasks, and what can be wrong with them.
+
+pub struct Task {
+    id: string,
+    title: string,
+    status: string,      // todo | doing | done | failed
+    priority: int,       // higher runs first
+    estimate: int,       // hours
+    owner: string,       // "" when nobody is assigned
+    deps: Array<string>,
+    source: string       // the file that declared it
+}
+
+pub struct Problem {
+    place: string,       // "tasks.json: tasks[2]"
+    what: string
+}
+
+pub struct Project {
+    name: string,
+    tasks: Array<Task>,  // sorted by id, whatever order the files were in
+    byId: Map<string, Task>,
+    problems: Array<Problem>
+}
+
+pub fn problem(place: string, what: string) -> Problem {
+    Problem { place: place, what: what }
+}
+
+pub fn isStatus(s: string) -> bool {
+    s == "todo" || s == "doing" || s == "done" || s == "failed"
+}

@@ -1,0 +1,39 @@
+// What the test files share: a project from JSON text, in one call.
+
+import "model"
+import "loader"
+import "graph"
+import "plan"
+
+pub fn project(text: string) -> Project {
+    loader.assemble(["t.json"], [text])
+}
+
+// Plans text that is expected to be valid.
+pub fn planOf(text: string, workers: int, target: string) -> Plan {
+    imut p = project(text)
+    plan.build(p.tasks, graph.build(p.tasks), workers, target)
+}
+
+// Each batch's ids joined by commas, the batches joined by " | ".
+pub fn shape(pl: Plan) -> string {
+    mut out = ""
+    mut first = true
+    for batch in pl.batches {
+        if !first { out = out + " | " }
+        first = false
+        mut names = ""
+        for t in batch {
+            if names != "" { names = names + "," }
+            names = names + t.id
+        }
+        out = out + names
+    }
+    out
+}
+
+pub fn problemsOf(p: Project) -> string {
+    mut out = ""
+    for x in p.problems { out = out + x.place + ": " + x.what + "\n" }
+    out
+}

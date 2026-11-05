@@ -1,0 +1,62 @@
+import "std/testing"
+import "std/strings"
+import "model"
+import "graph"
+import "helpers"
+
+fn cyclesOf(text: string) -> string {
+    imut p = helpers.project(text)
+    mut lines: string[] = []
+    for c in graph.cycles(graph.build(p.tasks)) { push(lines, strings.join(c, ">")) }
+    strings.join(lines, " ")
+}
+
+fn anAcyclicGraphHasNoCycles() {
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\"}]"), "", "none")
+    testing.assertEq(cyclesOf("[]"), "", "empty")
+}
+
+fn aDiamondIsNotACycle() {
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\", \"c\"]}, {\"id\": \"b\", \"deps\": [\"d\"]}, {\"id\": \"c\", \"deps\": [\"d\"]}, {\"id\": \"d\"}]"), "", "diamond")
+}
+
+fn aSelfDependencyIsACycle() {
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"a\"]}]"), "a>a", "self")
+}
+
+fn aCycleStartsAtItsSmallestId() {
+    testing.assertEq(cyclesOf("[{\"id\": \"c\", \"deps\": [\"a\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"a\", \"deps\": [\"b\"]}]"), "a>b>c>a", "rotated")
+}
+
+fn separateCyclesAreEachReported() {
+    testing.assertEq(cyclesOf("[{\"id\": \"p\", \"deps\": [\"q\"]}, {\"id\": \"q\", \"deps\": [\"p\"]}, {\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"a\"]}]"), "a>b>a p>q>p", "two")
+}
+
+fn aTaskLeadingIntoACycleIsNotPartOfIt() {
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"m\"]}, {\"id\": \"m\", \"deps\": [\"n\"]}, {\"id\": \"n\", \"deps\": [\"m\"]}]"), "m>n>m", "tail")
+}
+
+fn overlappingLoopsNameOneCycle() {
+    // a needs b and c; both need a. One strongly connected group, smallest route.
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\", \"c\"]}, {\"id\": \"b\", \"deps\": [\"a\"]}, {\"id\": \"c\", \"deps\": [\"a\"]}]"), "a>b>a", "group")
+}
+
+fn aWalkMayRejoinPartWayRound() {
+    // a -> b -> c -> b, with a reachable from c only through d.
+    testing.assertEq(cyclesOf("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\", \"deps\": [\"b\", \"d\"]}, {\"id\": \"d\", \"deps\": [\"a\"]}]"), "b>c>b", "rejoin")
+}
+
+fn closureFollowsEveryPath() {
+    imut p = helpers.project("[{\"id\": \"a\", \"deps\": [\"b\"]}, {\"id\": \"b\", \"deps\": [\"c\"]}, {\"id\": \"c\"}, {\"id\": \"z\"}]")
+    imut g = graph.build(p.tasks)
+    imut seen = graph.closure(g, g.index["b"])
+    testing.assertEq(toString(len(seen)), "2", "b and c")
+    testing.assert(seen.has(g.index["c"]), "c")
+    testing.assert(!seen.has(g.index["a"]), "not a")
+}
+
+fn main() {
+    testing.run("graph", [anAcyclicGraphHasNoCycles, aDiamondIsNotACycle, aSelfDependencyIsACycle,
+        aCycleStartsAtItsSmallestId, separateCyclesAreEachReported, aTaskLeadingIntoACycleIsNotPartOfIt,
+        overlappingLoopsNameOneCycle, aWalkMayRejoinPartWayRound, closureFollowsEveryPath])
+}

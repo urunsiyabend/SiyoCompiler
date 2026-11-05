@@ -1,0 +1,236 @@
+// Everything the user reads: the text and the JSON form of each report.
+
+import "std/json"
+import "std/strings"
+import "model"
+import "plan"
+
+fn hex4(n: int) -> string {
+    imut digits = "0123456789abcdef"
+    mut out = ""
+    mut rest = n
+    for mut i = 0 i < 4 i = i + 1 {
+        out = substring(digits, rest % 16, rest % 16 + 1) + out
+        rest = rest / 16
+    }
+    out
+}
+
+// Text comes from a file, and a terminal would obey any control sequence in it,
+// so a text report shows C0 and C1 control characters as escapes.
+pub fn safe(s: string) -> string {
+    imut out = strings.builder()
+    for c in strings.chars(s) {
+        imut code = ord(c)
+        if code < 32 || (code >= 127 && code < 160) {
+            out.append("\\u" + hex4(code))
+        } else {
+            out.append(c)
+        }
+    }
+    toString(out)
+}
+
+fn names(tasks: Array<Task>) -> Array<string> {
+    mut result: Array<string> = []
+    for t in tasks { push(result, safe(t.id)) }
+    result
+}
+
+fn safeAll(xs: Array<string>) -> Array<string> {
+    mut result: Array<string> = []
+    for x in xs { push(result, safe(x)) }
+    result
+}
+
+fn count(n: int, one: string, many: string) -> string {
+    toString(n) + " " + if n == 1 { one } else { many }
+}
+
+fn cycleLine(c: Array<string>) -> string {
+    strings.join(safeAll(c), " -> ")
+}
+
+pub fn problemText(p: Problem) -> string {
+    safe(p.place) + ": " + safe(p.what)
+}
+
+pub fn problemsText(problems: Array<Problem>, cycles: Array<Array<string>>) -> string {
+    imut out = strings.builder()
+    for p in problems { out.append(problemText(p) + "\n") }
+    for c in cycles { out.append("cycle: " + cycleLine(c) + "\n") }
+    toString(out)
+}
+
+fn problemsJson(problems: Array<Problem>) -> object[] {
+    mut result: object[] = []
+    for p in problems {
+        push(result, {"place": p.place, "problem": p.what})
+    }
+    result
+}
+
+fn edgeCount(p: Project) -> int {
+    mut n = 0
+    for t in p.tasks { n += len(t.deps) }
+    n
+}
+
+pub fn validateText(p: Project, cycles: Array<Array<string>>) -> string {
+    imut body = problemsText(p.problems, cycles)
+    imut found = len(p.problems) + len(cycles)
+    if found > 0 {
+        return body + "invalid: " + count(found, "problem", "problems") + "\n"
+    }
+    "ok: " + count(len(p.tasks), "task", "tasks") + ", " + count(edgeCount(p), "dependency", "dependencies") + "\n"
+}
+
+pub fn validateJson(p: Project, cycles: Array<Array<string>>) -> string {
+    json.stringify({
+        "valid": len(p.problems) + len(cycles) == 0,
+        "tasks": len(p.tasks),
+        "dependencies": edgeCount(p),
+        "problems": problemsJson(p.problems),
+        "cycles": cycles
+    })
+}
+
+pub fn cyclesText(cycles: Array<Array<string>>) -> string {
+    if len(cycles) == 0 { return "no cycles\n" }
+    imut out = strings.builder()
+    for c in cycles { out.append("cycle: " + cycleLine(c) + "\n") }
+    toString(out)
+}
+
+pub fn cyclesJson(cycles: Array<Array<string>>) -> string {
+    json.stringify({"cycles": cycles})
+}
+
+fn titleOf(t: Task) -> string {
+    imut title = if t.title == t.id { "" } else { "  " + safe(t.title) }
+    imut who = if t.owner == "" { "" } else { "  @" + safe(t.owner) }
+    safe(t.id) + " (" + toString(t.estimate) + "h)" + title + who
+}
+
+pub fn planText(name: string, pl: Plan) -> string {
+    imut out = strings.builder()
+    if name != "" { out.append("plan for " + safe(name) + "\n") }
+    if len(pl.batches) == 0 { out.append("nothing to do\n") }
+    mut b = 1
+    for batch in pl.batches {
+        out.append("batch " + toString(b) + ":\n")
+        b += 1
+        for t in batch { out.append("  " + titleOf(t) + "\n") }
+    }
+    if len(pl.blocked) > 0 {
+        out.append("blocked:\n")
+        for x in pl.blocked {
+            out.append("  " + safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
+        }
+    }
+    out.append("remaining: " + toString(pl.remaining) + "h\n")
+    if len(pl.critical) > 0 {
+        out.append("critical path (" + toString(pl.criticalHours) + "h): " + strings.join(names(pl.critical), " -> ") + "\n")
+    }
+    toString(out)
+}
+
+fn taskJson(t: Task) -> map {
+    {"id": t.id, "title": t.title, "status": t.status, "priority": t.priority,
+     "estimate": t.estimate, "owner": t.owner, "deps": t.deps}
+}
+
+fn tasksJson(ts: Array<Task>) -> object[] {
+    mut result: object[] = []
+    for t in ts { push(result, taskJson(t)) }
+    result
+}
+
+fn blockedJson(xs: Array<Blocked>) -> object[] {
+    mut result: object[] = []
+    for x in xs { push(result, {"id": x.id, "by": x.by}) }
+    result
+}
+
+fn ids(ts: Array<Task>) -> Array<string> {
+    mut result: Array<string> = []
+    for t in ts { push(result, t.id) }
+    result
+}
+
+pub fn planJson(name: string, pl: Plan) -> string {
+    mut batches: object[] = []
+    for batch in pl.batches { push(batches, tasksJson(batch)) }
+    json.stringify({
+        "project": name,
+        "batches": batches,
+        "blocked": blockedJson(pl.blocked),
+        "remainingHours": pl.remaining,
+        "criticalPath": ids(pl.critical),
+        "criticalHours": pl.criticalHours
+    })
+}
+
+pub struct Status {
+    name: string,
+    counts: Map<string, int>,
+    total: int,
+    percentDone: int,
+    hoursDone: long,
+    hoursLeft: long,
+    ready: Array<Task>,
+    doing: Array<Task>,
+    failed: Array<Task>,
+    blocked: Array<Blocked>,
+    critical: Array<Task>,
+    criticalHours: long,
+    warnings: Array<string>
+}
+
+pub fn statusText(s: Status) -> string {
+    imut out = strings.builder()
+    if s.name != "" { out.append("status of " + safe(s.name) + "\n") }
+    out.append(count(s.total, "task", "tasks") + ", " + toString(s.percentDone) + "% done\n")
+    for key in ["done", "doing", "todo", "failed"] {
+        out.append("  " + strings.padRight(key, 7, " ") + toString(s.counts[key]) + "\n")
+    }
+    out.append("hours: " + toString(s.hoursDone) + " done, " + toString(s.hoursLeft) + " left\n")
+    section(out, "running", s.doing)
+    section(out, "ready", s.ready)
+    section(out, "failed", s.failed)
+    if len(s.blocked) > 0 {
+        out.append("blocked:\n")
+        for x in s.blocked {
+            out.append("  " + safe(x.id) + " by " + strings.join(safeAll(x.by), ", ") + "\n")
+        }
+    }
+    if len(s.critical) > 0 {
+        out.append("critical path (" + toString(s.criticalHours) + "h): " + strings.join(names(s.critical), " -> ") + "\n")
+    }
+    for w in s.warnings { out.append("warning: " + safe(w) + "\n") }
+    toString(out)
+}
+
+fn section(out: object, title: string, ts: Array<Task>) {
+    if len(ts) == 0 { return }
+    out.append(title + ":\n")
+    for t in ts { out.append("  " + titleOf(t) + "\n") }
+}
+
+pub fn statusJson(s: Status) -> string {
+    json.stringify({
+        "project": s.name,
+        "total": s.total,
+        "counts": s.counts,
+        "percentDone": s.percentDone,
+        "hoursDone": s.hoursDone,
+        "hoursLeft": s.hoursLeft,
+        "running": ids(s.doing),
+        "ready": ids(s.ready),
+        "failed": ids(s.failed),
+        "blocked": blockedJson(s.blocked),
+        "criticalPath": ids(s.critical),
+        "criticalHours": s.criticalHours,
+        "warnings": s.warnings
+    })
+}

@@ -1,0 +1,1 @@
+{"project":"storefront","total":8,"counts":{"done":1,"doing":1,"todo":5,"failed":1},"percentDone":12,"hoursDone":3,"hoursLeft":37,"running":["beta"],"ready":["api","ui"],"failed":["auth"],"blocked":[{"id":"admin","by":["auth"]},{"id":"launch","by":["auth"]}],"criticalPath":["ui","e2e"],"criticalHours":17,"warnings":[]}

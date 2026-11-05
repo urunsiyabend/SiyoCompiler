@@ -1,0 +1,11 @@
+status of evil\u001b[31m
+4 tasks, 0% done
+  done   0
+  doing  0
+  todo   4
+  failed 0
+hours: 0 done, 4 left
+ready:
+  --json (1h)  looks like a flag
+  bell\u0007 (1h)  line\u000abreak \u009b2J  @\u001b]0;pwn\u0007
+critical path (2h): --json -> a b

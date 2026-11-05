@@ -1,0 +1,9 @@
+{"tasks": [
+  {"id": "root1", "status": "failed"},
+  {"id": "root2", "status": "failed"},
+  {"id": "mid", "deps": ["root1"]},
+  {"id": "leaf", "status": "doing", "deps": ["mid", "root2"]},
+  {"id": "done-after-failure", "status": "done", "deps": ["root1"]},
+  {"id": "after-done", "deps": ["done-after-failure"]},
+  {"id": "free", "priority": -5}
+]}

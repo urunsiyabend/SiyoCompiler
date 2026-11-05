@@ -1,0 +1,2 @@
+fixtures/adversarial/duplicate_key.json: json: duplicate key "tasks" at position 14 ('"')
+invalid: 1 problem

@@ -1,0 +1,5 @@
+plan for bom
+batch 1:
+  a (1h)
+remaining: 1h
+critical path (1h): a

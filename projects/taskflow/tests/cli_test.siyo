@@ -1,0 +1,67 @@
+import "std/testing"
+import "cli"
+
+fn opts(args: string[]) -> Options {
+    match cli.parseArgs(args) {
+        Opts(o) => o,
+        Usage(why) => { throw "unexpected usage error: " + why },
+        Help => { throw "unexpected help" }
+    }
+}
+
+fn usageOf(args: string[]) -> string {
+    match cli.parseArgs(args) {
+        Opts(o) => "",
+        Usage(why) => why,
+        Help => "help"
+    }
+}
+
+fn parsesAPlanWithItsOptions() {
+    imut o = opts(["plan", "a.json", "--workers", "3", "b.json", "--target", "ship", "--json"])
+    testing.assertEq(o.command, "plan", "command")
+    testing.assertEq(toString(o.files), "[a.json, b.json]", "files")
+    testing.assertEq(toString(o.workers), "3", "workers")
+    testing.assertEq(o.target, "ship", "target")
+    testing.assert(o.json, "json")
+}
+
+fn defaultsAreNoLimitAndNoTarget() {
+    imut o = opts(["status", "a.json"])
+    testing.assertEq(toString(o.workers), "0", "workers")
+    testing.assertEq(o.target, "", "target")
+    testing.assert(!o.json, "text by default")
+}
+
+fn helpIsNotAnError() {
+    testing.assertEq(usageOf(["help"]), "help", "help")
+    testing.assertEq(usageOf(["--help"]), "help", "--help")
+    testing.assertEq(usageOf(["-h"]), "help", "-h")
+}
+
+fn usageErrors() {
+    testing.assertEq(usageOf([]), "no command given", "empty")
+    testing.assertEq(usageOf(["fly", "a"]), "unknown command 'fly'", "command")
+    testing.assertEq(usageOf(["plan"]), "plan needs at least one file", "no file")
+    testing.assertEq(usageOf(["plan", "a", "--nope"]), "unknown flag '--nope'", "flag")
+    testing.assertEq(usageOf(["plan", "a", "-x"]), "unknown flag '-x'", "short flag")
+    testing.assertEq(usageOf(["status", "a", "--target", "x"]), "--target only applies to plan", "target")
+    testing.assertEq(usageOf(["validate", "a", "--workers", "1"]), "--workers only applies to plan", "workers")
+}
+
+fn workersMustBeAPositiveInteger() {
+    imut want = "--workers needs a positive integer, got "
+    for bad in ["0", "-1", "two", "1.5", "99999999999", ""] {
+        testing.assertEq(usageOf(["plan", "a", "--workers", bad]), want + "'" + bad + "'", bad)
+    }
+}
+
+fn aFlagIsNotTakenAsAValue() {
+    testing.assertEq(usageOf(["plan", "a", "--target", "--json"]), "--target needs a value", "target")
+    testing.assertEq(usageOf(["plan", "a", "--workers"]), "--workers needs a value", "end of args")
+}
+
+fn main() {
+    testing.run("cli", [parsesAPlanWithItsOptions, defaultsAreNoLimitAndNoTarget, helpIsNotAnError,
+                        usageErrors, workersMustBeAPositiveInteger, aFlagIsNotTakenAsAValue])
+}

@@ -1,0 +1,103 @@
+import "std/testing"
+import "model"
+import "loader"
+import "helpers"
+
+fn appliesDefaults() {
+    imut p = helpers.project("[{\"id\": \"a\"}]")
+    testing.assertEq(toString(len(p.problems)), "0", "no problems")
+    imut t = p.tasks[0]
+    testing.assertEq(t.title, "a", "title defaults to id")
+    testing.assertEq(t.status, "todo", "status")
+    testing.assertEq(toString(t.priority), "0", "priority")
+    testing.assertEq(toString(t.estimate), "1", "estimate")
+    testing.assertEq(t.owner, "", "owner")
+    testing.assertEq(t.source, "t.json", "source")
+}
+
+fn nullReadsAsAbsent() {
+    imut p = helpers.project("[{\"id\": \"a\", \"title\": null, \"deps\": null, \"priority\": null}]")
+    testing.assertEq(helpers.problemsOf(p), "", "no problems")
+}
+
+fn tasksComeOutSortedById() {
+    imut p = helpers.project("[{\"id\": \"b\"}, {\"id\": \"C\"}, {\"id\": \"a\"}]")
+    testing.assertEq(p.tasks[0].id + p.tasks[1].id + p.tasks[2].id, "Cab", "by code unit")
+}
+
+fn aDependencySectionJoinsTheTasksOwnList() {
+    imut p = helpers.project("{\"tasks\": [{\"id\": \"a\", \"deps\": [\"c\"]}, {\"id\": \"b\"}, {\"id\": \"c\"}], \"dependencies\": [{\"task\": \"a\", \"needs\": [\"b\", \"c\"]}]}")
+    testing.assertEq(helpers.problemsOf(p), "", "no problems")
+    testing.assertEq(toString(p.byId["a"].deps), "[b, c]", "merged, sorted, no repeat")
+}
+
+fn dependenciesMayLiveInAnotherFile() {
+    imut p = loader.assemble(["d.json", "t.json"],
+        ["{\"project\": \"x\", \"dependencies\": [{\"task\": \"a\", \"needs\": [\"b\"]}]}", "[{\"id\": \"a\"}, {\"id\": \"b\"}]"])
+    testing.assertEq(helpers.problemsOf(p), "", "no problems")
+    testing.assertEq(p.name, "x", "project name")
+    testing.assertEq(toString(p.byId["a"].deps), "[b]", "deps")
+}
+
+fn reportsAProblemAndKeepsChecking() {
+    imut p = helpers.project("[{\"id\": \"a\", \"estimate\": \"3\", \"status\": \"x\"}, {\"id\": 5}, 7]")
+    testing.assertEq(helpers.problemsOf(p),
+        "t.json: tasks[0]: \"status\" must be todo, doing, done or failed, got \"x\"\n"
+        + "t.json: tasks[0]: \"estimate\" must be an integer, got string\n"
+        + "t.json: tasks[1]: \"id\" must be a string, got int\n"
+        + "t.json: tasks[1]: a task needs a non-empty \"id\"\n"
+        + "t.json: tasks[2]: a task must be an object, got int\n", "all reported")
+}
+
+fn anUnknownFieldIsAProblem() {
+    imut p = helpers.project("[{\"id\": \"a\", \"dep\": []}]")
+    testing.assertEq(helpers.problemsOf(p), "t.json: tasks[0]: unknown field \"dep\"\n", "typo")
+}
+
+fn numbersAreChecked() {
+    imut p = helpers.project("[{\"id\": \"a\", \"priority\": 1000001, \"estimate\": -1}, {\"id\": \"b\", \"estimate\": 1.0}, {\"id\": \"c\", \"estimate\": 99999999999}]")
+    testing.assertEq(helpers.problemsOf(p),
+        "t.json: tasks[0]: \"priority\" must be between -1000000 and 1000000, got 1000001\n"
+        + "t.json: tasks[0]: \"estimate\" must be between 0 and 1000000, got -1\n"
+        + "t.json: tasks[1]: \"estimate\" must be an integer, got float\n"
+        + "t.json: tasks[2]: \"estimate\" must be between 0 and 1000000, got 99999999999\n", "ranges")
+}
+
+fn unknownAndRepeatedDependencies() {
+    imut p = helpers.project("[{\"id\": \"a\", \"deps\": [\"ghost\", \"a\", \"a\"]}]")
+    testing.assertEq(helpers.problemsOf(p),
+        "t.json: tasks[0].deps[2]: repeats \"a\"\n"
+        + "t.json: task \"a\": depends on unknown task \"ghost\"\n", "both")
+}
+
+fn aDuplicateIdNamesTheOtherFile() {
+    imut p = loader.assemble(["a.json", "b.json"], ["[{\"id\": \"x\"}]", "[{\"id\": \"x\"}]"])
+    testing.assertEq(helpers.problemsOf(p),
+        "b.json: tasks[0]: duplicate task id \"x\", already declared in a.json\n", "dup")
+}
+
+fn malformedJsonIsAProblemNotACrash() {
+    imut p = loader.assemble(["bad.json", "ok.json"], ["{", "[{\"id\": \"a\"}]"])
+    testing.assertEq(toString(len(p.problems)), "1", "one problem")
+    testing.assert(startsWith(p.problems[0].place, "bad.json"), "named")
+    testing.assertEq(toString(len(p.tasks)), "1", "the other file still counts")
+}
+
+fn aFileMayNotBeAScalar() {
+    imut p = helpers.project("null")
+    testing.assertEq(helpers.problemsOf(p), "t.json: a task file must hold an object or an array, got null\n", "null")
+}
+
+fn anUnreadableFileIsNamed() {
+    match loader.load(["/no/such/file"]) {
+        Unreadable(why) => testing.assertEq(why, "cannot read /no/such/file", "named"),
+        Ok(p) => testing.assert(false, "should not load")
+    }
+}
+
+fn main() {
+    testing.run("loader", [appliesDefaults, nullReadsAsAbsent, tasksComeOutSortedById,
+        aDependencySectionJoinsTheTasksOwnList, dependenciesMayLiveInAnotherFile, reportsAProblemAndKeepsChecking,
+        anUnknownFieldIsAProblem, numbersAreChecked, unknownAndRepeatedDependencies, aDuplicateIdNamesTheOtherFile,
+        malformedJsonIsAProblemNotACrash, aFileMayNotBeAScalar, anUnreadableFileIsNamed])
+}

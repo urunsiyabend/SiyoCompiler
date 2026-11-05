@@ -1,0 +1,12 @@
+status of release-0.9
+9 tasks, 22% done
+  done   2
+  doing  1
+  todo   6
+  failed 0
+hours: 12 done, 30 left
+running:
+  binder (6h)  Binder changes  @grace
+ready:
+  stdlib (5h)  Standard library
+critical path (18h): binder -> emitter -> notes -> ship

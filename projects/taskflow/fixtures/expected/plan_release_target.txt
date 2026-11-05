@@ -1,0 +1,9 @@
+plan for release-0.9
+batch 1:
+  binder (6h)  Binder changes  @grace
+batch 2:
+  stdlib (5h)  Standard library
+batch 3:
+  tests (4h)  Regression tests
+remaining: 15h
+critical path (10h): binder -> tests

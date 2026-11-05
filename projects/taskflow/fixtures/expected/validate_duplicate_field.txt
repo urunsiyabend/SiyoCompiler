@@ -1,0 +1,2 @@
+fixtures/adversarial/duplicate_field.json: json: duplicate key "id" at position 23 ('"')
+invalid: 1 problem

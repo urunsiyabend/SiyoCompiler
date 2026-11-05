@@ -1,0 +1,15 @@
+plan for release-0.9
+batch 1:
+  binder (6h)  Binder changes  @grace
+  stdlib (5h)  Standard library
+batch 2:
+  tests (4h)  Regression tests
+  docs (3h)  Write the docs
+batch 3:
+  emitter (10h)  Emitter changes  @grace
+batch 4:
+  notes (1h)  Release notes
+batch 5:
+  ship (1h)  Tag the release
+remaining: 30h
+critical path (18h): binder -> emitter -> notes -> ship
