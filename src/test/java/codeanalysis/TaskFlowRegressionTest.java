@@ -679,6 +679,24 @@ class TaskFlowRegressionTest {
     }
 
     @Test
+    void aLoopVariableKeepsTheGenericTypeItWasWalkedFrom() throws Exception {
+        assertBoth("a!\n2\nb\n1!", """
+                struct T { id: string }
+                struct Plan { batches: Array<Array<T>> }
+                fn main() {
+                    imut p = Plan { batches: [[T { id: "a" }]] }
+                    for batch in p.batches { for t in batch { println(t.id + "!") } }
+                    mut rows: Array<Array<int>> = [[1]]
+                    for row in rows { println(toString(row[0] + 1)) }
+                    mut byName: Map<string, Array<T>> = {"k": [T { id: "b" }]}
+                    for k in byName { for t in byName[k] { println(t.id) } }
+                    mut sets: Array<Set<string>> = [#{"1"}]
+                    for s in sets { for v in s { println(v + "!") } }
+                }
+                """, "LoopVariableGeneric");
+    }
+
+    @Test
     void aForLoopWalksAnErasedValueByWhatItIs() throws Exception {
         assertBoth("7\nk\n1\ndone", """
                 fn walk(v: object) {
@@ -772,5 +790,22 @@ class TaskFlowRegressionTest {
                     println(toString(f()))
                 }
                 """, "GlobalsAndCaptures");
+    }
+
+    // --- T17: a declared long is a long from its initializer on ----------------
+
+    @Test
+    void aDeclaredLongVariableDoesNotWrapAtAnInt() throws Exception {
+        assertBoth("3000000000\nlong\nfloat", """
+                fn main() {
+                    mut h: long = 0
+                    for i in [1000000000, 1000000000, 1000000000] { h += i }
+                    println(toString(h))
+                    imut l: long = 1
+                    println(typeOf(l))
+                    imut f: float = 1
+                    println(typeOf(f))
+                }
+                """, "DeclaredLong");
     }
 }

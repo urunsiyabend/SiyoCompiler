@@ -380,6 +380,9 @@ public class Binder {
                 }
             }
         }
+        // `mut h: long = 0` holds a long from the start; interpreted it stayed an
+        // int and later additions wrapped.
+        if (annotation != null) initializer = widenTo(initializer, variableType);
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
@@ -2040,6 +2043,19 @@ public class Binder {
         _scope = new BoundScope(_scope);
         _moduleHandler.setScope(_scope);
         _scope.tryDeclare(itemVar);
+        // Walking an Array<Array<T>> gives Array<T>s, whose elements are still Ts.
+        String itemTypeName = walkedTypeName != null ? walkedTypeName
+                : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
+        if (itemTypeName != null) {
+            itemVar.setDeclaredTypeName(itemTypeName);
+            String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
+            Class<?> innerType = _typeResolver.lookupType(innerName);
+            if (elementType == SiyoArray.class && innerType != null) {
+                StructSymbol innerStruct = _structTypes.get(innerName);
+                if (innerStruct != null) _typeResolver.trackArrayType(itemVar, innerType, innerStruct);
+                else _typeResolver.trackArrayType(itemVar, innerType);
+            }
+        }
         // Elements declared as an interface keep that identity, so a call on
         // the loop variable dispatches instead of resolving to whichever struct
         // happened to be written first.
