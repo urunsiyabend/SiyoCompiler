@@ -39,6 +39,31 @@ fn unknownDependenciesAreReportedInSortedOrder() {
     testing.assertEq(helpers.problemsOf(one), helpers.problemsOf(two), "same report")
 }
 
+fn aDependencyEntryMustNameATaskEvenWithNoEdges() {
+    imut want = "t.json: dependencies[0]: unknown task \"missing\"\n"
+    for needs in ["\"needs\": []", "\"needs\": null"] {
+        imut p = helpers.project("{\"tasks\": [{\"id\": \"a\"}], \"dependencies\": [{\"task\": \"missing\", " + needs + "}]}")
+        testing.assertEq(helpers.problemsOf(p), want, needs)
+    }
+    imut absent = helpers.project("{\"tasks\": [{\"id\": \"a\"}], \"dependencies\": [{\"task\": \"missing\"}]}")
+    testing.assertEq(helpers.problemsOf(absent), want, "no needs at all")
+}
+
+fn anUnknownTaskIsReportedOncePerEntry() {
+    imut p = helpers.project("{\"tasks\": [{\"id\": \"a\"}], \"dependencies\": [{\"task\": \"missing\", \"needs\": [\"a\", \"a\", 3]}]}")
+    testing.assertEq(helpers.problemsOf(p),
+        "t.json: dependencies[0].needs[1]: repeats \"a\"\n"
+        + "t.json: dependencies[0].needs[2]: must be a task id, got int\n"
+        + "t.json: dependencies[0]: unknown task \"missing\"\n", "once")
+}
+
+fn anEntryWithNoEdgesMayNameATaskInALaterFile() {
+    imut p = loader.assemble(["a.json", "b.json"],
+        ["{\"dependencies\": [{\"task\": \"later\", \"needs\": []}, {\"task\": \"later\"}]}", "[{\"id\": \"later\"}]"])
+    testing.assertEq(helpers.problemsOf(p), "", "resolved after every file")
+    testing.assertEq(toString(p.byId["later"].deps), "[]", "no edges added")
+}
+
 fn tasksComeOutSortedById() {
     imut p = helpers.project("[{\"id\": \"b\"}, {\"id\": \"C\"}, {\"id\": \"a\"}]")
     testing.assertEq(p.tasks[0].id + p.tasks[1].id + p.tasks[2].id, "Cab", "by code unit")
@@ -115,7 +140,7 @@ fn anUnreadableFileIsNamed() {
 }
 
 fn main() {
-    testing.run("loader", [appliesDefaults, nullReadsAsAbsent, nullSectionsReadAsAbsent, everyFieldOfABadTaskIsChecked, unknownDependenciesAreReportedInSortedOrder, tasksComeOutSortedById,
+    testing.run("loader", [aDependencyEntryMustNameATaskEvenWithNoEdges, anUnknownTaskIsReportedOncePerEntry, anEntryWithNoEdgesMayNameATaskInALaterFile, appliesDefaults, nullReadsAsAbsent, nullSectionsReadAsAbsent, everyFieldOfABadTaskIsChecked, unknownDependenciesAreReportedInSortedOrder, tasksComeOutSortedById,
         aDependencySectionJoinsTheTasksOwnList, dependenciesMayLiveInAnotherFile, reportsAProblemAndKeepsChecking,
         anUnknownFieldIsAProblem, numbersAreChecked, unknownAndRepeatedDependencies, aDuplicateIdNamesTheOtherFile,
         malformedJsonIsAProblemNotACrash, aFileMayNotBeAScalar, anUnreadableFileIsNamed])

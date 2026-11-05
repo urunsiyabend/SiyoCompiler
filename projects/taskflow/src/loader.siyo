@@ -16,11 +16,13 @@ struct Builder {
     tasks: Array<Task>,
     byId: Map<string, Task>,
     problems: Array<Problem>,
+    declared: Array<Edge>,
     edges: Array<Edge>
 }
 
 // A dependency declared in a "dependencies" section, resolved after every file
-// has been read since its task may live in a later file.
+// has been read since its task may live in a later file. `declared` holds one per
+// entry with no `needs`, so naming a missing task is an error even with no edges.
 struct Edge { task: string, needs: string, place: string }
 
 fn report(b: Builder, place: string, what: string) {
@@ -150,6 +152,7 @@ fn addDependencies(b: Builder, raw: object, place: string) {
         if trim(task) == "" { report(b, where, "a dependency needs a non-empty \"task\"") }
         imut needs = idList(b, m, "needs", where)
         if trim(task) == "" { continue }
+        push(b.declared, Edge { task: task, needs: "", place: where })
         for need in needs {
             push(b.edges, Edge { task: task, needs: need, place: where })
         }
@@ -209,11 +212,11 @@ fn byText(x: string, y: string) -> int {
 // dependencies are sorted first, so these reports do not depend on input order.
 fn resolve(b: Builder) {
     mut known: Map<string, Set<string>> = {}
+    for e in b.declared {
+        if !b.byId.has(e.task) { report(b, e.place, "unknown task \"" + e.task + "\"") }
+    }
     for e in b.edges {
-        if !b.byId.has(e.task) {
-            report(b, e.place, "unknown task \"" + e.task + "\"")
-            continue
-        }
+        if !b.byId.has(e.task) { continue }
         imut task = b.byId[e.task]
         if !known.has(e.task) {
             mut seen: Set<string> = #{}
@@ -238,7 +241,7 @@ fn resolve(b: Builder) {
 
 // Merges documents, each with the name it is reported under, in the order given.
 pub fn assemble(names: string[], texts: string[]) -> Project {
-    imut b = Builder { name: "", nameFrom: "", tasks: [], byId: {}, problems: [], edges: [] }
+    imut b = Builder { name: "", nameFrom: "", tasks: [], byId: {}, problems: [], declared: [], edges: [] }
     for mut i = 0 i < len(names) i = i + 1 { addFile(b, names[i], texts[i]) }
     resolve(b)
     Project { name: b.name, tasks: b.tasks, byId: b.byId, problems: b.problems }

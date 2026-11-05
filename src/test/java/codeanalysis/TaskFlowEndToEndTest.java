@@ -175,6 +175,49 @@ class TaskFlowEndToEndTest {
     }
 
     @Test
+    void aDependencyEntryNamingAMissingTaskIsInvalidHoweverManyEdgesItHas() throws Exception {
+        for (String needs : List.of(",\"needs\":[]", ",\"needs\":null", "", ",\"needs\":[\"a\"]")) {
+            Path file = tempDir.resolve("missing.json");
+            Files.writeString(file, "{\"tasks\":[{\"id\":\"a\"}],\"dependencies\":[{\"task\":\"missing\"" + needs + "}]}");
+            String problem = file + ": dependencies[0]: unknown task \"missing\"";
+            for (String mode : MODES) {
+                CliParityTest.Result validate = taskflow(mode, "validate", file.toString());
+                assertEquals(3, validate.exitCode(), mode + needs);
+                assertEquals(problem + "\ninvalid: 1 problem", validate.stdout(), mode + needs);
+
+                Map<?, ?> json = (Map<?, ?>) StrictJson.parse(taskflow(mode, "validate", file.toString(), "--json").stdout());
+                assertEquals(Boolean.FALSE, json.get("valid"), mode + needs);
+
+                for (String command : List.of("plan", "status", "cycles")) {
+                    CliParityTest.Result refused = taskflow(mode, command, file.toString());
+                    assertEquals(3, refused.exitCode(), mode + " " + command + needs);
+                    assertTrue((refused.stdout() + refused.stderr()).contains(problem), mode + " " + command + needs);
+                }
+            }
+        }
+    }
+
+    @Test
+    void aDependencyEntryMayNameATaskInAnotherFileWhicheverIsListedFirst() throws Exception {
+        Path deps = tempDir.resolve("a_deps.json");
+        Path tasks = tempDir.resolve("z_tasks.json");
+        Files.writeString(deps, "{\"dependencies\":[{\"task\":\"later\",\"needs\":[]},{\"task\":\"later\"},"
+                + "{\"task\":\"later\",\"needs\":null},{\"task\":\"later\",\"needs\":[\"first\"]}]}");
+        Files.writeString(tasks, "[{\"id\":\"later\"},{\"id\":\"first\"}]");
+        for (String mode : MODES) {
+            for (String[] order : List.of(new String[]{deps.toString(), tasks.toString()},
+                    new String[]{tasks.toString(), deps.toString()})) {
+                CliParityTest.Result validate = taskflow(mode, "validate", order[0], order[1]);
+                assertEquals(0, validate.exitCode(), mode + ": " + validate.stdout() + validate.stderr());
+                assertEquals("ok: 2 tasks, 1 dependency", validate.stdout(), mode);
+                CliParityTest.Result plan = taskflow(mode, "plan", order[0], order[1]);
+                assertEquals(0, plan.exitCode(), mode);
+                assertTrue(plan.stdout().startsWith("batch 1:\n  first (1h)\nbatch 2:\n  later (1h)"), mode + ": " + plan.stdout());
+            }
+        }
+    }
+
+    @Test
     void anUnknownTargetIsInvalidInput() throws Exception {
         for (String mode : MODES) {
             CliParityTest.Result result = taskflow(mode, "plan", RELEASE, "--target", "nope");
