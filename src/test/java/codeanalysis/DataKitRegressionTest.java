@@ -545,4 +545,33 @@ class DataKitRegressionTest {
                 }
                 """, "CsvFormat");
     }
+
+    // --- G14: io.readText keeps a file as written ---------------------------------
+
+    @Test
+    void readTextKeepsLineEndingsAndTheFinalNewline(@TempDir Path dir) throws Exception {
+        Path data = dir.resolve("d.csv");
+        Files.write(data, "a,\"x\r\ny\"\r\nb,\"p\rq\"\n\u00e9,".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(dir.resolve("bad.txt"), new byte[]{'o', 'k', (byte) 0xff});
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "std/io"
+                fn codes(s: string) -> string {
+                    mut out = ""
+                    for mut i = 0 i < len(s) i = i + 1 { out = out + toString(ord(substring(s, i, i + 1))) + " " }
+                    out
+                }
+                fn main() {
+                    println(codes(io.readText("d.csv")))
+                    println(codes(io.readText("bad.txt")))
+                    println(toString(len(io.readFile("d.csv"))))
+                    try { io.readText("missing.txt") } catch e { println(e) }
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("97 44 34 120 13 10 121 34 13 10 98 44 34 112 13 113 34 10 233 44 \n111 107 65533 \n18\ncannot read missing.txt",
+                    result.stdout(), mode + ": " + result.stderr());
+        }
+    }
 }

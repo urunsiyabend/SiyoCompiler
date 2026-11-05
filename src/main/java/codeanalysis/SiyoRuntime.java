@@ -465,6 +465,16 @@ public class SiyoRuntime {
         }
     }
 
+    /** A file's text exactly as written, decoded as UTF-8 with malformed bytes replaced. */
+    public static String readText(String path) {
+        try {
+            return new String(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(path)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new SiyoThrow("cannot read " + path);
+        }
+    }
+
     private static final java.util.regex.Pattern DECIMAL =
             java.util.regex.Pattern.compile("-?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?");
 

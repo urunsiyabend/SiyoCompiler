@@ -23,6 +23,14 @@ pub fn readFile(path: string) -> string {
     return toString(result)
 }
 
+// A file's text exactly as written, decoded as UTF-8: line endings, including
+// a CR or CRLF inside a quoted CSV field, and a final newline are kept. Bytes
+// that are not UTF-8 read as U+FFFD. readFile reads lines and joins them with
+// "\n", which is what most text wants and loses what data files hold.
+pub fn readText(path: string) -> string {
+    return SiyoRuntime.readText(path)
+}
+
 // Writes a line to standard error, where a CLI's diagnostics belong.
 pub fn eprintln(msg: string) {
     System.err.println(msg)
