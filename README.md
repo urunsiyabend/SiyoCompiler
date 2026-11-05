@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/urunsiyabend/SiyoCompiler/actions"><img src="https://github.com/urunsiyabend/SiyoCompiler/actions/workflows/maven.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/java-21%2B-blue" alt="Java 21+">
-  <img src="https://img.shields.io/badge/version-0.9.0-green" alt="v0.9.0">
+  <img src="https://img.shields.io/badge/version-0.10.0-green" alt="v0.10.0">
   <img src="https://img.shields.io/badge/tests-2243%20passing-brightgreen" alt="Tests">
 </p>
 
@@ -204,7 +204,7 @@ siyoc -cp lib/sqlite-jdbc.jar run server.siyo
 # siyo.toml
 [project]
 name = "my-app"
-version = "0.9.0"
+version = "0.10.0"
 main = "src/main.siyo"
 
 [dependencies]
@@ -228,7 +228,7 @@ Dependencies are downloaded from Maven Central on first `siyoc run` and cached i
 | **Sum types** | `type Result = Ok(int) \| Err(string)`, recursive types, equality, printing |
 | **Pattern matching** | `match r { Ok(v) => v, Err(m) => 0 }` — destructures a variant, checked for exhaustiveness |
 | **Function types** | `fn(int) -> int` is checked: arity, parameter and return types, and the call's own result type |
-| **Generics** | `Array<int>`, `Map<string, int>`, `Set<int>`, `type Option<T> = Some(T) \| None`, `fn identity<T>(x: T) -> T` |
+| **Generics** | `Array<int>`, `Map<string, int>`, `Set<int>`, `type Option<T> = Some(T) \| None`, `struct Group<T> { key: string, items: Array<T> }`, `fn groupBy<T>(xs: Array<T>, key: fn(T) -> string) -> Array<Group<T>>`, with every call's result keeping its type arguments |
 | **Interfaces** | `interface Shape { fn area() -> int }` with `impl Shape for Square`, dispatched on the struct at run time |
 | **Visibility** | `pub` marks what a module exports; a module that marks nothing exports everything |
 | **Module aliasing** | `import "std/math" as m` |
@@ -319,30 +319,33 @@ projects/                               Multi-file projects (siyodb, chat)
 mvn test
 ```
 
-2743 tests across 41 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope and TaskFlow end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
+2857 tests across 43 suites — lexer, parser, parser statements, parser recovery, binder, evaluator, compilation (bytecode-vs-interpreter parity), module regression, module scope, module visibility, language semantics, sum types, generics, interfaces, error handling, ergonomics, function types, higher-order builtins, numeric literals, Java boundary, examples smoke, stdlib, syntax rules, CLI parity, dogfooding regressions, the LogScope, TaskFlow and DataKit end-to-end runs, and source text handling. The compilation test suite verifies that every program produces identical output in both the bytecode and interpreter paths.
 
 ## Documentation
 
 - **[GRAMMAR.md](GRAMMAR.md)** — Complete language grammar, type system, and built-in reference
+- **[RELEASE_NOTES_0.10.0.md](RELEASE_NOTES_0.10.0.md)** — What changed in 0.10.0, and why
 - **[RELEASE_NOTES_0.9.0.md](RELEASE_NOTES_0.9.0.md)** — What changed in 0.9.0, and why
 - **[RELEASE_NOTES_0.8.0.md](RELEASE_NOTES_0.8.0.md)** — What changed in 0.8.0, and why
 - **[RELEASE_NOTES_0.7.0.md](RELEASE_NOTES_0.7.0.md)** — What changed in 0.7.0, and why
 - **[RELEASE_NOTES_0.6.0.md](RELEASE_NOTES_0.6.0.md)** — What changed in 0.6.0, and why
-- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.9.0 through 1.0.0
+- **[FUTURE.md](FUTURE.md)** — Roadmap from 0.10.0 through 1.0.0
 - **[docs/ACTOR_DESIGN.md](docs/ACTOR_DESIGN.md)** — Actor model design rationale
 
-## Known limitations (0.9.0)
+## Known limitations (0.10.0)
 
 These are tracked for future releases — see [FUTURE.md](FUTURE.md):
 
-- A struct is not generic: `struct Box<T>` is not accepted, though a sum type,
-  a function and a container all take type arguments.
+- A struct field typed with a struct from a module the reader did not import
+  cannot be walked (`for g in p.items`): import that module too. Two imported
+  modules exporting a type of one name collide.
 - An interface declares methods and nothing else — no default bodies, no
   interface that requires another, and an interface cannot bound a type
   parameter.
 - `as` casts a Java object; it does not convert between numeric types. Widening
   is implicit and narrowing is written with `toInt`.
-- A struct literal with no fields (`Empty { }`) is not recognised.
+- A struct literal with no fields (`Empty { }`) is not recognised, and `1e20`
+  is not a float literal.
 - A type annotation cannot be module-qualified (`-> cli.Options`); imported
   types are written unqualified.
 - A mixed array literal is rejected even when annotated `object[]`, and

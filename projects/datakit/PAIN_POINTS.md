@@ -58,6 +58,25 @@ type V = I(long) | F(float)
 println(show(I(2)))
 ```
 
+### Caught in review
+
+An independent review of the branch found that G1, G2 and G8 read values at
+types nothing had checked. The result was compiled ClassCastExceptions, and
+backends disagreeing (`2.0` against `2`), for programs 0.9.0 ran consistently.
+Fixed before release, each with a test:
+
+- Payloads now widen to the type argument.
+- The interpreter widens and checks erased reads as the compiled casts do.
+- Declared names are set only where they carry struct or generic identity.
+- `push` into a declared array and assignment to a generic field are checked.
+- A number returned from an `object` function is boxed.
+
+The tests are `aGenericPayloadWidensToItsDeclaredTypeArgument`,
+`aGenericValueOfTheWrongKindFailsTheSameWayOnBothBackends`,
+`anArrayDeclaredByAGenericResultTakesOnlyItsKind`,
+`whatZeroNineAcceptedWithoutDeclaredTypesIsUnchanged` and
+`aNumberReturnedFromAnObjectFunctionIsBoxed`.
+
 ## DataKit's own bugs, found in testing
 
 | Finding | Fix | Test |
@@ -80,6 +99,7 @@ println(show(I(2)))
 | D4 | type rule | `os.exit` is not known to diverge, so a function that calls `fail(...)` on one path still needs a value on that path. This is the same as LogScope D4 for `error`. | Needs a never type. | Unreachable placeholder values after `fail`. |
 | D5 | type rule | `[1, 1.5]` is rejected as a mixed literal, and `Empty { }` is unsupported. Both are known (TaskFlow D7, FUTURE.md). | Not needed. | Not applicable. |
 | D6 | naming | A local variant named like one an import exports, such as `Invalid` beside `std/json`'s `Invalid`, must be written qualified. The diagnostic says so. | A language rule, documented since 0.6.0. | Named `Rejected`. |
+| D8 | type rule | Reassigning a generic struct variable to a literal of other type arguments is not reported; the field read fails on both backends. A struct type parameter named like a struct hides it, as function and sum type parameters already did. | Found in review; the rest of generic struct checking is in place. | Not applicable. |
 | D7 | output | Column padding counts UTF-16 units, so a non-ASCII group key misaligns its table row. This is TaskFlow D9 again. | Display width is its own problem. | Only text output is affected. |
 
 A CSV file's bytes are decoded as UTF-8. Invalid bytes become U+FFFD, as in

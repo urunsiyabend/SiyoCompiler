@@ -8,7 +8,7 @@ it found is in [PAIN_POINTS.md](PAIN_POINTS.md).
 ## Run
 
 From this directory, with `siyoc` 0.9.0 or later on your `PATH` (or
-`java -jar ../../target/siyo-compiler-0.9.0.jar` in place of `siyoc`):
+`java -jar ../../target/siyo-compiler-0.10.0.jar` in place of `siyoc`):
 
 ```bash
 siyoc run validate fixtures/release.json
