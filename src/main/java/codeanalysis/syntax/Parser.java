@@ -156,7 +156,11 @@ public class Parser {
             return parsePublicDeclaration();
         }
         return switch (current().getType()) {
-            case OpenBraceToken -> parseBlockStatement();
+            // No statement starts `key :`, so this brace opens a map: a block's
+            // tail value. `{ }` stays an empty block.
+            case OpenBraceToken -> peek(2).getType() == SyntaxType.ColonToken
+                    ? parseExpressionStatement()
+                    : parseBlockStatement();
             case ImmutableKeyword, MutableKeyword -> parseVariableDeclaration();
             case IfKeyword -> parseIfStatement();
             case WhileKeyword -> parseWhileStatement();
@@ -1049,7 +1053,7 @@ public class Parser {
             }
             SyntaxToken arrow = match(SyntaxType.FatArrowToken);
             ExpressionSyntax body;
-            if (current().getType() == SyntaxType.OpenBraceToken) {
+            if (current().getType() == SyntaxType.OpenBraceToken && peek(2).getType() != SyntaxType.ColonToken) {
                 // Block body: { ... } — parse as block, wrap last expression
                 StatementSyntax block = parseBlockStatement();
                 body = new BlockExpressionSyntax(block);

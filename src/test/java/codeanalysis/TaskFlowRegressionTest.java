@@ -249,6 +249,49 @@ class TaskFlowRegressionTest {
                 """, "TryLoopJump");
     }
 
+    // --- T6: a map literal may be a block's tail value -------------------------
+
+    @Test
+    void aMapLiteralMayBeATailValue() throws Exception {
+        assertBoth("{a=1, b=x}".replace("=", ": "), """
+                fn mk(s: string) -> map { {"a": 1, "b": s} }
+                fn main() { println(toString(mk("x"))) }
+                """, "MapTail");
+    }
+
+    @Test
+    void aMapLiteralMayEndAMatchArmAndSpanLines() throws Exception {
+        assertBoth("{k: 2}\n{1: 2}", """
+                fn mk(n: int) -> map {
+                    match n {
+                        1 => {
+                            imut v = n + 1
+                            {
+                                "k": v
+                            }
+                        },
+                        _ => {1: 2}
+                    }
+                }
+                fn main() {
+                    println(toString(mk(1)))
+                    println(toString(mk(2)))
+                }
+                """, "MapTailArm");
+    }
+
+    @Test
+    void aBareBlockIsStillABlock() throws Exception {
+        assertBoth("2", """
+                fn main() {
+                    mut n = 1
+                    { n = n + 1 }
+                    { }
+                    println(toString(n))
+                }
+                """, "BareBlock");
+    }
+
     // --- T8: a deep recursion can be caught, and on both backends --------------
 
     @Test
