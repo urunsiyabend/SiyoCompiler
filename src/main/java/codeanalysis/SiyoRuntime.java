@@ -764,7 +764,7 @@ public class SiyoRuntime {
         }
         // A struct is its fields and a set its elements, rather than the way
         // they print; nothing can read that text back.
-        if (structNameOf(obj) != null) return jsonStringify(structToMap(obj));
+        if (obj instanceof SiyoObject || obj instanceof SiyoStruct) return jsonStringify(structToMap(obj));
         if (obj instanceof SiyoSet set) return jsonStringify(set.values());
         // A string, or any other value written as its text.
         return '"' + jsonEscapeStr(obj.toString()) + '"';

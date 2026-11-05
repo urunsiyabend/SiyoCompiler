@@ -136,6 +136,13 @@ public class TypeResolver {
         return arguments.size() == 2 ? arguments.get(0) : null;
     }
 
+    /** The two type arguments of a written {@code Map<K, V>}, or null for any other name. */
+    public static List<String> typeArgumentsOfMap(String typeName) {
+        if (!"Map".equals(genericBaseName(typeName))) return null;
+        List<String> arguments = typeArgumentsOf(typeName);
+        return arguments.size() == 2 ? arguments : null;
+    }
+
     public static String elementTypeNameOf(String typeName) {
         if (typeName == null) return null;
         if (typeName.endsWith("[]")) return typeName.substring(0, typeName.length() - 2);

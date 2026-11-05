@@ -808,4 +808,205 @@ class TaskFlowRegressionTest {
                 }
                 """, "DeclaredLong");
     }
+
+    // --- T18: review regressions: closures, values, void --------------------------
+
+    private void assertRejected(String fragment, String source, String className) throws Exception {
+        String compiled = compileFailure(source, className);
+        org.junit.jupiter.api.Assertions.assertTrue(compiled.contains(fragment), "compiled: " + compiled);
+        String interpreted = interpretFailure(source, className);
+        org.junit.jupiter.api.Assertions.assertTrue(interpreted.contains(fragment), "interpreted: " + interpreted);
+    }
+
+    private String compileFailure(String source, String className) throws Exception {
+        try {
+            return "ran: " + harness.run(source, className);
+        } catch (AssertionError expected) {
+            return expected.getMessage();
+        }
+    }
+
+    private String interpretFailure(String source, String className) throws Exception {
+        try {
+            return "ran: " + harness.interpret(source, className);
+        } catch (AssertionError expected) {
+            return expected.getMessage();
+        }
+    }
+
+    @Test
+    void aNestedClosureReadsAVariableItsParentNeverNamed() throws Exception {
+        String source = """
+                fn f() -> int {
+                    imut a = 1
+                    imut o = fn() -> int {
+                        imut i = fn() -> int { return a }
+                        return i()
+                    }
+                    return o()
+                }
+                fn main() { println(toString(f())) }
+                """;
+        assertEquals("1", harness.interpret(source, "NestedClosureRead"));
+    }
+
+    @Test
+    void aNestedClosureThatOutlivesItsFunctionKeepsItsCapture() throws Exception {
+        String source = """
+                fn make() -> fn() -> int {
+                    imut a = 41
+                    fn() -> int {
+                        imut i = fn() -> int { return a + 1 }
+                        return i()
+                    }
+                }
+                fn main() {
+                    imut f = make()
+                    println(toString(f()))
+                }
+                """;
+        assertEquals("42", harness.interpret(source, "NestedClosureEscape"));
+    }
+
+    @Test
+    void aNestedClosureWritesThroughToTheOuterVariable() throws Exception {
+        String source = """
+                fn f() -> int {
+                    mut n = 1
+                    imut o = fn() {
+                        imut i = fn() { n = n + 1 }
+                        i()
+                    }
+                    o()
+                    n
+                }
+                fn main() { println(toString(f())) }
+                """;
+        assertEquals("2", harness.interpret(source, "NestedClosureWrite"));
+    }
+
+    @Test
+    void aFunctionDeclaredInsideAFunctionReadsItsLocals() throws Exception {
+        String source = """
+                fn f() -> int {
+                    imut a = 1
+                    fn inner() -> int { a + 1 }
+                    inner()
+                }
+                fn main() { println(toString(f())) }
+                """;
+        assertEquals("2", harness.interpret(source, "NestedFunctionRead"));
+    }
+
+    @Test
+    void aTailArmThatOnlyLoopsFallsThroughLikeAnyOtherPath() throws Exception {
+        assertBoth("1\n2", """
+                fn c(x: int) -> int { match x { 1 => { while true { return 1 } } _ => { return 2 } } }
+                fn main() {
+                    println(toString(c(1)))
+                    println(toString(c(2)))
+                }
+                """, "TailArmLoop");
+    }
+
+    @Test
+    void anIfArmMayReturnBesideAValue() throws Exception {
+        assertBoth("1\n2", """
+                fn f(a: bool) -> int { if a { 1 } else { return 2 } }
+                fn main() {
+                    println(toString(f(true)))
+                    println(toString(f(false)))
+                }
+                """, "IfArmReturn");
+    }
+
+    @Test
+    void aLiteralWidensToItsDeclaredElementType() throws Exception {
+        assertBoth("2.0\n2\n3.0\nfloat\nlong", """
+                fn g() -> float[] { return [1, 2] }
+                fn h() -> Map<string, long> { {"a": 1} }
+                fn main() {
+                    imut a = g()
+                    println(toString(pop(a)))
+                    imut m = h()
+                    println(toString(m["a"] + 1))
+                    imut d: Array<Array<float>> = [[1, 3]]
+                    println(toString(d[0][1]))
+                    println(typeOf(d[0][0]))
+                    imut l: Map<string, long> = {"x": 1}
+                    println(typeOf(l["x"]))
+                }
+                """, "LiteralWidening");
+    }
+
+    @Test
+    void aSetOfFloatsAcceptsAnIntAndReadsAFloat() throws Exception {
+        assertBoth("2.0", """
+                fn main() {
+                    imut s: Set<float> = set()
+                    s.add(1)
+                    for v in s { println(toString(v + 1.0)) }
+                }
+                """, "SetFloatRead");
+    }
+
+    @Test
+    void stringifyLeavesAnActorAsItsName() throws Exception {
+        assertBoth("\"actor<A>\"", """
+                import "std/json"
+                actor struct A { n: int }
+                impl A { fn new() -> A { A { n: 3 } } }
+                fn main() {
+                    imut a = spawn A.new()
+                    println(json.stringify(a))
+                }
+                """, "StringifyActor");
+    }
+
+    @Test
+    void anExpressionWithNoValueIsRejectedWhereOneIsNeeded() throws Exception {
+        assertRejected("no value", "fn main() { imut r = if true { imut a = 1 } else { imut b = 2 } }", "VoidInit");
+        assertRejected("no value", "fn main() { println(if true { imut a = 1 } else { imut b = 2 }) }", "VoidArgument");
+        assertRejected("no value", "fn main() { println(toString(match 1 { 1 => { imut q = 1 } _ => { imut r = 1 } })) }", "VoidMatch");
+        assertRejected("no value", "fn v() { }\nfn main() { println(\"v=${v()}\") }", "VoidInterpolated");
+    }
+
+    @Test
+    void aValueBesideAnArmThatFallsOffTheEndIsRejected() throws Exception {
+        assertRejected("cannot mix void and value arms",
+                "fn a(x: int) -> map { if x == 1 { {\"k\": 1} } else { {} } }\nfn main() { println(toString(a(1))) }", "MixedMapTail");
+    }
+
+    @Test
+    void anIfThatReturnsInOneArmMayFallThroughInTheOther() throws Exception {
+        assertBoth("1\n0", """
+                fn f(a: bool) -> int {
+                    if a { return 1 } else { println("0") }
+                    return 0
+                }
+                fn main() {
+                    println(toString(f(true)))
+                    f(false)
+                }
+                """, "ReturnOrFallThrough");
+    }
+
+    @Test
+    void breakCannotLeaveALambdaOrASpawn() throws Exception {
+        assertRejected("not allowed outside", """
+                fn main() {
+                    for x in [1] {
+                        imut f = fn() { break }
+                        f()
+                    }
+                }
+                """, "BreakInLambda");
+        assertRejected("not allowed outside", """
+                fn main() {
+                    for x in [1] {
+                        scope { spawn { continue } }
+                    }
+                }
+                """, "ContinueInSpawn");
+    }
 }

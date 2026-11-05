@@ -364,6 +364,7 @@ public class Binder {
         String name = syntax.getIdentifier().getData();
         var isReadOnly = syntax.getKeyword().getType() == SyntaxType.ImmutableKeyword;
         BoundExpression initializer = bindExpressionWithTypeHint(syntax.getInitializer(), syntax.getTypeAnnotation());
+        requireValue(initializer, syntax.getInitializer());
 
         // A declared type is binding, not decoration: it gives the variable its
         // type and the initializer is checked against it. It used to be parsed
@@ -382,7 +383,7 @@ public class Binder {
         }
         // `mut h: long = 0` holds a long from the start; interpreted it stayed an
         // int and later additions wrapped.
-        if (annotation != null) initializer = widenTo(initializer, variableType);
+        if (annotation != null) initializer = widenLiteral(widenTo(initializer, variableType), annotation.getData());
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
@@ -597,6 +598,13 @@ public class Binder {
             try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
         }
         return result;
+    }
+
+    /** Reports an expression with no value where one is needed: a void call, or an if with no tail values. */
+    private void requireValue(BoundExpression expression, SyntaxNode syntax) {
+        if (expression.getClassType() == null) {
+            _diagnostics.reportError(syntax.getSpan(), "This expression has no value");
+        }
     }
 
     private static boolean isPopCall(BoundExpression expression) {
@@ -867,8 +875,9 @@ public class Binder {
 
         // One arm is void and the other not: run for effects, like a match whose
         // arms disagree. Each value is discarded where it is produced.
-        if (!diverges(thenPre, thenExpr) && !diverges(elsePre, elseExpr)
-                && (thenExpr.getClassType() == null) != (elseExpr.getClassType() == null)) {
+        boolean mixedArms = !diverges(thenPre, thenExpr) && !diverges(elsePre, elseExpr)
+                && (thenExpr.getClassType() == null) != (elseExpr.getClassType() == null);
+        if (mixedArms) {
             thenPre.add(new BoundExpressionStatement(thenExpr));
             elsePre.add(new BoundExpressionStatement(elseExpr));
             thenExpr = new BoundUnitExpression();
@@ -887,7 +896,9 @@ public class Binder {
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
         arms.add(new BoundMatchExpression.BoundMatchArm(new BoundLiteralExpression(true), thenExpr, false, thenPre));
         arms.add(new BoundMatchExpression.BoundMatchArm(null, elseExpr, true, elsePre));
-        return new BoundMatchExpression(cond, arms, resultType);
+        BoundMatchExpression result = new BoundMatchExpression(cond, arms, resultType);
+        if (mixedArms) _mixedArmMatches.put(result, ifs.getIfKeyword().getSpan());
+        return result;
     }
 
     private static final String MIXED_ARMS =
@@ -1250,9 +1261,15 @@ public class Binder {
             if (isNullLiteral(boundRight)) boundLeft = withoutUnboxing(boundLeft);
             if (isNullLiteral(boundLeft)) boundRight = withoutUnboxing(boundRight);
         }
+        if (syntax.getOperator().getValue() == codeanalysis.syntax.Parser.INTERPOLATION
+                && boundRight.getClassType() == null) {
+            requireValue(boundRight, syntax.getRight());
+            return boundLeft;
+        }
         // "$x" shows x whatever it is. + itself only joins text to a scalar, so
         // interpolating an array or a struct used to report an operator error.
         if (syntax.getOperator().getValue() == codeanalysis.syntax.Parser.INTERPOLATION
+                && boundRight.getClassType() != null
                 && boundRight.getClassType() != Object.class
                 && BoundBinaryOperator.bind(SyntaxType.PlusToken, String.class, boundRight.getClassType()) == null) {
             boundRight = new BoundCallExpression(BuiltinFunctions.TO_STRING, List.of(boundRight));
@@ -1331,6 +1348,41 @@ public class Binder {
         if (numericRank(from) == 0 || numericRank(target) == 0) return expression;
         if (numericRank(from) >= numericRank(target)) return expression;
         return new BoundConversionExpression(expression, target);
+    }
+
+    /**
+     * Widens the elements of an array or map literal to the type it is declared
+     * as, so {@code float[]} given {@code [1, 2]} holds floats on both backends.
+     *
+     * @param expression The expression.
+     * @param typeName   The type it is declared as, or null.
+     * @return The literal with its elements widened, or the expression unchanged.
+     */
+    private BoundExpression widenLiteral(BoundExpression expression, String typeName) {
+        if (typeName == null) return expression;
+        if (expression instanceof BoundArrayLiteralExpression array) {
+            String elementName = TypeResolver.elementTypeNameOf(typeName);
+            Class<?> elementType = _typeResolver.lookupType(elementName);
+            if (elementType == null) return expression;
+            List<BoundExpression> elements = new ArrayList<>();
+            for (BoundExpression element : array.getElements()) {
+                elements.add(widenLiteral(widenTo(element, elementType), elementName));
+            }
+            boolean numeric = numericRank(array.getElementType()) > 0 && numericRank(elementType) > 0;
+            return new BoundArrayLiteralExpression(elements, numeric ? elementType : array.getElementType());
+        }
+        if (expression instanceof BoundMapLiteralExpression map) {
+            List<String> arguments = TypeResolver.typeArgumentsOfMap(typeName);
+            if (arguments == null) return expression;
+            Class<?> valueType = _typeResolver.lookupType(arguments.get(1));
+            if (valueType == null) return expression;
+            List<BoundExpression> values = new ArrayList<>();
+            for (BoundExpression value : map.getValues()) {
+                values.add(widenLiteral(widenTo(value, valueType), arguments.get(1)));
+            }
+            return new BoundMapLiteralExpression(map.getKeys(), values);
+        }
+        return expression;
     }
 
     /**
@@ -1771,7 +1823,7 @@ public class Binder {
             statements.add(boundStatement);
         }
         BoundBlockStatement boundBody = applyImplicitReturn(
-                new BoundBlockStatement(statements), function.getReturnType());
+                new BoundBlockStatement(statements), function.getReturnType(), function.getDeclaredReturnTypeName());
 
         // Store the function body for evaluation
         _functionBodies.put(function, boundBody);
@@ -1810,7 +1862,8 @@ public class Binder {
             } else {
                 // A narrower number is a value of the declared wider type, so
                 // `fn f() -> float { return 3 }` widens instead of mismatching.
-                expression = widenTo(expression, _currentFunction.getReturnType());
+                expression = widenLiteral(widenTo(expression, _currentFunction.getReturnType()),
+                        _currentFunction.getDeclaredReturnTypeName());
                 if (expression.getClassType() != _currentFunction.getReturnType()
                         && _currentFunction.getReturnType() != Object.class
                         && expression.getClassType() != Object.class) {
@@ -1888,6 +1941,7 @@ public class Binder {
         for (int i = 0; i < boundArguments.size(); i++) {
             BoundExpression argument = boundArguments.get(i);
             ParameterSymbol parameter = function.getParameters().get(i);
+            requireValue(argument, syntax.getArguments().get(i));
 
             // A narrower number is a value of the wider parameter's type, so it
             // is widened rather than rejected: half(5) reaches half(x: float).
@@ -2407,7 +2461,11 @@ public class Binder {
         boolean wasInSpawn = _insideSpawn;
         _insideSpawn = true;
 
+        // A loop outside the spawn is not one its break can leave.
+        java.util.List<LoopLabels> enclosingLoops = new ArrayList<>(_loopStack);
+        _loopStack.clear();
         BoundStatement body = bindStatement(syntax.getBody());
+        _loopStack.addAll(enclosingLoops);
         BoundBlockStatement block = body instanceof BoundBlockStatement b
                 ? b : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
 
@@ -2478,6 +2536,16 @@ public class Binder {
                                               java.util.Set<VariableSymbol> captured,
                                               java.util.Set<VariableSymbol> mutableCaptures,
                                               java.util.Set<VariableSymbol> sharedContainerCaptures) {
+        // What a closure or spawn nested here captures, this body has to hold for it.
+        if (node instanceof BoundLambdaExpression || node instanceof BoundSpawnExpression) {
+            java.util.Set<VariableSymbol> nested = node instanceof BoundLambdaExpression lambda
+                    ? lambda.getCapturedVariables() : ((BoundSpawnExpression) node).getCapturedVariables();
+            for (VariableSymbol variable : nested) {
+                collectCapturedVarsFromBody(new BoundVariableExpression(variable), localVarNames, captured,
+                        mutableCaptures, sharedContainerCaptures);
+            }
+            return;
+        }
         // Variable reference → check if captured
         if (node instanceof BoundVariableExpression varExpr) {
             VariableSymbol var = varExpr.getVariable();
@@ -2608,8 +2676,11 @@ public class Binder {
         FunctionSymbol previousFunction = _currentFunction;
         _currentFunction = new FunctionSymbol("$lambda", parameters, returnType);
 
-        // Bind body
+        // Bind body. A loop outside the lambda is not one its break can leave.
+        java.util.List<LoopLabels> enclosingLoops = new ArrayList<>(_loopStack);
+        _loopStack.clear();
         BoundStatement body = bindStatement(syntax.getBody());
+        _loopStack.addAll(enclosingLoops);
         _currentFunction = previousFunction;
         BoundBlockStatement blockBody = body instanceof BoundBlockStatement block
                 ? block : new BoundBlockStatement(new ArrayList<>(java.util.List.of(body)));
@@ -2685,6 +2756,12 @@ public class Binder {
             if (!localNames.contains(varExpr.getVariable().getName())) {
                 captured.add(varExpr.getVariable());
             }
+        }
+        // What a nested closure or spawn captures, this one has to hold for it.
+        java.util.Set<VariableSymbol> nested = node instanceof BoundLambdaExpression lambda ? lambda.getCapturedVariables()
+                : node instanceof BoundSpawnExpression spawn ? spawn.getCapturedVariables() : java.util.Set.of();
+        for (VariableSymbol variable : nested) {
+            if (!localNames.contains(variable.getName())) captured.add(variable);
         }
         if (node instanceof BoundAssignmentExpression assignExpr) {
             if (!localNames.contains(assignExpr.getVariable().getName())) {
@@ -3316,6 +3393,24 @@ public class Binder {
      * @return The body with its tail rewritten to return.
      */
     BoundBlockStatement applyImplicitReturn(BoundBlockStatement body, Class<?> returnType) {
+        return applyImplicitReturn(body, returnType, null);
+    }
+
+    private String _implicitReturnTypeName;
+
+    /** Whether a statement ends in an expression whose value would be its result. */
+    private static boolean endsInValue(BoundStatement statement) {
+        if (statement instanceof BoundBlockStatement block) {
+            var statements = block.getStatements();
+            return !statements.isEmpty() && endsInValue(statements.get(statements.size() - 1));
+        }
+        return statement instanceof BoundExpressionStatement expression
+                && expression.getExpression().getClassType() != null
+                && !(expression.getExpression() instanceof BoundAssignmentExpression);
+    }
+
+    BoundBlockStatement applyImplicitReturn(BoundBlockStatement body, Class<?> returnType, String returnTypeName) {
+        _implicitReturnTypeName = returnTypeName;
         if (returnType == null) return body;
         var statements = new ArrayList<>(body.getStatements());
         if (statements.isEmpty()) return body;
@@ -3338,14 +3433,17 @@ public class Binder {
                 _diagnostics.reportError(_mixedArmMatches.get(match), MIXED_ARMS);
                 return null;
             }
-            // An assignment used as a statement is a side effect, not a value.
-            if (value instanceof BoundAssignmentExpression) return null;
+            // An assignment used as a statement is a side effect, not a value,
+            // and an expression with no value has nothing to return.
+            if (value instanceof BoundAssignmentExpression || value.getClassType() == null) return null;
             // The tail of the body is the return value, so it is widened to the
             // declared type the same way an explicit return is. Without this
             // `fn f() -> float { 3 }` emitted an int where a double was
             // expected and the class failed verification.
-            return new BoundReturnStatement(widenTo(value, returnType));
+            return new BoundReturnStatement(widenLiteral(widenTo(value, returnType), _implicitReturnTypeName));
         }
+        // These already leave the function, so they count as an arm with a value.
+        if (statement instanceof BoundReturnStatement || statement instanceof BoundThrowStatement) return statement;
         if (statement instanceof BoundBlockStatement block) {
             var statements = new ArrayList<>(block.getStatements());
             if (statements.isEmpty()) return null;
@@ -3360,6 +3458,13 @@ public class Binder {
             if (ifStatement.getElseStatement() == null) return null;
             BoundStatement thenBranch = implicitReturnOf(ifStatement.getThenStatement(), returnType);
             BoundStatement elseBranch = implicitReturnOf(ifStatement.getElseStatement(), returnType);
+            // One arm gives a value and the other falls off the end: the value
+            // would be lost, on one backend only.
+            if ((thenBranch == null && endsInValue(ifStatement.getElseStatement()))
+                    || (elseBranch == null && endsInValue(ifStatement.getThenStatement()))) {
+                _diagnostics.reportError(new codeanalysis.text.TextSpan(
+                        Math.max(0, ifStatement.getCondition().getSourceOffset()), 1), MIXED_ARMS);
+            }
             if (thenBranch == null || elseBranch == null) return null;
             return new BoundIfStatement(ifStatement.getCondition(), thenBranch, elseBranch);
         }

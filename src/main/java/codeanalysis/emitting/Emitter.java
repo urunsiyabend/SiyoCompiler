@@ -379,7 +379,8 @@ public class Emitter {
             boolean isLast = (i == statements.size() - 1);
 
             // For the last expression statement in a non-void function, emit as return
-            if (isLast && function.getReturnType() != null && stmt instanceof BoundExpressionStatement exprStmt) {
+            if (isLast && function.getReturnType() != null && stmt instanceof BoundExpressionStatement exprStmt
+                    && exprStmt.getExpression().getClassType() != null) {
                 emitExpression(exprStmt.getExpression());
                 // Coerce expression type to match declared return type
                 Class<?> exprType = exprStmt.getExpression().getClassType();
@@ -2982,11 +2983,13 @@ public class Emitter {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/Boolean");
             _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Boolean", "booleanValue", "()Z", false);
         } else if (type == Long.class) {
-            _mv.visitTypeInsn(CHECKCAST, "java/lang/Long");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Long", "longValue", "()J", false);
+            // Through Number: an erased container may hold a narrower number
+            // that was never widened, such as an int added to a Set<long>.
+            _mv.visitTypeInsn(CHECKCAST, "java/lang/Number");
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "longValue", "()J", false);
         } else if (type == Double.class) {
-            _mv.visitTypeInsn(CHECKCAST, "java/lang/Double");
-            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Double", "doubleValue", "()D", false);
+            _mv.visitTypeInsn(CHECKCAST, "java/lang/Number");
+            _mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/Number", "doubleValue", "()D", false);
         } else if (type == String.class) {
             _mv.visitTypeInsn(CHECKCAST, "java/lang/String");
         } else if (type != null && type != Object.class) {
