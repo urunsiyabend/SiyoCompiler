@@ -1614,6 +1614,9 @@ public class Parser {
      * The lexer produces: InterpolatedStringStart, <expr tokens>, InterpolatedStringMid/End, ...
      * We build a chain of binary + expressions to concatenate all parts.
      */
+    /** Marks the + joining an interpolated value to the text before it. */
+    public static final Object INTERPOLATION = new Object();
+
     private ExpressionSyntax parseInterpolatedString() {
         SyntaxToken startToken = nextToken(); // consume InterpolatedStringStartToken
         ExpressionSyntax result = new LiteralExpressionSyntax(
@@ -1624,8 +1627,8 @@ public class Parser {
             // Parse the expression inside interpolation
             ExpressionSyntax expr = parseExpression();
 
-            // Wrap in toString: String + expr → auto-converted by binder
-            SyntaxToken plusToken = new SyntaxToken(SyntaxType.PlusToken, 0, "+", null);
+            // String + expr, which the binder converts whatever expr's type is.
+            SyntaxToken plusToken = new SyntaxToken(SyntaxType.PlusToken, startToken.getPosition(), "+", INTERPOLATION);
             result = new BinaryExpressionSyntax(result, plusToken, expr);
 
             // Next should be InterpolatedStringMidToken or InterpolatedStringEndToken

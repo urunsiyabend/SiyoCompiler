@@ -249,6 +249,23 @@ class TaskFlowRegressionTest {
                 """, "TryLoopJump");
     }
 
+    // --- T5: null comparison of a typed container's slot -----------------------
+
+    @Test
+    void aMissingKeyOfATypedMapComparesToNull() throws Exception {
+        assertBoth("true false true false true true", """
+                fn main() {
+                    mut m: Map<string, int> = {"a": 1}
+                    mut f: Map<string, float> = {}
+                    mut b: Map<string, bool> = {}
+                    mut l: Map<string, long> = {}
+                    println(toString(m["no"] == null) + " " + toString(m["a"] == null) + " "
+                        + toString(m["a"] != null) + " " + toString(m["no"] != null) + " "
+                        + toString(f["no"] == null) + " " + toString(null == b["no"] && l["no"] == null))
+                }
+                """, "MapSlotNull");
+    }
+
     // --- T6: a map literal may be a block's tail value -------------------------
 
     @Test
@@ -290,6 +307,35 @@ class TaskFlowRegressionTest {
                     println(toString(n))
                 }
                 """, "BareBlock");
+    }
+
+    // --- T7: any value may be interpolated -------------------------------------
+
+    @Test
+    void interpolationConvertsAnyValue() throws Exception {
+        assertBoth("P { x: 1 } | [1, 2] | {a: 1} | [z] | 3 | 1.5 | true", """
+                struct P { x: int }
+                fn main() {
+                    imut p = P { x: 1 }
+                    imut a = [1, 2]
+                    imut m = {"a": 1}
+                    mut s: Set<string> = #{"z"}
+                    imut vs = s.values()
+                    println("$p | $a | $m | $vs | ${1 + 2} | ${1.5} | ${1 == 1}")
+                }
+                """, "InterpolateAny");
+    }
+
+    @Test
+    void interpolatingASetOrSumValueWorks() throws Exception {
+        assertBoth("S true", """
+                type T = S | V(int)
+                fn main() {
+                    imut t = S
+                    mut s: Set<int> = #{1}
+                    println("$t ${s.has(1)}")
+                }
+                """, "InterpolateSum");
     }
 
     // --- T8: a deep recursion can be caught, and on both backends --------------

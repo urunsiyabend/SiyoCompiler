@@ -1218,9 +1218,42 @@ public class Binder {
      * @param syntax The expression syntax to bind.
      * @return The bound binary expression.
      */
+    private static boolean isEqualityOperator(SyntaxType type) {
+        return type == SyntaxType.EqualsEqualsToken || type == SyntaxType.BangEqualsToken;
+    }
+
+    private static boolean isNullLiteral(BoundExpression expression) {
+        return expression instanceof BoundLiteralExpression literal && literal.getValue() == null;
+    }
+
+    /**
+     * A slot of a {@code Map<string, int>} compared to null. Its declared type
+     * would have the compiled code unbox it first, which fails for the very
+     * case being asked about: a missing key. Only the slot's box is compared.
+     */
+    private static BoundExpression withoutUnboxing(BoundExpression expression) {
+        if (expression instanceof BoundIndexExpression slot
+                && (slot.getClassType() == Integer.class || slot.getClassType() == Long.class
+                    || slot.getClassType() == Double.class || slot.getClassType() == Boolean.class)) {
+            return new BoundIndexExpression(slot.getTarget(), slot.getIndex(), Object.class);
+        }
+        return expression;
+    }
+
     private BoundExpression bindBinaryExpression(BinaryExpressionSyntax syntax) {
         BoundExpression boundLeft = bindExpression(syntax.getLeft());
         BoundExpression boundRight = bindExpression(syntax.getRight());
+        if (isEqualityOperator(syntax.getOperator().getType())) {
+            if (isNullLiteral(boundRight)) boundLeft = withoutUnboxing(boundLeft);
+            if (isNullLiteral(boundLeft)) boundRight = withoutUnboxing(boundRight);
+        }
+        // "$x" shows x whatever it is. + itself only joins text to a scalar, so
+        // interpolating an array or a struct used to report an operator error.
+        if (syntax.getOperator().getValue() == codeanalysis.syntax.Parser.INTERPOLATION
+                && boundRight.getClassType() != Object.class
+                && BoundBinaryOperator.bind(SyntaxType.PlusToken, String.class, boundRight.getClassType()) == null) {
+            boundRight = new BoundCallExpression(BuiltinFunctions.TO_STRING, List.of(boundRight));
+        }
         Class<?> leftType = boundLeft.getClassType();
         Class<?> rightType = boundRight.getClassType();
 
