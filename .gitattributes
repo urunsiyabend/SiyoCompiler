@@ -1,3 +1,7 @@
 # Syntax highlighting for .siyo files on GitHub
 # Rust is the closest match: fn, mut, struct, enum, match, ->, //, closures
 *.siyo linguist-language=Rust
+
+# Adversarial CSV fixtures deliberately preserve CRLF and trailing blank rows.
+projects/datakit/fixtures/adversarial/bad_cells.csv -text whitespace=cr-at-eol
+projects/datakit/fixtures/adversarial/blank_lines.csv -text whitespace=-blank-at-eof
