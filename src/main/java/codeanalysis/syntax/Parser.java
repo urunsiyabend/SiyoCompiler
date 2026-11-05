@@ -654,9 +654,14 @@ public class Parser {
             nextToken(); // consume '['
             nextToken(); // consume ']'
             typeToken = new SyntaxToken(SyntaxType.IdentifierToken, typeToken.getPosition(),
-                    typeToken.getData() + "[]", typeToken.getValue());
+                    typeNameData(typeToken) + "[]", typeToken.getValue());
         }
         return typeToken;
+    }
+
+    /** A type token's text, or empty for one the parser had to make up. */
+    private static String typeNameData(SyntaxToken typeToken) {
+        return typeToken.getData() == null ? "" : typeToken.getData();
     }
 
     /**
@@ -677,7 +682,8 @@ public class Parser {
         if (!isTypeArgumentListAhead()) return typeToken;
 
         nextToken(); // consume '<'
-        StringBuilder name = new StringBuilder(typeToken.getData()).append('<');
+        // A missing type name was already reported; it must not end the parse.
+        StringBuilder name = new StringBuilder(typeNameData(typeToken)).append('<');
         boolean first = true;
         while (current().getType() != SyntaxType.GreaterToken
                 && current().getType() != SyntaxType.DoubleGreaterToken
@@ -1155,6 +1161,7 @@ public class Parser {
     private StatementSyntax parseStructDeclaration() {
         SyntaxToken structKeyword = match(SyntaxType.StructKeyword);
         SyntaxToken identifier = match(SyntaxType.IdentifierToken);
+        java.util.List<String> typeParameters = parseOptionalTypeParameters();
         SyntaxToken openBrace = match(SyntaxType.OpenBraceToken);
 
         List<ParameterSyntax> fields = new ArrayList<>();
@@ -1175,7 +1182,9 @@ public class Parser {
         }
 
         SyntaxToken closeBrace = match(SyntaxType.CloseBraceToken);
-        return new StructDeclarationSyntax(structKeyword, identifier, openBrace, fields, closeBrace);
+        StructDeclarationSyntax declaration = new StructDeclarationSyntax(structKeyword, identifier, openBrace, fields, closeBrace);
+        declaration.setTypeParameters(typeParameters);
+        return declaration;
     }
 
     /**

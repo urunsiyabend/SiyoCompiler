@@ -78,8 +78,10 @@ public class TypeResolver {
             return containedTypeNameOf(declaredTypeNameOf(indexExpr.getTarget()));
         }
         if (expr instanceof BoundMemberAccessExpression memberExpr) {
-            StructSymbol owner = resolveStructType(memberExpr.getTarget());
-            return owner != null ? owner.getFieldTypeName(memberExpr.getMemberName()) : null;
+            return fieldTypeNameOf(memberExpr.getTarget(), memberExpr.getMemberName());
+        }
+        if (expr instanceof BoundStructLiteralExpression structLit) {
+            return structLit.getTypeName();
         }
         if (expr instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP
                 && !call.getArguments().isEmpty()) {
@@ -92,6 +94,33 @@ public class TypeResolver {
             return call.getFunction().getDeclaredReturnTypeName();
         }
         return null;
+    }
+
+    /**
+     * The type a field of a struct value has, written out. A generic struct's
+     * field is read at the type arguments the value carries, so {@code items}
+     * of a {@code Group<Row>} declared {@code items: Array<T>} is an
+     * {@code Array<Row>}; with no arguments known it is erased to {@code object}.
+     *
+     * @param target The struct-valued expression.
+     * @param field  The field's name.
+     * @return The field's type name, or null when the struct is not known.
+     */
+    public String fieldTypeNameOf(BoundExpression target, String field) {
+        StructSymbol owner = resolveStructType(target);
+        if (owner == null) return null;
+        String declared = owner.getFieldTypeName(field);
+        List<String> typeParameters = owner.getTypeParameters();
+        if (declared == null || typeParameters.isEmpty()) return declared;
+        Map<String, String> bindings = new java.util.HashMap<>();
+        String targetTypeName = declaredTypeNameOf(target);
+        if (targetTypeName != null && owner.getName().equals(genericBaseName(targetTypeName))) {
+            List<String> arguments = typeArgumentsOf(targetTypeName);
+            for (int i = 0; i < arguments.size() && i < typeParameters.size(); i++) {
+                bindings.put(typeParameters.get(i), arguments.get(i));
+            }
+        }
+        return substitute(declared, typeParameters, bindings);
     }
 
     /**
@@ -397,19 +426,18 @@ public class TypeResolver {
         if (target instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol structType = resolveStructType(memberExpr.getTarget());
             if (structType != null) {
-                String fieldTypeName = structType.getFieldTypeName(memberExpr.getMemberName());
+                String fieldTypeName = fieldTypeNameOf(memberExpr.getTarget(), memberExpr.getMemberName());
                 if (fieldTypeName != null) {
                     Class<?> elemType = lookupElementType(fieldTypeName);
                     if (elemType != null) return elemType;
                 }
             }
         }
-        if (target instanceof BoundIndexExpression) {
-            // groups["e"] where groups: Map<string, Array<Rec>>
-            String elementName = elementTypeNameOf(declaredTypeNameOf(target));
-            Class<?> elemType = elementName != null ? lookupType(elementName) : null;
-            if (elemType != null) return elemType;
-        }
+        // Whatever else declares it: groups["e"] where groups: Map<string, Array<Rec>>,
+        // or a variable that took a generic struct's field, imut its = g.items.
+        String elementName = elementTypeNameOf(declaredTypeNameOf(target));
+        Class<?> elemType = elementName != null ? lookupType(elementName) : null;
+        if (elemType != null) return elemType;
         return Object.class;
     }
 
@@ -425,7 +453,7 @@ public class TypeResolver {
         if (target instanceof BoundMemberAccessExpression memberExpr && memberExpr.getClassType() == SiyoStruct.class) {
             StructSymbol ownerStruct = resolveStructType(memberExpr.getTarget());
             if (ownerStruct != null) {
-                String fieldTypeName = ownerStruct.getFieldTypeName(memberExpr.getMemberName());
+                String fieldTypeName = fieldTypeNameOf(memberExpr.getTarget(), memberExpr.getMemberName());
                 if (fieldTypeName != null) {
                     StructSymbol fieldStruct = _structTypes.get(fieldTypeName);
                     if (fieldStruct != null) return fieldStruct;
@@ -464,6 +492,11 @@ public class TypeResolver {
                 if (st != null) return st;
             }
         }
+        // A value whose declared type names a struct: imut r = box.value on a Box<Row>.
+        if (target.getClassType() == SiyoStruct.class) {
+            String declared = declaredTypeNameOf(target);
+            if (declared != null) return _structTypes.get(declared);
+        }
         return null;
     }
 
@@ -489,8 +522,9 @@ public class TypeResolver {
                 if (structType != null) return structType;
             }
         }
-        // An indexed container: groups["e"] where groups: Map<string, Array<Rec>>
-        if (collection instanceof BoundIndexExpression) {
+        // An indexed container: groups["e"] where groups: Map<string, Array<Rec>>,
+        // or a variable that took a generic struct's field.
+        if (collection instanceof BoundIndexExpression || collection instanceof BoundVariableExpression) {
             String elementName = elementTypeNameOf(declaredTypeNameOf(collection));
             if (elementName != null) {
                 StructSymbol elemStruct = _structTypes.get(elementName);
@@ -501,7 +535,7 @@ public class TypeResolver {
         if (collection instanceof BoundMemberAccessExpression memberExpr) {
             StructSymbol ownerStruct = resolveStructType(memberExpr.getTarget());
             if (ownerStruct != null) {
-                String fieldTypeName = ownerStruct.getFieldTypeName(memberExpr.getMemberName());
+                String fieldTypeName = fieldTypeNameOf(memberExpr.getTarget(), memberExpr.getMemberName());
                 String elemName = elementTypeNameOf(fieldTypeName);
                 if (elemName != null) {
                     StructSymbol elemStruct = _structTypes.get(elemName);

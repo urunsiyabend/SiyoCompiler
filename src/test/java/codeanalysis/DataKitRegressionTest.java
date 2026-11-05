@@ -1,8 +1,14 @@
 package codeanalysis;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Gaps found by writing DataKit (projects/datakit), each pinned on both
@@ -100,5 +106,173 @@ class DataKitRegressionTest {
                     println(toString(len(anything[0])))
                 }
                 """, "GenericPlainValues");
+    }
+
+    // --- G2: generic structs ----------------------------------------------------
+
+    @Test
+    void aGenericStructKeepsItsFieldTypes() throws Exception {
+        assertBoth("4\nab\nb 5\n2.5", ROWS + """
+                struct Box<T> { value: T }
+                struct Group<T> { key: string, items: Array<T> }
+                struct Pair<A, B> { left: A, right: B }
+                fn main() {
+                    imut b = Box { value: 3 }
+                    println(toString(b.value + 1))
+                    imut s = Box { value: "a" }
+                    println(s.value + "b")
+                    imut g = Group { key: "x", items: rows() }
+                    println(g.items[1].name + " " + toString(g.items[1].salary))
+                    imut p: Pair<string, float> = Pair { left: "k", right: 2.5 }
+                    println(toString(p.right))
+                }
+                """, "GenericStructFields");
+    }
+
+    @Test
+    void aGenericStructFlowsThroughParametersLoopsAndIndexing() throws Exception {
+        assertBoth("x:a,c\ny:b\nx 17", ROWS + """
+                struct Group<T> { key: string, items: Array<T> }
+                fn groupBy<T>(xs: Array<T>, key: fn(T) -> string) -> Array<Group<T>> {
+                    mut out: Array<Group<T>> = []
+                    for x in xs {
+                        imut k = key(x)
+                        mut found = false
+                        for g in out { if g.key == k { push(g.items, x)
+                                                       found = true } }
+                        if !found { push(out, Group { key: k, items: [x] }) }
+                    }
+                    out
+                }
+                fn names(g: Group<Row>) -> string {
+                    mut parts: string[] = []
+                    for r in g.items { push(parts, r.name) }
+                    g.key + ":" + parts[0] + (if len(parts) > 1 { "," + parts[1] } else { "" })
+                }
+                fn total(g: Group<Row>) -> int {
+                    mut t = 0
+                    for r in g.items { t += r.salary }
+                    t
+                }
+                fn main() {
+                    imut gs = groupBy(rows(), fn(r: Row) -> string { r.dept })
+                    for g in gs { println(names(g)) }
+                    println(gs[0].key + " " + toString(total(gs[0])))
+                }
+                """, "GenericStructFlows");
+    }
+
+    @Test
+    void aGenericStructFieldWidensAndAssigns() throws Exception {
+        assertBoth("3.0\n7\n2", """
+                struct Box<T> { value: T }
+                fn main() {
+                    imut f: Box<float> = Box { value: 3 }
+                    println(toString(f.value))
+                    mut b = Box { value: 1 }
+                    b.value = 7
+                    println(toString(b.value))
+                    mut bs: Array<Box<int>> = []
+                    push(bs, Box { value: 1 })
+                    push(bs, b)
+                    println(toString(len(bs)))
+                }
+                """, "GenericStructWidens");
+    }
+
+    @Test
+    void aPlainStructAndAnErasedGenericStructStillWork() throws Exception {
+        assertBoth("1\nBox { value: 1 }\n{\"value\":2}", """
+                import "std/json"
+                struct Box<T> { value: T }
+                struct Plain { n: int }
+                fn erased(b: Box) -> string { toString(b) }
+                fn main() {
+                    println(toString(Plain { n: 1 }.n))
+                    println(erased(Box { value: 1 }))
+                    println(json.stringify(Box { value: 2 }))
+                }
+                """, "GenericStructErased");
+    }
+
+    @Test
+    void aMalformedTypeNameIsADiagnosticNotACrash() {
+        String message = harness.firstDiagnostic("""
+                struct A { x: <T> }
+                fn main() { }
+                """);
+        assertTrue(message.contains("Unexpected token"), message);
+    }
+
+    @Test
+    void aGenericStructCrossesAModuleBoundary(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("pipe.siyo"), """
+                pub struct Group<T> { key: string, items: Array<T> }
+                pub fn single<T>(key: string, x: T) -> Group<T> { Group { key: key, items: [x] } }
+                """);
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "pipe"
+                struct Row { name: string }
+                fn main() {
+                    imut g = pipe.single("k", Row { name: "r" })
+                    println(g.key + " " + g.items[0].name)
+                    imut h: Group<Row> = Group { key: "h", items: [] }
+                    println(toString(len(h.items)))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("k r\n0", result.stdout(), mode + ": " + result.stderr());
+            assertEquals(0, result.exitCode(), mode);
+        }
+    }
+
+    @Test
+    void aGenericStructsFieldMayBeTakenIntoAVariable() throws Exception {
+        assertBoth("a\nb 5", ROWS + """
+                struct Box<T> { value: T }
+                struct Group<T> { key: string, items: Array<T> }
+                fn main() {
+                    imut g = Group { key: "k", items: rows() }
+                    imut its = g.items
+                    println(its[0].name)
+                    imut b = Box { value: its[1] }
+                    imut r = b.value
+                    println(r.name + " " + toString(r.salary))
+                }
+                """, "GenericStructFieldVariable");
+    }
+
+    // --- G6, G7: another module's generic function and number widening -------
+
+    @Test
+    void anImportedGenericFunctionKeepsItsResultTypeAndWidensItsArguments(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("lib.siyo"), """
+                pub fn ident<T>(x: T) -> T { x }
+                pub fn half(x: float) -> float { x / 2 }
+                pub fn keep<T>(xs: Array<T>, p: fn(T) -> bool) -> Array<T> {
+                    mut out: Array<T> = []
+                    for x in xs { if p(x) { push(out, x) } }
+                    out
+                }
+                """);
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                struct R { n: string }
+                fn main() {
+                    println(lib.ident(R { n: "a" }).n)
+                    println(toString(lib.ident(2) + 1))
+                    println(toString(lib.half(5)))
+                    imut rs = [R { n: "p" }, R { n: "q" }]
+                    println(lib.keep(rs, fn(r: R) -> bool { r.n == "q" })[0].n)
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("a\n3\n2.5\nq", result.stdout(), mode + ": " + result.stderr());
+            assertEquals(0, result.exitCode(), mode);
+        }
     }
 }

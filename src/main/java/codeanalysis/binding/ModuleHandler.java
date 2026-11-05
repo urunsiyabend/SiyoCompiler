@@ -226,6 +226,10 @@ public class ModuleHandler {
             importedFunc.setReturnElementStructName(func.getReturnElementStructName());
             importedFunc.setJvmMethodName(func.getName().replace('.', '$'));
             importedFunc.setOriginModule(func.getOriginModule());
+            // A generic function is generic from any module: the call site
+            // works its result type out from what the declaration wrote.
+            importedFunc.setTypeParameters(func.getTypeParameters());
+            importedFunc.setDeclaredReturnTypeName(func.getDeclaredReturnTypeName());
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
@@ -250,6 +254,8 @@ public class ModuleHandler {
             inherited.setReturnElementStructName(source.getReturnElementStructName());
             inherited.setJvmMethodName(source.getJvmMethodName());
             inherited.setOriginModule(source.getOriginModule());
+            inherited.setTypeParameters(source.getTypeParameters());
+            inherited.setDeclaredReturnTypeName(source.getDeclaredReturnTypeName());
             if (_scope.tryDeclareFunction(inherited) && entry.getValue() != null) {
                 _functionBodies.put(inherited, entry.getValue());
             }
@@ -710,6 +716,8 @@ public class ModuleHandler {
         String name = syntax.getIdentifier().getData();
         if (_structTypes.containsKey(name)) return;
 
+        // A field written over a type parameter is erased, as a sum type's payload is.
+        _typeResolver.getTypeParameters().addAll(syntax.getTypeParameters());
         java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
         java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
         for (ParameterSyntax field : syntax.getFields()) {
@@ -720,7 +728,9 @@ public class ModuleHandler {
             fields.put(fieldName, fieldType);
             fieldTypeNames.put(fieldName, typeName);
         }
-        _structTypes.put(name, new StructSymbol(name, fields, fieldTypeNames));
+        StructSymbol struct = new StructSymbol(name, fields, fieldTypeNames);
+        struct.setTypeParameters(syntax.getTypeParameters());
+        _structTypes.put(name, struct);
     }
 
     public void registerImplDeclaration(ImplDeclarationSyntax syntax) {

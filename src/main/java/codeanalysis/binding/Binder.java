@@ -41,7 +41,7 @@ public class Binder {
     private boolean _atFileTopLevel = true;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
-    private final Map<String, StructSymbol> _structTypes = new HashMap<>();
+    private final Map<String, StructSymbol> _structTypes = new StructTable();
     private final Map<String, codeanalysis.UnionSymbol> _unionTypes = new java.util.LinkedHashMap<>();
 
     private final TypeResolver _typeResolver;
@@ -398,7 +398,9 @@ public class Binder {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
             variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
-        } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression) {
+        } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression
+                || initializer instanceof BoundMemberAccessExpression
+                || initializer instanceof BoundStructLiteralExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
             if (inherited != null) variableSymbol.setDeclaredTypeName(inherited);
@@ -1391,6 +1393,27 @@ public class Binder {
                 values.add(widenLiteral(widenTo(value, valueType), arguments.get(1)));
             }
             return new BoundMapLiteralExpression(map.getKeys(), values);
+        }
+        // A generic struct's field holds what its declared type argument says:
+        // value of a Box<float> given 3 holds 3.0, as a float field would.
+        if (expression instanceof BoundStructLiteralExpression struct
+                && !struct.getStructType().getTypeParameters().isEmpty()
+                && struct.getStructType().getName().equals(TypeResolver.genericBaseName(typeName))) {
+            StructSymbol symbol = struct.getStructType();
+            List<String> parameters = symbol.getTypeParameters();
+            List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
+            if (arguments.size() != parameters.size()) return expression;
+            Map<String, String> bindings = new HashMap<>();
+            for (int i = 0; i < parameters.size(); i++) bindings.put(parameters.get(i), arguments.get(i));
+            java.util.LinkedHashMap<String, BoundExpression> values = new java.util.LinkedHashMap<>();
+            for (var entry : struct.getFieldValues().entrySet()) {
+                String fieldTypeName = TypeResolver.substitute(symbol.getFieldTypeName(entry.getKey()), parameters, bindings);
+                Class<?> fieldType = _typeResolver.lookupType(fieldTypeName);
+                BoundExpression value = entry.getValue();
+                if (fieldType != null) value = widenLiteral(widenTo(value, fieldType), fieldTypeName);
+                values.put(entry.getKey(), value);
+            }
+            return new BoundStructLiteralExpression(symbol, values, typeName);
         }
         return expression;
     }
@@ -2396,6 +2419,12 @@ public class Binder {
         }
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
+            // A generic struct's field reads at the type its value was given:
+            // items of a Group<Row> is an Array<Row>, value of a Box<int> an int.
+            if (!structType.getTypeParameters().isEmpty()) {
+                Class<?> substituted = _typeResolver.lookupType(_typeResolver.fieldTypeNameOf(target, memberName));
+                if (substituted != null) memberType = substituted;
+            }
             // If field is typed "object" but the type name is a known struct/actor, upgrade to SiyoStruct
             if (memberType == Object.class) {
                 String fieldTypeName = structType.getFieldTypeName(memberName);
@@ -2480,7 +2509,30 @@ public class Binder {
             fieldValues.put(fieldName, fieldValue);
         }
 
-        return new BoundStructLiteralExpression(structType, fieldValues);
+        return new BoundStructLiteralExpression(structType, fieldValues, genericStructTypeName(structType, fieldValues));
+    }
+
+    /**
+     * The type a literal of a generic struct has, its type arguments read off
+     * the values its fields were given: {@code Group { key: "a", items: rows }}
+     * with {@code rows: Array<Row>} is a {@code Group<Row>}. A parameter no
+     * field tells is erased to {@code object}.
+     *
+     * @param structType  The struct.
+     * @param fieldValues The values given for its fields.
+     * @return The type name with its arguments, or null for a struct that declares none.
+     */
+    private String genericStructTypeName(StructSymbol structType, Map<String, BoundExpression> fieldValues) {
+        List<String> typeParameters = structType.getTypeParameters();
+        if (typeParameters.isEmpty()) return null;
+        Map<String, String> bindings = new HashMap<>();
+        for (var entry : fieldValues.entrySet()) {
+            TypeResolver.unify(structType.getFieldTypeName(entry.getKey()), typeNameOf(entry.getValue()),
+                    typeParameters, bindings);
+        }
+        List<String> arguments = new ArrayList<>();
+        for (String parameter : typeParameters) arguments.add(bindings.getOrDefault(parameter, "object"));
+        return structType.getName() + "<" + String.join(",", arguments) + ">";
     }
 
     private BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
@@ -2982,6 +3034,9 @@ public class Binder {
                 }
 
                 for (int i = 0; i < boundArgs.size(); i++) {
+                    // A narrower number widens at a parameter of another
+                    // module's function as at one of this file's.
+                    boundArgs.set(i, widenTo(boundArgs.get(i), func.getParameters().get(i).getType()));
                     BoundExpression arg = boundArgs.get(i);
                     ParameterSymbol param = func.getParameters().get(i);
                     if (param.getType() != Object.class && arg.getClassType() != Object.class && arg.getClassType() != param.getType()) {
@@ -2989,7 +3044,8 @@ public class Binder {
                     }
                 }
 
-                return new BoundCallExpression(func, boundArgs);
+                GenericResult generic = inferGenericResultType(func, boundArgs);
+                return new BoundCallExpression(func, boundArgs, generic.type(), generic.typeName());
             }
 
             // Check if target is a Java class (static method or constructor)
@@ -3165,7 +3221,8 @@ public class Binder {
         for (int i = 0; i < arguments.size(); i++) {
             callArguments.add(widenTo(arguments.get(i), function.getParameters().get(i + 1).getType()));
         }
-        return new BoundCallExpression(function, callArguments);
+        GenericResult generic = inferGenericResultType(function, callArguments);
+        return new BoundCallExpression(function, callArguments, generic.type(), generic.typeName());
     }
 
     /**
