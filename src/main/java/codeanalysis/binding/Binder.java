@@ -862,13 +862,24 @@ public class Binder {
         List<BoundStatement> elsePre = new ArrayList<>();
         BoundExpression elseExpr = bindBlockExpressionBody(ifs.getElseClause().getElseStatement(), elsePre);
 
+        // One arm is void and the other not: run for effects, like a match whose
+        // arms disagree. Each value is discarded where it is produced.
+        if (!diverges(thenPre, thenExpr) && !diverges(elsePre, elseExpr)
+                && (thenExpr.getClassType() == null) != (elseExpr.getClassType() == null)) {
+            thenPre.add(new BoundExpressionStatement(thenExpr));
+            elsePre.add(new BoundExpressionStatement(elseExpr));
+            thenExpr = new BoundUnitExpression();
+            elseExpr = new BoundUnitExpression();
+        }
+
         // An arm that throws has no value, so the type comes from the other one.
         boolean thenDiverges = diverges(thenPre, thenExpr);
         Class<?> resultType = thenDiverges ? elseExpr.getClassType() : thenExpr.getClassType();
         if ((resultType == null || resultType == Object.class) && !diverges(elsePre, elseExpr)) {
             resultType = elseExpr.getClassType();
         }
-        if (resultType == null) resultType = Object.class;
+        // Both arms void stays void: typing it Object told an enclosing arm that
+        // a value was on the stack, and the method failed verification.
 
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
         arms.add(new BoundMatchExpression.BoundMatchArm(new BoundLiteralExpression(true), thenExpr, false, thenPre));
@@ -1078,7 +1089,8 @@ public class Binder {
     private static boolean diverges(List<BoundStatement> preStatements, BoundExpression body) {
         if (preStatements.isEmpty() || !(body instanceof BoundLiteralExpression)) return false;
         BoundStatement last = preStatements.get(preStatements.size() - 1);
-        return last instanceof BoundThrowStatement || last instanceof BoundReturnStatement;
+        return last instanceof BoundThrowStatement || last instanceof BoundReturnStatement
+                || last instanceof BoundBreakStatement || last instanceof BoundContinueStatement;
     }
 
     private BoundExpression bindBlockExpressionBody(StatementSyntax block, List<BoundStatement> preStatements) {
@@ -1099,15 +1111,21 @@ public class Binder {
                 // Allow trailing `if/else` to act as the value of the block.
                 result = bindIfExpression(new IfExpressionSyntax(ifStmt));
             } else {
-                // Last statement is not an expression — bind it as a statement and return 0
+                // Last statement is not an expression — bind it as a statement; the block has no value.
                 preStatements.add(bindStatement(last));
-                result = new BoundLiteralExpression(0);
+                result = new BoundUnitExpression();
             }
             _scope = _scope.getParent();
             _moduleHandler.setScope(_scope);
             return result;
         }
-        return new BoundLiteralExpression(0);
+        // `else if` is the else block of an if expression, with the same value.
+        if (block instanceof IfStatementSyntax elseIf) {
+            if (elseIf.getElseClause() != null) return bindIfExpression(new IfExpressionSyntax(elseIf));
+            preStatements.add(bindStatement(elseIf));
+            return new BoundUnitExpression();
+        }
+        return new BoundUnitExpression();
     }
 
     /**

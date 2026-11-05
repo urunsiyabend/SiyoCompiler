@@ -168,6 +168,63 @@ class TaskFlowRegressionTest {
                 """, "ForInMapKeys");
     }
 
+    // --- T13: else if is a value, and void arms stay void ----------------------
+
+    @Test
+    void anElseIfChainIsAValue() throws Exception {
+        assertBoth("onetwomany\n50", """
+                fn pick(d: int) -> string {
+                    imut x = if d == 1 { "one" } else if d == 2 { "two" } else { "many" }
+                    x
+                }
+                fn main() {
+                    println(pick(1) + pick(2) + pick(3))
+                    imut y = 5
+                    println(toString(if y == 1 { 10 } else if y == 5 { 50 } else { 60 }))
+                }
+                """, "ElseIfValue");
+    }
+
+    @Test
+    void aVoidElseIfChainMayEndAMatchArm() throws Exception {
+        assertBoth("1\n2\n3\n0", """
+                type K = A(int) | B
+                fn f(n: int) { println(toString(n)) }
+                fn g(k: K) {
+                    match k {
+                        B => f(0),
+                        A(d) => {
+                            if d == 1 { f(1) } else if d == 2 { f(2) } else { f(3) }
+                        }
+                    }
+                }
+                fn main() {
+                    g(A(1))
+                    g(A(2))
+                    g(A(3))
+                    g(B)
+                }
+                """, "VoidElseIfArm");
+    }
+
+    @Test
+    void anIfWhoseArmsAreVoidAndValueRunsForEffects() throws Exception {
+        assertBoth("1\n1\n7\n5", """
+                fn f(n: int) { println(toString(n)) }
+                fn g(n: int) -> int { n }
+                fn h(d: int) {
+                    match d { 1 => { if d == 1 { f(1) } else { g(1) } }, _ => { if d == 2 { g(2) } else { f(3) } } }
+                    match d { 1 => { if d == 1 { f(1) } else if d == 3 { f(7) } }, _ => { } }
+                }
+                fn main() {
+                    h(1)
+                    f(7)
+                    imut z = match 1 { 1 => { if true { 5 } else if false { 6 } else { throw "x" } }, _ => 9 }
+                    println(toString(z))
+                }
+                """, "VoidValueArms");
+    }
+
     // --- T14: a declared number widens wherever it is stored -------------------
 
     @Test
