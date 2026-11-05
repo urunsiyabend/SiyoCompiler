@@ -354,6 +354,163 @@ class TaskFlowRegressionTest {
                 """, "OverflowCatch");
     }
 
+    // --- T9: json.parseValue reads any JSON document ---------------------------
+
+    private static final String JSON_PROBE = """
+            import "std/json"
+            fn show(s: string) {
+                match json.parseValue(s) {
+                    Document(v) => println(typeOf(v) + " " + json.stringify(v)),
+                    Malformed(why) => println("bad: " + why)
+                }
+            }
+            """;
+
+    @Test
+    void parseValueReadsAnyDocument() throws Exception {
+        assertBoth("array [1,\"a\",null]\nmap {\"a\":[]}\nint 7\nstring \"s\"\nbool true\nnull null", JSON_PROBE + """
+                fn main() {
+                    show("[1, \\"a\\", null]")
+                    show("{\\"a\\": []}")
+                    show(" 7 ")
+                    show("\\"s\\"")
+                    show("true")
+                    show("null")
+                }
+                """, "JsonValue");
+    }
+
+    @Test
+    void parseStillWantsAnObject() throws Exception {
+        assertBoth("bad", """
+                import "std/json"
+                fn main() {
+                    match json.parse("[1]") {
+                        Parsed(m) => println("ok"),
+                        Invalid(why) => println("bad")
+                    }
+                }
+                """, "JsonParseObject");
+    }
+
+    // --- T10: the JSON parser rejects what RFC 8259 rejects --------------------
+
+    private void assertMalformed(String expectedFragment, String json, String className) throws Exception {
+        String source = JSON_PROBE + "fn main() { show(\"" + json.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\") }\n";
+        String compiled = harness.run(source, className);
+        String interpreted = harness.interpret(source, className);
+        assertEquals(compiled, interpreted, "backends differ");
+        org.junit.jupiter.api.Assertions.assertTrue(compiled.startsWith("bad: ") && compiled.contains(expectedFragment),
+                json + " gave: " + compiled);
+    }
+
+    @Test
+    void aLeadingZeroIsRejected() throws Exception {
+        assertMalformed("leading zero", "{\"a\": 01}", "JsonLeadingZero");
+        assertMalformed("leading zero", "[-012]", "JsonLeadingZeroNeg");
+    }
+
+    @Test
+    void aDigitMustBeAnAsciiDigit() throws Exception {
+        assertMalformed("expected a value", "[\u0663]", "JsonArabicDigit");
+    }
+
+    @Test
+    void aRawControlCharacterInAStringIsRejected() throws Exception {
+        assertMalformed("control character", "[\"a\\tb\"]".replace("\\t", "\t"), "JsonRawTab");
+    }
+
+    @Test
+    void aDuplicateKeyIsRejected() throws Exception {
+        assertMalformed("duplicate key \"a\"", "{\"a\": 1, \"a\": 2}", "JsonDuplicateKey");
+    }
+
+    @Test
+    void aBadUnicodeEscapeIsRejected() throws Exception {
+        assertMalformed("bad unicode escape", "[\"\\u+123\"]", "JsonBadEscape");
+    }
+
+    @Test
+    void aMalformedDocumentNamesItsLineAndColumn() throws Exception {
+        assertMalformed("line 2, column 3", "[1,\n  x]", "JsonLineColumn");
+    }
+
+    @Test
+    void anIntegerTooLongForALongIsAFloat() throws Exception {
+        assertBoth("float true\nlong 99999999999", JSON_PROBE + """
+                fn main() {
+                    match json.parseValue("123456789012345678901234567890") {
+                        Document(v) => println(typeOf(v) + " " + toString(v == v)),
+                        Malformed(why) => println(why)
+                    }
+                    show("99999999999")
+                }
+                """, "JsonHugeInt");
+    }
+
+    @Test
+    void aByteOrderMarkIsIgnored() throws Exception {
+        assertBoth("map {\"a\":1}\nok", JSON_PROBE + """
+                fn main() {
+                    show(chr(65279) + "{\\"a\\": 1}")
+                    match json.parse(chr(65279) + "{}") {
+                        Parsed(m) => println("ok"),
+                        Invalid(why) => println(why)
+                    }
+                }
+                """, "JsonBom");
+    }
+
+    @Test
+    void aDocumentNestedTooDeeplyIsMalformedNotAnOverflow() throws Exception {
+        assertBoth("bad: json: nested too deeply\nbad: json: nested too deeply", JSON_PROBE + """
+                import "std/strings"
+                fn trimmed(s: string) -> string { s }
+                fn check(s: string) {
+                    match json.parseValue(s) {
+                        Document(v) => println("ok"),
+                        Malformed(why) => println("bad: " + substring(why, 0, indexOf(why, " at position")))
+                    }
+                }
+                fn main() {
+                    check(strings.repeat("[", 200000))
+                    check(strings.repeat("{\\"a\\":", 200000))
+                }
+                """, "JsonDeep");
+    }
+
+    @Test
+    void aReasonablyDeepDocumentStillParses() throws Exception {
+        assertBoth("ok", """
+                import "std/json"
+                import "std/strings"
+                fn main() {
+                    match json.parseValue(strings.repeat("[", 300) + strings.repeat("]", 300)) {
+                        Document(v) => println("ok"),
+                        Malformed(why) => println(why)
+                    }
+                }
+                """, "JsonDeepEnough");
+    }
+
+    // --- T11: json.stringify writes structs and sets as data -------------------
+
+    @Test
+    void stringifyWritesAStructByItsFields() throws Exception {
+        assertBoth("{\"id\":\"a\",\"deps\":[\"b\"],\"inner\":{\"n\":1}}\n[{\"n\":2}]\n[3,4]", """
+                import "std/json"
+                struct I { n: int }
+                struct T { id: string, deps: Array<string>, inner: I }
+                fn main() {
+                    println(json.stringify(T { id: "a", deps: ["b"], inner: I { n: 1 } }))
+                    println(json.stringify([I { n: 2 }]))
+                    mut s: Set<int> = #{3}
+                    s.add(4)
+                    println(json.stringify(s))
+                }
+                """, "JsonStruct");
+    }
+
     // --- T13: else if is a value, and void arms stay void ----------------------
 
     @Test
