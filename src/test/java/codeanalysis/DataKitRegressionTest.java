@@ -1202,4 +1202,126 @@ fn main() {
                 }
                 """, "OrdinaryErased");
     }
+
+    // --- Gate at 897ea1c: provenance carried by every transport -------------------
+
+    private static final List<String> TRANSPORTS = List.of("exported", "bridge", "bridgeLoop", "pop", "mapKey", "ifMatch");
+
+    /**
+     * A program moving a struct-derived value of one shape through one transport
+     * and reading it through two aliases. Null when the transport does not apply:
+     * a map key is only tried with array shapes.
+     */
+    private static String transportProgram(String transport, Shape shape) {
+        String header = "struct Box<T> { value: T }\nfn g<T>(b: Box<T>) -> T { b.value }\n";
+        String reads = "    imut b = a\n    imut c = b\n    println(toString(a" + shape.read() + " * 2))\n"
+                + "    println(toString(c" + shape.read() + " * 2))\n";
+        return switch (transport) {
+            case "exported" -> "import \"lib\"\nfn main() {\n    imut a = lib.values\n" + reads + "}\n";
+            case "bridge" -> header + "struct Row { items: " + shape.type() + " }\nfn main() {\n"
+                    + "    imut row = g(Box { value: Row { items: " + shape.literal() + " } })\n    imut a = row.items\n"
+                    + reads + "}\n";
+            case "bridgeLoop" -> header + "struct Row { items: " + shape.type() + " }\nfn main() {\n"
+                    + "    imut rows = g(Box { value: [Row { items: " + shape.literal() + " }] })\n"
+                    + "    for row in rows {\n    imut a = row.items\n" + reads + "    }\n}\n";
+            case "pop" -> header + "fn main() {\n    mut all = g(Box { value: [" + shape.literal() + "] })\n"
+                    + "    imut a = pop(all)\n" + reads + "}\n";
+            case "ifMatch" -> header + "fn main() {\n    imut v = g(Box { value: " + shape.literal() + " })\n"
+                    + "    imut w = if len(\"x\") > 0 { v } else { v }\n"
+                    + "    imut a = match 1 { 1 => w, _ => v }\n" + reads + "}\n";
+            default -> shape.itemRead() == null ? null : header + "fn main() {\n"
+                    + "    imut keyed = g(Box { value: {" + shape.literal() + ": 1} })\n"
+                    + "    for a in keyed {\n" + reads + "    }\n}\n";
+        };
+    }
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aStructDerivedValueSurvivesEveryTransport(@TempDir Path dir) {
+        List<DynamicTest> tests = new java.util.ArrayList<>();
+        for (String transport : TRANSPORTS) {
+            for (Shape shape : SHAPES) {
+                String program = transportProgram(transport, shape);
+                if (program == null) continue;
+                tests.add(DynamicTest.dynamicTest(transport + " " + shape.name(), () -> {
+                    if (!transport.equals("exported")) {
+                        assertBoth("3.0\n3.0", program, "Transport_" + transport + "_" + shape.name());
+                        return;
+                    }
+                    Path project = Files.createDirectories(dir.resolve(shape.name()));
+                    Files.writeString(project.resolve("lib.siyo"), "struct Box<T> { value: T }\n"
+                            + "fn g<T>(b: Box<T>) -> T { b.value }\n"
+                            + "pub imut values = g(Box { value: " + shape.literal() + " })\n");
+                    Path main = project.resolve("main.siyo");
+                    Files.writeString(main, program);
+                    for (String mode : List.of("run", "interpret")) {
+                        CliParityTest.Result result = CliParityTest.siyoc(project, mode, main.toString());
+                        assertEquals("3.0\n3.0", result.stdout(), mode + ": " + result.stderr());
+                    }
+                }));
+            }
+        }
+        return tests.stream();
+    }
+
+    @Test
+    void anOrdinaryExportedOrPoppedValueStaysAsInZeroNine(@TempDir Path dir) throws Exception {
+        // Transport only carries what a generic struct gave: a typed module map
+        // and a popped plain array read as 0.9.0 read them.
+        Files.writeString(dir.resolve("lib.siyo"), "pub imut counts: Map<string, int> = {\"a\": 1}\npub fn one() -> int { 1 }\n");
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                fn main() {
+                    imut m = lib.counts
+                    println(toString(m["absent"]))
+                    mut all = [[1]]
+                    mut row = pop(all)
+                    push(row, "two")
+                    println(toString(row[1]))
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals("null\ntwo", result.stdout(), mode + ": " + result.stderr());
+        }
+    }
+
+    @Test
+    void aSetLiteralGivesItsElementType() throws Exception {
+        assertBoth("3.0\n5.0", """
+                struct Box<T> { value: T }
+                fn g<T>(b: Box<T>) -> T { b.value }
+                fn main() {
+                    imut s = g(Box { value: #{1.5, 2.5} })
+                    for x in s { println(toString(x * 2)) }
+                }
+                """, "SetLiteralType");
+    }
+
+    @Test
+    void anExportedTypeNamingAnotherModulesPrivateStructDoesNotCross(@TempDir Path dir) throws Exception {
+        // Provenance crosses an import only when the struct it names here is the
+        // one the exporter meant: a library's private P is not this module's P.
+        Files.writeString(dir.resolve("lib.siyo"), """
+                struct Box<T> { value: T }
+                struct P { x: float }
+                fn g<T>(b: Box<T>) -> T { b.value }
+                pub imut ps = g(Box { value: [P { x: 1.5 }] })
+                pub fn one() -> int { 1 }
+                """);
+        Path main = dir.resolve("main.siyo");
+        Files.writeString(main, """
+                import "lib"
+                struct P { x: string, y: int }
+                fn main() {
+                    imut a = lib.ps
+                    println(a[0].x)
+                }
+                """);
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, main.toString());
+            assertEquals(1, result.exitCode(), mode);
+            assertTrue(result.stderr().contains("does not have members"), mode + ": " + result.stderr());
+        }
+    }
 }

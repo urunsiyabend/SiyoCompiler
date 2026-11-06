@@ -413,6 +413,11 @@ public class Binder {
                 checkAgainstFunctionType(initializer, annotation.getData(),
                         syntax.getInitializer().getSpan());
             }
+        } else if (_typeResolver.isStructDerived(initializer) && _typeResolver.declaredTypeNameOf(initializer) != null) {
+            // Whatever form a struct-derived value arrives in (an alias, an index,
+            // an if or match, a call, a loop), the variable holds its whole type.
+            variableSymbol.setDeclaredTypeName(_typeResolver.declaredTypeNameOf(initializer));
+            _typeResolver.markStructDerived(variableSymbol);
         } else if (initializer instanceof BoundLambdaExpression lambda) {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
@@ -2344,6 +2349,16 @@ public class Binder {
             }
             if (element != null && !element.equals("object")) return "Array<" + element + ">";
         }
+        // A set literal of one element kind, as an array literal is named.
+        if (expr instanceof BoundSetLiteralExpression set && !set.getElements().isEmpty()) {
+            String element = null;
+            for (int i = 0; i < set.getElements().size(); i++) {
+                String one = typeNameOf(set.getElements().get(i));
+                element = i == 0 ? one : TypeResolver.joinTypeNames(element, one);
+                if (element == null) break;
+            }
+            if (element != null && !element.equals("object")) return "Set<" + element + ">";
+        }
         // A map literal of one key kind and one value kind, number kinds joined
         // at the wider: Box { value: {"x": 1.5} } is a Box<Map<string,float>>.
         if (expr instanceof BoundMapLiteralExpression map && !map.getKeys().isEmpty()) {
@@ -2457,9 +2472,8 @@ public class Binder {
                 : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
-            if (walkedTypeName == null && _typeResolver.isStructDerived(originalCollection)) {
-                _typeResolver.markStructDerived(itemVar);
-            }
+            // An element, a map key or a set element of a struct-derived collection.
+            if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar);
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {

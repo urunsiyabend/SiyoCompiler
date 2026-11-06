@@ -86,6 +86,7 @@ public class TypeResolver {
         if (expr instanceof BoundStructLiteralExpression structLit) {
             return structLit.getTypeName();
         }
+        if (expr instanceof BoundMatchExpression match) return commonArmTypeName(match);
         // [mk(0.5), mk(1.5)] is an Array<Box<float>> when every element says so;
         // only a generic struct's name is carried this way, since its field
         // reads are checked, while 0.9.0's element classes stay as they were.
@@ -212,35 +213,48 @@ public class TypeResolver {
         _boundThroughStruct.add(call);
     }
 
-    // Variables whose type came from a generic struct's type argument: initialised
-    // from a struct-derived expression, or walking a struct-derived collection.
-    private final java.util.Set<VariableSymbol> _structDerived =
-            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    /** The type name every arm of an if or match gives, when each arm is struct-derived; else null. */
+    private String commonArmTypeName(BoundMatchExpression match) {
+        String common = null;
+        for (var arm : match.getArms()) {
+            if (!isStructDerived(arm.body())) return null;
+            String name = declaredTypeNameOf(arm.body());
+            if (name == null || (common != null && !common.equals(name))) return null;
+            common = name;
+        }
+        return common;
+    }
 
     public void markStructDerived(VariableSymbol var) {
-        _structDerived.add(var);
+        var.setStructDerived(true);
     }
 
     /**
      * Whether an expression's type came from a generic struct's type argument,
      * so its whole written type name, at every depth, is what it holds: its
-     * reads are checked the same way on both backends. That is a generic
-     * struct's field, a call whose result was bound through a generic struct
-     * argument, a filter of such an array, an index into such a container, and
-     * a variable or loop item that took one. Nothing else is: ordinary generic
-     * results stay erased as in 0.9.0.
+     * reads are checked the same way on both backends.
+     *
+     * <p>It starts at a generic struct's field or a call whose result was bound
+     * through a generic struct argument, and every operation that moves a value
+     * of a known type carries it: a member read (through a plain struct too),
+     * an index, filter and pop, a variable or loop item (an element, a map key,
+     * a set element) taking one, and an exported variable reached from another
+     * module. Nothing else is: ordinary generic results stay erased as in 0.9.0.
      */
     public boolean isStructDerived(BoundExpression expr) {
         if (expr instanceof BoundMemberAccessExpression member) {
             StructSymbol owner = resolveStructType(member.getTarget());
-            return owner != null && !owner.getTypeParameters().isEmpty();
+            if (owner == null) return false;
+            return !owner.getTypeParameters().isEmpty() || isStructDerived(member.getTarget());
         }
         if (expr instanceof BoundCallExpression call) {
             if (_boundThroughStruct.contains(call)) return true;
-            return call.getFunction() == BuiltinFunctions.FILTER && !call.getArguments().isEmpty()
-                    && isStructDerived(call.getArguments().get(0));
+            boolean carries = call.getFunction() == BuiltinFunctions.FILTER || call.getFunction() == BuiltinFunctions.POP;
+            return carries && !call.getArguments().isEmpty() && isStructDerived(call.getArguments().get(0));
         }
-        if (expr instanceof BoundVariableExpression variable) return _structDerived.contains(variable.getVariable());
+        if (expr instanceof BoundVariableExpression variable) return variable.getVariable().isStructDerived();
+        // An if or match whose every arm gives the same struct-derived value type.
+        if (expr instanceof BoundMatchExpression match) return commonArmTypeName(match) != null;
         if (expr instanceof BoundIndexExpression index) return isStructDerived(index.getTarget());
         return false;
     }

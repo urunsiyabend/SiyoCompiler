@@ -82,6 +82,21 @@ public class VariableSymbol {
      *
      * @return The declared type name, or null.
      */
+    private boolean _structDerived;
+
+    /**
+     * Whether this variable's type came from a generic struct's type argument,
+     * so its whole declared type name is what it holds. It travels with the
+     * symbol, into an importing module too.
+     */
+    public boolean isStructDerived() {
+        return _structDerived;
+    }
+
+    public void setStructDerived(boolean structDerived) {
+        _structDerived = structDerived;
+    }
+
     public String getDeclaredTypeName() {
         return _declaredTypeName;
     }

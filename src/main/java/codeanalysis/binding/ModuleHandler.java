@@ -263,6 +263,7 @@ public class ModuleHandler {
 
         // Module-level variables are exported as module.name, reading the static
         // field on the module's own class.
+        Map<VariableSymbol, VariableSymbol> structDerivedExports = new java.util.LinkedHashMap<>();
         for (var entry : module.getVariables().entrySet()) {
             String qualifiedName = qualifier + "." + entry.getKey();
             if (!module.exports(entry.getKey())) {
@@ -273,6 +274,7 @@ public class ModuleHandler {
             VariableSymbol imported = new VariableSymbol(
                     qualifiedName, source.isReadOnly(), source.getType());
             imported.setOwner(className, entry.getKey());
+            if (source.isStructDerived()) structDerivedExports.put(imported, source);
             _scope.tryDeclare(imported);
         }
 
@@ -283,6 +285,17 @@ public class ModuleHandler {
                 continue;
             }
             _structTypes.put(entry.getKey(), entry.getValue());
+        }
+
+        // A struct-derived value's type travels with it, once the structs it names
+        // are known here and are the ones the exporter meant; any other exported
+        // variable is reached as 0.9.0 reached it.
+        for (var export : structDerivedExports.entrySet()) {
+            VariableSymbol source = export.getValue();
+            if (namesTheSameStructs(source.getDeclaredTypeName(), module.getStructs())) {
+                export.getKey().setDeclaredTypeName(source.getDeclaredTypeName());
+                export.getKey().setStructDerived(true);
+            }
         }
 
         // Register imported enums so EnumName.Member remains usable across modules.
@@ -650,6 +663,23 @@ public class ModuleHandler {
             variables.putIfAbsent(name, variable);
         }
         return variables;
+    }
+
+    /**
+     * Whether every struct a type name mentions is, in this module, the very
+     * struct the exporting module meant: a library's private P must not be read
+     * as this module's own P.
+     */
+    private boolean namesTheSameStructs(String typeName, Map<String, StructSymbol> exporters) {
+        if (typeName == null) return false;
+        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
+            if (word.isEmpty()) continue;
+            StructSymbol theirs = exporters.get(word);
+            StructSymbol ours = _structTypes.get(word);
+            if (theirs != null && ours != theirs) return false;
+            if (theirs == null && ours != null) return false;
+        }
+        return true;
     }
 
     // --- Registration (first pass) ---
