@@ -216,6 +216,45 @@ changes some of these. `direct_map_null` (a missing key through a generic
   reads the value directly, through two aliases, an annotated variable and its
   alias, `filter` and its alias, and `for` items, on both backends.
 
+  The gate at 897ea1c found four transports that dropped provenance:
+
+  - a map key walked by `for`;
+  - an exported module variable, which `import` recreated without its type;
+  - a member read through a plain struct inside a generic one (`Row` holding
+    `Array<Array<float>>` inside a `Box`);
+  - `pop`.
+
+  Provenance is now carried by every operation that moves a value of a known
+  type. It is a property of the variable symbol, so it crosses a module
+  boundary with the symbol. A member read of a struct-derived value, `filter`,
+  `pop`, an index, and a loop item that is an element, a map key or a set
+  element all carry it. An exported variable keeps its type only when it is
+  struct-derived. Even then it crosses only when every struct the type
+  names is, in the importer, the very struct the exporter meant, so a library's
+  private `P` is never read as the importer's own `P`
+  (`anExportedTypeNamingAnotherModulesPrivateStructDoesNotCross`). Other
+  exported variables read as in 0.9.0. Re-exporting a struct-derived value
+  through a middle module drops its type conservatively: the importer gets the
+  compile error a plain exported value gives, never a split. Deferred.
+
+  An `if` or `match` whose every arm gives the same struct-derived type carries
+  it. A set literal is named like array and map literals
+  (`aSetLiteralGivesItsElementType`). A variable takes the name and provenance
+  of any struct-derived initializer, whatever form it arrives in.
+
+  **Not a transport: a declared slot.** Passing a struct-derived value to a
+  function parameter declared with a concrete type
+  (`fn take(xs: Array<Array<float>>)`), or storing it in a plain struct's
+  field, gives it that slot's declared type under 0.9.0's rules. Arithmetic on
+  its numbers then splits by backend exactly as 0.9.0 splits for the same
+  program without a `Box`. That is inherited and deferred with D10.
+
+  `aStructDerivedValueSurvivesEveryTransport` crosses the five shapes with five
+  transports: exported module state, a plain-struct bridge, the bridge inside a
+  `for`, `pop`, map keys for the array shapes, and an `if`/`match`. 27 cases, each read through
+  two aliases on both backends. `anOrdinaryExportedOrPoppedValueStaysAsInZeroNine`
+  (identical on 0.9.0) pins the baseline.
+
   Inherited from 0.9.0 and deferred: a lambda parameter whose type has a comma
   inside type arguments (`fn(x: Map<string, float>)`) is read as two
   parameters, a compile error on both backends.

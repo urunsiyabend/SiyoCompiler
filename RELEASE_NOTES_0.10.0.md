@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,906 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,937 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -139,9 +139,13 @@ in 0.9.0. A `Box<T>` getter (`g(b: Box<T>) -> T`, `-> Array<T>`) gives an
 array's or map's element type from the struct's argument, whether the `Box`
 was written, inferred, or made by a lambda declared to return one. One rule
 covers every path. A value whose type came from a generic struct's argument
-(a field, a getter bound through a `Box`, a `filter` or index of one, a variable
-or loop item taking one) keeps its whole known type at every depth, through
-aliases and imports. Ordinary generic results otherwise stay erased. The one
+(a field, a getter bound through a `Box`, and anything moved from one: a member
+read, even through a plain struct, an index, `filter`, `pop`, a variable, a loop
+item, map key or set element, an `if` or `match` of such values, an exported
+module variable whose structs are the same ones in the importer) keeps its
+whole known type at every depth, through aliases and imports. Passing one to a
+function parameter or a plain struct field declared with a concrete type gives
+it that slot's type under 0.9.0's rules, as any value. Ordinary generic results otherwise stay erased. The one
 visible change outside generic structs is that a generic call over a nested
 literal of struct rows, `firstOf([xs, xs])` with `xs = [R { n: 1 }]`, now
 knows its elements are `R`s. That was a compile error ("Object does not have
