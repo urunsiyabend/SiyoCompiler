@@ -1,0 +1,20 @@
+import "std/json"
+
+fn main() {
+    // json.parse still requires an object; parseValue accepts any JSON value.
+
+    match json.parseValue("[1,2]") {
+        Document(v) => println(typeOf(v)),
+        Malformed(why) => println("bad: " + why)
+    }
+
+    match json.parseValue("true") {
+        Document(v) => println(typeOf(v)),
+        Malformed(why) => println("bad: " + why)
+    }
+
+    match json.parseValue("[") {
+        Document(v) => println("unexpected"),
+        Malformed(why) => println("malformed")
+    }
+}
