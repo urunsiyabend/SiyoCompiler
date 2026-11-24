@@ -507,7 +507,80 @@ changes some of these. `direct_map_null` (a missing key through a generic
   40f6f7f printed the local struct's method.
 
   The walk caches each syntax class's fields. On a 39,000-line file,
-  interpreting takes about 0.73 s against 0.57 s at 40f6f7f.
+  interpreting takes about 0.76 s against 0.57 s at 40f6f7f.
+
+  **Compiling ahead does not reorder initialisation.** The gate at 79348c0
+  found that interpreted programs initialised nested-imported modules in the
+  order anticipation compiled them. For `fn side() { if true { import "a" }
+  import "b" }`, a module printing as it starts gave `B A MAIN` interpreted and
+  `A B MAIN` compiled. 0.9.0 and 40f6f7f give `A B MAIN` on both.
+
+  The interpreter initialises modules in registry order, which was completion
+  order, and anticipation completed some modules early. Now a module records
+  the modules its import statements bound, in the order they were bound. Only
+  the file being run places modules in the initialisation order, each after
+  its own imports. That is the completion order the binder alone would give,
+  whichever was compiled first.
+
+  `modulesInitialiseInTheOrderTheirImportsAreBound` checks nine shapes on both
+  backends against 0.9.0's exact output: flat (unused and called), nested
+  first, nested second, a lambda first, `if`/`else`, deep, a diamond whose
+  shared module starts once, and a nested module whose own function nests
+  imports.
+
+  **Stores are seen through aliases.** The gate at 79348c0 also found
+  `imut alias = w`, `import "dup"`, `w.value = p`, `alias.value.who()`
+  printing `lib` compiled and `dup` interpreted. A store added what it stored
+  only to the variable written through, not to aliases taken before it.
+
+  Provenance now lives on storage, in three relations:
+  - **The same object.** `c = w`, or an `if` or `match` of it, shares one cell.
+  - **Taken out of.** An element, a field, a loop item, a payload, or the
+    result of a builtin, a generic or ordinary function, or a closure over `w`.
+    It sees what `w` sees, and a store into it is a store into what `w` holds.
+  - **Held inside.** A literal holding `w`, or `w` stored or pushed into
+    another. Only the container sees what reaches `w`.
+
+  Every relation only grows, and a root reaches a cell at most once.
+
+  A function or closure call may store one of its values into an argument
+  whose slots can hold it, so `put(w, p)` counts as `w.value = p`. This holds
+  in a declaration's initializer too. The slots are fields, elements and
+  payloads, through nested structs, and a slot of unknown or parameter type
+  may hold anything. A closure counts as one of its values, since it may store
+  what it captured. An argument whose type holds only numbers and strings, such
+  as `P { x: float }`, receives nothing, so `show(fresh, xs)` leaves `fresh` as
+  it was. Review found that a first version, storing every argument into every
+  other, refused that.
+
+  A first version joined every relation into one cell. Review found that
+  pushing a fresh `P { x: 2.0 }` into an inferred list then refused
+  `fresh.who()`, which 0.9.0 runs, and that the shared sets grew quadratically.
+  Containment is now one-way. A local is no longer a root of its own, since
+  what it was inferred from is. A list of 16,000 pushed elements that ran out
+  of memory at 79348c0 takes 0.6 s.
+
+  Two tests cover this on both backends:
+  - `aStoreIsSeenThroughEveryAliasTakenBeforeIt`: field, index, map and `push`
+    stores, a rebuilt `pop([c.value])` and an alias of an alias, with and
+    without dup.
+  - `aStoreReachesAliasesThroughCallsClosuresLoopsAndHolders`: a store through
+    a parameter, a loop item or a holder, and an alias handed back by a
+    function or closure, `imut n = put(w, p)`, and a one-argument closure that
+    captured `p`. A fresh value pushed beside inferred ones, and one passed to
+    `show(fresh, xs)`, still print `lib`.
+
+  **Not covered: a value a function fetches itself.** `fn put1(t: W<P>) {
+  t.value = lib.mk()[0] }` stores an inferred value its caller never sees, so
+  `put1(w)` then `w.value.who()` still splits, as at 79348c0. Seeing it needs
+  a summary of what each function stores.
+
+  **Not covered: a read bound before the store.** A closure whose body calls
+  `w.value.who()`, or a loop that calls it on one pass and stores `p` on an
+  earlier one, is bound before the store that makes it unsafe. They still run
+  lib's method compiled and dup's interpreted, as at 79348c0. 0.9.0 failed
+  here, and 40f6f7f refused the loop case. Closing them needs every dispatch
+  re-checked once the whole file is bound.
 
   The cost is that a call bound before such an import in the same file is
   refused too, as 0.9.0 refused it. Which runs first is not known statically.
