@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,966 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,991 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -49,6 +49,19 @@ and `Map<string, Array<T>>` likewise. Only a bare `-> T` kept its type.
 - The same holds for a function from another module, for a module-qualified
   call and for a call written as a method. An imported generic function used to
   lose its type parameters altogether.
+- An imported function's result is named only while the names in its declared
+  return type mean, in the caller, what they meant where it was declared. A
+  function of the exporter may import a module whose `P` replaces its own, as
+  0.9.0 allows. `lib.mk()` returning `Array<P>` is then left erased, as 0.9.0
+  left it, and `lib.mk()[0].who()` fails with "No matching method" as in 0.9.0
+  rather than running the other module's method. The same holds where `P`'s
+  methods in the caller, or in the exporter, come from another declaration of
+  the name than its struct. That covers another import of a `P` before or
+  after, the caller's own `struct P` with methods, or a second impl of a method
+  lib already has. A generic call over such a result is not named from it
+  either, nor is an inferred local or a struct taken from one once such a clash
+  appears. A clash an imported module found counts in the importer too. A
+  method another file adds to lib's `P` clashes with nothing.
 
 **A payload keeps its written type name.** With `type R = T(Array<S>) | ...`,
 `T(xs) => xs[0].n` was rejected. A payload now carries its written type, and a
@@ -228,13 +241,12 @@ Found by DataKit and left for later (see PAIN_POINTS.md):
   name, as in 0.9.0. When two modules declare one type name, the importer
   cannot tell them apart.
 - An import inside a module's function of a module declaring a type of the
-  same name replaces that type throughout the module, as in 0.9.0, where
-  `lib.mkp().who()` then runs the other module's method. 0.10.0 types
-  `lib.mk()`'s `Array<P>` result without an annotation, so an unannotated
-  `imut a = lib.mk()` now reaches this too. In 0.9.0 it failed with "No
-  matching method".
+  same name replaces that type throughout the module, as in 0.9.0. There,
+  `lib.mkp().who()` and `imut a: Array<P> = lib.mk()` run the other module's
+  method, and they still do.
 - After `import "other"` and then `import "lib"`, a method of a type both
-  declare runs other's, as in 0.9.0.
+  declare runs other's where 0.9.0's routes name it (`lib.mkp().who()`, an
+  annotation), as in 0.9.0.
 - A lambda parameter typed with a comma inside type arguments
   (`fn(x: Map<string, float>)`) is read as two parameters, as in 0.9.0.
   - `=> return x` is not a match arm. Write `=> { return x }`.

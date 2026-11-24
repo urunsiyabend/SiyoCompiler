@@ -297,7 +297,7 @@ changes some of these. `direct_map_null` (a missing key through a generic
     they stood where it was declared there. A function of the exporter that
     imports `other` therefore cannot make the value read as `other`'s `P`.
 
-  `aLaterImportNeverLetsAnImportedValueReadAnotherModulesType` covers fourteen
+  `aLaterImportNeverLetsAnImportedValueReadAnotherModulesType` covers fifteen
   cases on both backends. None may print `other`: each either reads lib's own
   type or is refused, and a control reads `lib`.
   - a use primed by an unused function, and the unprimed case;
@@ -308,7 +308,11 @@ changes some of these. `direct_map_null` (a missing key through a generic
     with a field local, each captured before the import;
   - an import inside a lambda bound within a declaration's initializer, a loop's
     collection and a match's target;
-  - the same three statements without the imports, which read `lib`.
+  - the same three statements without the imports, which read `lib`;
+  - a struct local's method before (`lib`) and after (refused) the import.
+
+  `aStructLocalsFieldStillReadsAsTrackedAfterANestedImport` keeps that local's
+  field reads.
 
   `anImportInsideTheExportersOwnFunctionDoesNotChangeWhatItsValueMeans` covers
   the exported value.
@@ -324,23 +328,124 @@ changes some of these. `direct_map_null` (a missing key through a generic
   analog of each prints `other` too.
   - **Methods follow the first import.** After `import "other"` and then
     `import "lib"`, the type table holds lib's `P`, but `P.who` was registered
-    by other first, so `a[0].who()` runs other's method. In 0.9.0,
-    `lib.mkp().who()` does the same. Dispatch follows the function scope, not
-    the type tables, which the origin check reads.
-  - **Directly tracked struct locals.** A struct-typed local whose struct symbol
-    was tracked directly, such as `imut p = a[0]`, calls a method by the plain
-    name `P.who` after the import, as 0.9.0 does for a value returned by a
-    function.
+    by other first. In 0.9.0, `lib.mkp().who()` runs other's method, and it
+    still does. A name 0.10.0 infers, whether an imported value's or a call's
+    result, is not trusted through such a contested `P`: it fails as 0.9.0
+    did.
+  - **Directly tracked struct locals, when annotated.** A struct-typed local
+    whose struct symbol was tracked directly calls a method by the plain name
+    `P.who` after the import, as 0.9.0 does for a value returned by a function.
+    When the local's type was inferred (`imut p = a[0]` with `a = lib.values`),
+    the method call is refused once its names no longer hold. That printed
+    `other` until this round. Its fields still read as tracked, so `p.x + 1`
+    gives `2.5` on both backends, not 0.9.0's erased arithmetic.
   - **Declared slots.** A value passed to a parameter or lambda parameter typed
     `W<Array<P>>`, or returned from a named function declared `-> W<Array<P>>`,
     takes the slot's type, read where it is used. So does `fn f(a: Array<P>)`
     in 0.9.0.
   - **An exporter's own nested import.** A module whose own function imports
     another module declaring a type of the same name has that name replaced
-    throughout the module. In 0.9.0, `lib.mkp().who()` and `imut a: Array<P> =
-    lib.mk()` then print `other`. 0.10.0 now gives `lib.mk()` its declared
-    `Array<P>` without the annotation, so `imut a = lib.mk(); a[0].who()`, a
-    "No matching method" in 0.9.0, reaches the same `other`.
+    throughout the module. In 0.9.0, `lib.mkp().who()` (a struct return) and
+    `imut a: Array<P> = lib.mk()` (an annotation) then print `other`, and still
+    do.
+
+  **Fixed: an inferred return after an exporter's own nested import.** 0.10.0
+  names an imported call's result from the function's declared return type,
+  where 0.9.0 left `lib.mk()`'s `Array<P>` erased. The gate's review of this
+  round found that, after lib's `side()` replaced lib's `P`, `imut a =
+  lib.mk(); a[0].who()` printed `other` on both backends. In 0.9.0 it failed
+  with "No matching method".
+
+  - **The fix.** An imported function carries its exporter's tables as they
+    stood before any of its bodies, and so any import inside one, was bound.
+    These are views at a generation, not copies.
+  - **The check.** Where the result is named (a call's type, a loop over it, a
+    generic struct result), the declared return type is checked as an imported
+    value is, the function's own type parameters excepted.
+  - **The outcome.** When a name now means another declaration, the result is
+    erased as in 0.9.0.
+
+  Review of that fix found three more ways the new inference reached another
+  declaration's method where 0.9.0 failed:
+  - **A generic call over a struct return.** `lib.id(lib.mkp()).who()`, or a
+    local `id`, bound `T` to the `P` that 0.9.0's struct-return route names.
+  - **Collisions in the importer.** After `import "other"` and `import "lib"`
+    in either order, or beside the importer's own `struct P` with methods, the
+    struct table keeps one `P` while its methods, or the interpreter's lookup by
+    name, belong to another.
+  - **Collisions in lib.** Lib does `import "other" as o` before its own `P`.
+
+  Two rules close them without changing 0.9.0's tables:
+  - **Contested names.** Each file records, for each struct name and method,
+    which files declared it, whether or not the declaration won. A name is
+    contested when either of these holds:
+    - two files declared the same method of it;
+    - two files declared a struct of the name, and one of its methods here
+      comes from another file than the current struct's.
+
+    The backends may then run different bodies. A name that an imported value
+    or an imported call's result carries is not trusted when it is contested in
+    the importer, or for a call, was contested in the exporter as its
+    declarations stood.
+
+    These clash with nothing:
+    - a method another file adds to the one struct of a name (`impl P { fn mine
+      }` on lib's `P`);
+    - a second struct of the name with no methods.
+
+    A struct an imported module found contested is contested in the importer
+    too, when it is the same struct. Its methods arrive by inheritance, and the
+    interpreter finds a refused method by name. Two cases show this:
+    - `mid` imports `xx` (a `P` with `zed`) and then lib, so xx's `zed` reaches
+      lib's `P` in main;
+    - `dupmod` declares lib's `who` again.
+
+    A local whose type was inferred, rather than written in an annotation, is
+    held to all of this when it is re-checked after an import. So is a struct
+    local taken from it (`imut p = a[0]`). An annotated local is 0.9.0's route,
+    is held only to what changed since, and reads as 0.9.0 read it.
+
+    Review found that a first version, contesting any method from another file,
+    wrongly rejected an extension method on lib's `P` and impls split across
+    files, which 0.9.0 runs.
+  - **Calls that fail the check.** Inference no longer names a call whose
+    return check fails, even by 0.9.0's routes.
+
+  `anInferredReturnTypeNeverReadsATypeTheExportersOwnImportReplaced` covers
+  twenty-three cases on both backends:
+  - **Erased again, failing as in 0.9.0:**
+    - `imut a = lib.mk()`, `lib.mk()[0].who()`, and `lib.boxed()` returning
+      `Box<Array<P>>`, after lib's own import;
+    - `lib.id(lib.mkp())` and a local `id` over it;
+    - the importer importing other before or after lib;
+    - the importer's own `struct P`;
+    - lib importing other before its own `P`;
+    - the importer implementing `Named` for lib's `P` again, which lib already
+      does. Compiled code ran lib's `name` and the interpreter main's.
+    - a middle module through which xx's `zed` reached lib's `P` (`xx` was
+      printed);
+    - `dupmod` imported after an inferred local, and a struct local taken from
+      it. Compiled code printed `lib` and the interpreter `dup`.
+
+    At the previous commit each printed `other`, `main` or (run) `lib`. 0.9.0
+    failed with "No matching method" on all of them.
+  - **Still named, printing `lib`:** the calls with no import in lib, with an
+    import in lib of a module declaring no `P`, annotated, a generic call over
+    `lib.mkp()`, a methodless `P` imported before lib (`1.5 lib`), a method
+    main adds to lib's `P` (`lib main-ext`), and an annotated local beside a
+    duplicate impl across a nested import.
+  - **Unchanged from 0.9.0, printing `other`:** `lib.mkp().who()` and the
+    annotated `Array<P>` after lib's own import of `other`.
+
+  The previous commit printed `lib` for `import "lib"` then `import "other"`,
+  and beside the importer's own `struct P`. Both now fail as 0.9.0 did, since
+  which `P.who` runs there depends on the order and the backend.
+
+  **Inherited: an actor in an array.** `lib.mka()[0].hi()`, with `mka`
+  returning `Array<A>` for an actor `A`, throws a ClassCastException compiled
+  and runs interpreted. A same-file `fn mka() -> Array<A>` does exactly that in
+  0.9.0. 0.10.0 reaches it through an imported call too, which 0.9.0 left
+  erased.
 
   Three tests bound the cost:
   - `anOriginCheckStaysFastOnALargeCyclicGraphWithManyAliases`: 500 structs
