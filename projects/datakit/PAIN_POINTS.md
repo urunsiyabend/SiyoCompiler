@@ -241,10 +241,11 @@ changes some of these. `direct_map_null` (a missing key through a generic
     the import-time check had passed, and the read failed with a cast error.
 
   An imported struct-derived variable now carries its exporter's struct, sum
-  type and interface tables. Where the value is used, after every import, the
-  compiler checks every type its name mentions, and every type their fields and
-  variant payloads mention in turn. The walk is cycle-safe, so recursive types
-  terminate, and the result is cached per variable. A type may not be a
+  type and interface tables. So does every alias, loop item or other variable
+  that takes a value moved from it. Wherever such a value is used, the compiler
+  checks every type its name mentions, and every type their fields and variant
+  payloads mention in turn, against the names as they stand at that point. The
+  walk is cycle-safe, so recursive types terminate. A type may not be a
   *different* declaration of that name in the importer. Two things don't count
   as a clash:
 
@@ -255,8 +256,106 @@ changes some of these. `direct_map_null` (a missing key through a generic
   When the check fails, the value reads erased. Member access is rejected at
   compile time ("does not have members"), and a method or interface call on it
   fails on both backends. Another module's type is never read in its place.
-  When the check holds, the genuine exporter types are used, whatever the
-  import order.
+  When the check holds, the genuine exporter types are used.
+
+  **The check is not stale.** The gate at 6864526 found the first version cached
+  the check per variable. An `import "other"` inside a function changed what `P`
+  meant after a use elsewhere had already passed the check, and `a[0].who()`
+  then silently printed `other` on both backends. Review of the first fix found
+  the same through a struct literal (`W { v: lib.values }`), a generic wrapper, a
+  lambda's declared return type, and a loop with a field local, none of which
+  carried the origin. The fix is general rather than per transport:
+
+  - **One generation per file.** The file's struct, sum type and interface
+    tables share a generation that moves on every change to any of them. A
+    table changes only through `put`, `putIfAbsent` and `remove`, each
+    recorded. Every other way to change it, including through its key, value
+    and entry views, is refused, so no change goes unseen.
+  - **Locals are stamped, before their statement.** Every local variable that
+    takes a type name records the generation from just before the statement
+    that gives it its type. This covers a declaration, a loop item and a payload
+    binding. A second review found that stamping after the initializer let a
+    lambda inside it import `other` first, and `first(wrap(lib.values), call0(fn()
+    { import "other" ... }))` then printed `other`.
+  - **No copies.** Each table keeps every change, so a stamp reads the table as
+    it stood at its generation. A copy of the tables per generation ran out of
+    memory with 3,000 nested imports. A `put` that changes nothing starts no
+    generation.
+  - **The fast path.** A variable stamped in the current generation is trusted
+    at once, which is the case for all ordinary code.
+  - **The slow path.** Otherwise its name is checked against its stamp as an
+    imported value is checked against its exporter, transitively and
+    cycle-safe, and it reads erased if any name now means something else.
+  - **Shared results.** Results are kept per (origin, type name), so aliases
+    share one walk. A local's result holds only in the generation it was made
+    in. An imported value's result also keeps the names its walk consulted. It
+    is reused in a later generation when the file's change log since then
+    touches none of them, so an unrelated nested import costs no new walk.
+  - **Closure signatures.** A call through a closure reads the closure's
+    signature through the same check.
+  - **Exported values.** An exported value carries its exporter's tables as
+    they stood where it was declared there. A function of the exporter that
+    imports `other` therefore cannot make the value read as `other`'s `P`.
+
+  `aLaterImportNeverLetsAnImportedValueReadAnotherModulesType` covers fourteen
+  cases on both backends. None may print `other`: each either reads lib's own
+  type or is refused, and a control reads `lib`.
+  - a use primed by an unused function, and the unprimed case;
+  - an alias taken before the nested import;
+  - a read before and after it;
+  - a function-level import declared before and after `main`;
+  - a struct literal, a generic wrapper, a lambda's declared return, and a loop
+    with a field local, each captured before the import;
+  - an import inside a lambda bound within a declaration's initializer, a loop's
+    collection and a match's target;
+  - the same three statements without the imports, which read `lib`.
+
+  `anImportInsideTheExportersOwnFunctionDoesNotChangeWhatItsValueMeans` covers
+  the exported value.
+
+  **Not covered: an expression spanning a nested import.** A type name an
+  expression computed before an import inside its own lambda is read after it,
+  with no variable to stamp. An example is `first(wrap(lib.values), call0(fn() {
+  import "other" ... })).v[0].x` with other's `P { x: string }`. It fails loudly
+  on both backends with a `ClassCastException`. Method dispatch inside the
+  expression stays with lib's `P`, so it was not made to print `other`.
+
+  **Inherited, unchanged.** These are the same-name families below; 0.9.0's
+  analog of each prints `other` too.
+  - **Methods follow the first import.** After `import "other"` and then
+    `import "lib"`, the type table holds lib's `P`, but `P.who` was registered
+    by other first, so `a[0].who()` runs other's method. In 0.9.0,
+    `lib.mkp().who()` does the same. Dispatch follows the function scope, not
+    the type tables, which the origin check reads.
+  - **Directly tracked struct locals.** A struct-typed local whose struct symbol
+    was tracked directly, such as `imut p = a[0]`, calls a method by the plain
+    name `P.who` after the import, as 0.9.0 does for a value returned by a
+    function.
+  - **Declared slots.** A value passed to a parameter or lambda parameter typed
+    `W<Array<P>>`, or returned from a named function declared `-> W<Array<P>>`,
+    takes the slot's type, read where it is used. So does `fn f(a: Array<P>)`
+    in 0.9.0.
+  - **An exporter's own nested import.** A module whose own function imports
+    another module declaring a type of the same name has that name replaced
+    throughout the module. In 0.9.0, `lib.mkp().who()` and `imut a: Array<P> =
+    lib.mk()` then print `other`. 0.10.0 now gives `lib.mk()` its declared
+    `Array<P>` without the annotation, so `imut a = lib.mk(); a[0].who()`, a
+    "No matching method" in 0.9.0, reaches the same `other`.
+
+  Three tests bound the cost:
+  - `anOriginCheckStaysFastOnALargeCyclicGraphWithManyAliases`: 500 structs
+    with cross edges and 200 chained aliases, on both backends, about 0.25 s
+    a run.
+  - Not a test: 3,000 functions that each import a module and then read
+    `lib.values` of a 2,000-struct chain take 0.34 s interpreted. Re-walking
+    per generation took 3.3 s.
+  - `anOriginCheckIsSharedAcrossAliasesOfALongChain`: 3,000 chained structs and
+    3,000 aliases, each read. Before the walk was shared, this ran out of
+    memory. It now takes about 0.25 s interpreted.
+  - `manyNestedImportsKeepTheOriginCheckBounded`: 1,500 functions, each taking
+    a local of a 2,000-struct chain and then importing a module of its own,
+    which makes 1,500 generations. It takes about 3 s interpreted. With 3,000
+    such functions it takes 3.2 s and 410 MB, where copies ran out of memory.
 
   `anImportedValueIsReadAsItsOriginsTypesOrRejected` covers ten cases, each on
   both backends:

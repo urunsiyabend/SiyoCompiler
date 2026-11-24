@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,948 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,966 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -142,8 +142,10 @@ covers every path. A value whose type came from a generic struct's argument
 (a field, a getter bound through a `Box`, and anything moved from one: a member
 read, even through a plain struct, an index, `filter`, `pop`, a variable, a loop
 item, map key or set element, an `if` or `match` of such values, an exported
-module variable whose structs, checked transitively where it is used, are the
-very ones the exporter meant, including through fields, union payloads and
+module variable whose structs, checked transitively at each use against the
+names as they stand there, a later or nested import included, are the very
+ones the exporter meant (a local is checked the same way against the names it
+was declared under), including through fields, union payloads and
 interfaces; otherwise it reads erased and member access is rejected, never
 reinterpreted as another module's type) keeps its
 whole known type at every depth, through aliases and imports. Passing one to a
@@ -225,6 +227,14 @@ Found by DataKit and left for later (see PAIN_POINTS.md):
   parameter typed with a struct, is read through the importer's type of that
   name, as in 0.9.0. When two modules declare one type name, the importer
   cannot tell them apart.
+- An import inside a module's function of a module declaring a type of the
+  same name replaces that type throughout the module, as in 0.9.0, where
+  `lib.mkp().who()` then runs the other module's method. 0.10.0 types
+  `lib.mk()`'s `Array<P>` result without an annotation, so an unannotated
+  `imut a = lib.mk()` now reaches this too. In 0.9.0 it failed with "No
+  matching method".
+- After `import "other"` and then `import "lib"`, a method of a type both
+  declare runs other's, as in 0.9.0.
 - A lambda parameter typed with a comma inside type arguments
   (`fn(x: Map<string, float>)`) is read as two parameters, as in 0.9.0.
   - `=> return x` is not a match arm. Write `=> { return x }`.
