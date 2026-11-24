@@ -441,6 +441,115 @@ changes some of these. `direct_map_null` (a missing key through a generic
   and beside the importer's own `struct P`. Both now fail as 0.9.0 did, since
   which `P.who` runs there depends on the order and the backend.
 
+  **Provenance, not call shapes.** The gate at 40f6f7f found two more ways back
+  to a refused identity. Both ran lib's `who` compiled and dup's interpreted,
+  where 0.9.0 failed:
+  - **Rebuilding the value.** `b = [p]` then `b[0].who()`, and the same through
+    `pop(b)`. The array's struct was tracked by symbol and never checked.
+  - **Generic inference.** `lib.id(p).who()`, or a local `id`. Inference fell
+    back to p's tracked struct after its name had been refused.
+
+  The fix is one rule. Each value carries the set of roots its static identity
+  was inferred from by 0.10.0:
+  - an imported value;
+  - an imported call named from its declared return type (not a struct or sum
+    type result, which 0.9.0 typed already);
+  - a generic call's inferred result.
+
+  The set is the union over what the value is made of. That covers an alias,
+  an index, a field, a literal holding it, a builtin over it (`pop`,
+  `filter`), an `if` or `match`, a loop item and a payload. A variable keeps
+  its set and only grows it: assigning, storing an element or field, or
+  `push`ing adds what was stored. An annotation starts afresh, as 0.9.0's route.
+
+  Each root is asked two things:
+  - **Identity:** whether its names still mean the declarations they meant. This
+    governs naming and field reads, as before.
+  - **Contest:** whether a struct its type reaches has methods from more than
+    one declaration. A contest decides only which method body runs.
+
+  The two places that use roots:
+  - **Method calls.** A method call dispatched by struct is refused when that
+    struct is contested or now means another struct, and the receiver's roots
+    fail either question. `W { n: len(a) }.hello()` beside a contested `P`
+    keeps its dispatch.
+  - **Generic calls.** A generic call's type argument is not named from a value
+    whose roots fail identity, nor by a contested struct its roots meet.
+
+  So an identity refused once is never regained by repackaging. A number,
+  string or bool carries no roots. A struct annotation (`imut q: P = ...`) keeps
+  them, since 0.9.0 never typed an erased value by one; only a collection
+  annotation such as `Array<P>`, 0.9.0's route, starts afresh.
+
+  **Bind order is not run order.** Review found that a call bound before
+  `import "dup"` still split. Three shapes did it:
+  - a closure made earlier;
+  - a function declared above `main`;
+  - an import inside a function declared after `main`.
+
+  The interpreter finds a method by name once the import has run, whatever
+  order the code was bound in. Every import nested in a function, method or
+  lambda of a file is therefore compiled while the file's declarations are read,
+  before any body is bound. Its methods and structs are recorded then, so the
+  contests it will cause hold from the start, and pass to importers through the
+  file's declared-contested set. The walk follows each syntax node's fields,
+  since some nodes do not list their body as a child. Nothing is declared into
+  scope early, and a module that fails is reported once.
+
+  Anticipation is transitive. A module carries what its own nested imports
+  bring in: methods, structs, and structs found contested. So `import "dup2"`
+  in `main`, where `dup2`'s function imports `dup`, is refused as `dup` itself
+  would be. A file that is a single declaration is walked too.
+
+  An import that is only ever written inside a function that never runs still
+  counts. A same-name struct it would bring makes the name at risk for the
+  whole file, so `id(r).who()` beside such a module fails as in 0.9.0, where
+  40f6f7f printed the local struct's method.
+
+  The walk caches each syntax class's fields. On a 39,000-line file,
+  interpreting takes about 0.73 s against 0.57 s at 40f6f7f.
+
+  The cost is that a call bound before such an import in the same file is
+  refused too, as 0.9.0 refused it. Which runs first is not known statically.
+  `readBeforeAndAfterNestedImport` and `structLocalMethodBeforeAndAfterNestedImport`
+  now expect that.
+
+  `anInferredIdentityRejectedOnceIsNeverRegainedByRepackaging` covers 72 cases
+  on both backends. The dimensions are two sources (`lib.mk()` and
+  `lib.values`), twelve rebuildings, and dup imported before, after or not at
+  all. The rebuildings are:
+  - an alias, an array variable and an inline array;
+  - `pop`, `filter` and `push`;
+  - a generic struct field, an `if` value and a loop item;
+  - imported and local `id`, and `id` of an array.
+
+  With dup, every case fails as 0.9.0 did. Without it, none prints `dup` and
+  the backends agree.
+
+  `aContestIsHeldWhereverTheCallRunsAndOnlyAgainstItsStruct` covers thirteen
+  cases on both backends:
+  - `dup2` imported in a function, where `dup2`'s own function imports `dup`.
+    It is refused; imported at top level it prints `lib`.
+  - a closure, a lambda, and a function bound before the import, an import in
+    a function declared after `main`, and a struct annotation over an inferred
+    value. Each is refused.
+  - a closure without the import, which prints `lib`;
+  - `W` and `S` beside a contested `P`, which keep their methods, while
+    `id(s).q.who()` is refused.
+
+  **Stricter than 0.9.0.** Under such a collision, a value that 0.10.0 inferred
+  and then stored in a local struct's `P` field, a local `[P { .. }]` array, or
+  a local union's payload is refused. 0.9.0 split there, compiled `lib` and
+  interpreted `dup`. A `P`-typed parameter and an annotated `Array<P>` keep
+  0.9.0's split, as documented.
+
+  `anAnnotatedValueKeepsZeroNinesRouteButNotGenericInference` covers the
+  annotated side. An annotated `Array<P>`'s `b[0].who()` runs as in 0.9.0,
+  while `lib.id(p)` and `id(p)` over it fail as 0.9.0 did. An unrecorded
+  generation was also possible through a table's entries. `VersionedMapTest`
+  shows that `entrySet()` entries are now immutable copies, and that every
+  other way to change a table is refused or recorded.
+
   **Inherited: an actor in an array.** `lib.mka()[0].hi()`, with `mka`
   returning `Array<A>` for an actor `A`, throws a ClassCastException compiled
   and runs interpreted. A same-file `fn mka() -> Array<A>` does exactly that in
@@ -460,7 +569,7 @@ changes some of these. `direct_map_null` (a missing key through a generic
   - `manyNestedImportsKeepTheOriginCheckBounded`: 1,500 functions, each taking
     a local of a 2,000-struct chain and then importing a module of its own,
     which makes 1,500 generations. It takes about 3 s interpreted. With 3,000
-    such functions it takes 3.2 s and 410 MB, where copies ran out of memory.
+    such functions it takes about 3.4 s and 450 MB, where copies ran out of memory.
 
   `anImportedValueIsReadAsItsOriginsTypesOrRejected` covers ten cases, each on
   both backends:
