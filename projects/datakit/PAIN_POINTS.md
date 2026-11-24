@@ -657,12 +657,18 @@ changes some of these. `direct_map_null` (a missing key through a generic
     - a builtin over one of those.
 
     The array these start from must be one 0.9.0 typed where it was declared:
-    from an array literal, or from an ordinary call returning an array. An
-    array annotated over another variable is not, and neither is `pop(..)`
-    seen through `filter`. Review found all four routes splitting before that
-    was tightened.
+    from an array literal, from an ordinary call returning an array, or from
+    `filter` of such an array, written or not. Examples:
+    - `xs = filter([w], f)`, then `filter(xs, f)`;
+    - `xs: Array<Array<W>> = filter([[w]], g)`, then `pop(xs)`.
 
-    `aCollectionAnnotationOverABuiltinFollowsZeroNinesTyping` checks sixteen
+    These run as in 0.9.0. Two things are not such arrays: an array annotated
+    over another variable, and `pop(..)` seen through `filter`. Review found
+    four routes splitting before that was tightened. The gate at fe1bbe7 then
+    found the tightened rule refusing the `filter` declarations above, which
+    0.9.0 runs.
+
+    `aCollectionAnnotationOverABuiltinFollowsZeroNinesTyping` checks nineteen
     compositions, plain and generic, against 0.9.0's own output. Where 0.9.0
     fails, each is refused on both backends. Where it runs, each gives exactly
     0.9.0's output per backend.
