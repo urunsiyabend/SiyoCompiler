@@ -1,0 +1,2 @@
+datakit: fixtures/adversarial/schema_malformed.json: malformed JSON: json: expected a value at position 13 (end of input)
+datakit: the schema is invalid, nothing was checked

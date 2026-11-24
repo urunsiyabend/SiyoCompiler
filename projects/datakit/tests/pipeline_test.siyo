@@ -1,0 +1,76 @@
+import "std/testing"
+import "pipeline"
+
+struct P { name: string, n: int }
+
+fn people() -> Array<P> {
+    [P { name: "a", n: 3 }, P { name: "b", n: 1 }, P { name: "c", n: 3 }, P { name: "d", n: 2 }, P { name: "e", n: 1 }]
+}
+
+fn names(ps: Array<P>) -> string {
+    mut out = ""
+    for p in ps { out = out + p.name }
+    out
+}
+
+fn keepKeepsOrderAndType() {
+    imut big = pipeline.keep(people(), fn(p: P) -> bool { p.n > 1 })
+    testing.assertEq(names(big), "acd", "kept in order")
+    testing.assertEq(big[1].name, "c", "elements keep their struct")
+    testing.assertEq(toString(len(pipeline.keep(people(), fn(p: P) -> bool { false }))), "0", "none kept")
+}
+
+fn takeStopsAtN() {
+    testing.assertEq(names(pipeline.take(people(), 2)), "ab", "two")
+    testing.assertEq(names(pipeline.take(people(), 0)), "", "zero")
+    testing.assertEq(names(pipeline.take(people(), 99)), "abcde", "more than there are")
+}
+
+fn sortByIsStable() {
+    imut sorted = pipeline.sortBy(people(), fn(x: P, y: P) -> int { x.n - y.n })
+    testing.assertEq(names(sorted), "bedac", "equal elements keep their order")
+    imut down = pipeline.sortBy(people(), fn(x: P, y: P) -> int { y.n - x.n })
+    testing.assertEq(names(down), "acdbe", "descending, still stable")
+    testing.assertEq(toString(len(pipeline.sortBy(pipeline.take(people(), 0), fn(x: P, y: P) -> int { 0 }))), "0", "empty")
+}
+
+fn sortByHandlesALongReversedInput() {
+    mut xs: Array<int> = []
+    for mut i = 3000 i > 0 i = i - 1 { push(xs, i) }
+    // A generic result over ints is erased (only struct type arguments are
+    // trusted), so each element is narrowed where it is compared.
+    imut sorted = pipeline.sortBy(xs, fn(a: int, b: int) -> int { a - b })
+    mut ordered = true
+    for mut i = 1 i < len(sorted) i = i + 1 {
+        imut before: int = sorted[i - 1]
+        imut here: int = sorted[i]
+        if before > here { ordered = false }
+    }
+    testing.assert(ordered, "ascending")
+    testing.assertEq(toString(sorted[0]) + " " + toString(sorted[2999]), "1 3000", "ends")
+}
+
+fn groupByKeepsFirstAppearanceOrder() {
+    imut groups = pipeline.groupBy(people(), fn(p: P) -> string { toString(p.n) })
+    mut out = ""
+    for g in groups { out = out + g.key + ":" + names(g.items) + " " }
+    testing.assertEq(out, "3:ac 1:be 2:d ", "groups")
+    testing.assertEq(groups[0].items[1].name, "c", "a group's items keep their struct")
+}
+
+fn groupByWorksOverPlainStrings() {
+    imut groups = pipeline.groupBy(["x", "y", "x"], fn(s: string) -> string { s })
+    testing.assertEq(toString(len(groups)) + " " + toString(len(groups[0].items)) + " " + groups[0].items[1], "2 2 x", "strings")
+}
+
+fn sumAndCount() {
+    testing.assertEq(toString(pipeline.sumBy(people(), fn(p: P) -> float { p.n * 1.5 })), "15.0", "sum")
+    imut counts = pipeline.countBy(people(), fn(p: P) -> string { toString(p.n) })
+    testing.assertEq(toString(counts["1"]) + toString(counts["2"]) + toString(counts["3"]), "212", "counts")
+    testing.assertEq(toString(pipeline.distinct(["b", "a", "b", "c", "a"])), "[b, a, c]", "distinct")
+}
+
+fn main() {
+    testing.run("pipeline", [keepKeepsOrderAndType, takeStopsAtN, sortByIsStable, sortByHandlesALongReversedInput,
+                             groupByKeepsFirstAppearanceOrder, groupByWorksOverPlainStrings, sumAndCount])
+}

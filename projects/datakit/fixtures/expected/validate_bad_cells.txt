@@ -1,0 +1,20 @@
+line 3, id: must be an integer, got "x"
+line 3, salary: must be a number, got "12x"
+line 3, start: must be a date written YYYY-MM-DD, got "2021-02-30"
+line 3, remote: must be true or false, got "yes"
+line 4, id: must be at least 1, got 0
+line 4, name: is required
+line 4, dept: must be one of eng, ops, sales, got "hr"
+line 4, salary: must be at least 0, got -5.0
+line 4, start: must be a date written YYYY-MM-DD, got "2021-13-01"
+line 4, remote: must be true or false, got "TRUE"
+line 5, salary: must be a number, got "NaN"
+line 5, start: must be a date written YYYY-MM-DD, got "20210101"
+line 7: has 3 fields, the header has 6
+line 8, id: must be an integer, got "9223372036854775808"
+line 8, salary: must be a number, got "1e999"
+line 8, start: must be a date written YYYY-MM-DD, got "0000-01-01"
+line 9, id: must be at least 1, got -9223372036854775808
+line 9, salary: must be a number, got "Infinity"
+line 9, start: must be a date written YYYY-MM-DD, got " 2020-01-01"
+invalid: 19 problems, 6 of 7 rows rejected

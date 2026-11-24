@@ -146,7 +146,7 @@ public class ModuleHandler {
 
     // --- Import handling ---
 
-    public BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
+    private static String importedModuleName(ImportStatementSyntax syntax) {
         String moduleName = (String) syntax.getModuleName().getValue();
         if (moduleName == null) {
             moduleName = syntax.getModuleName().getData();
@@ -155,6 +155,84 @@ public class ModuleHandler {
                 moduleName = moduleName.substring(1, moduleName.length() - 1);
             }
         }
+        return moduleName;
+    }
+
+    private final List<String> _importOrder = new ArrayList<>();
+    private final List<String> _ownMethods = new ArrayList<>();
+    private boolean _root;
+
+    /** Marks the handler of the file being run, whose imports place modules in initialisation order. */
+    public void setRoot(boolean root) { _root = root; }
+
+    // Modules an import inside a function will bring in, compiled ahead by
+    // anticipateImport; a failed one maps to null and is reported once.
+    private final Map<String, ModuleSymbol> _anticipated = new HashMap<>();
+    // What those imports bring in, theirs included, so a file importing this one
+    // inside a function learns it too: {name, declaring file}.
+    private final List<String[]> _anticipatedMethods = new ArrayList<>();
+    private final List<String[]> _anticipatedStructs = new ArrayList<>();
+
+    private void anticipateMethod(String qualifiedName, String module) {
+        _anticipatedMethods.add(new String[]{qualifiedName, module});
+        _typeResolver.recordMethod(qualifiedName, module, true);
+    }
+
+    private final List<StructSymbol> _anticipatedContested = new ArrayList<>();
+
+    private void anticipateContested(StructSymbol struct) {
+        if (struct == null) return;
+        _anticipatedContested.add(struct);
+        _typeResolver.recordImportedContested(struct.getName(), struct);
+    }
+
+    private void anticipateStruct(String name, String module) {
+        _anticipatedStructs.add(new String[]{name, module});
+        _typeResolver.recordFutureStruct(name, module);
+    }
+
+    /**
+     * Compiles the module an import nested in a function or lambda will bring in,
+     * before any body of this file is bound, and records the methods and struct
+     * declarations it will add. The interpreter finds a method by name once that
+     * import has run, whichever order the code was bound in, so a struct its
+     * methods will contest is contested from the start for what 0.10.0 infers.
+     * Nothing is declared into scope: the import itself still does that.
+     */
+    public void anticipateImport(ImportStatementSyntax syntax) {
+        String moduleName = importedModuleName(syntax);
+        if (moduleName == null) return;
+        String moduleFilePath = resolveModulePath(moduleName);
+        if (moduleFilePath == null || _anticipated.containsKey(moduleFilePath)) return;
+        if (_registry != null && _registry.isInProgress(moduleFilePath)) return;
+        ModuleSymbol module = _registry != null && _registry.isCompiled(moduleFilePath)
+                ? _registry.getModule(moduleFilePath)
+                : compileModule(moduleName, moduleFilePath);
+        _anticipated.put(moduleFilePath, module);
+        if (module == null) return;
+        for (FunctionSymbol func : module.getFunctions()) {
+            if (func.getName().contains(".")) anticipateMethod(func.getName(), func.getOriginModule());
+        }
+        // Its impl blocks, on its own structs or another module's: once the
+        // import has run, the interpreter may find any of them by name.
+        for (String method : module.getOwnMethods()) anticipateMethod(method, moduleFilePath);
+        for (FunctionSymbol inherited : module.getInheritedMethods().keySet()) {
+            anticipateMethod(inherited.getName(), inherited.getOriginModule());
+        }
+        for (var entry : module.getStructs().entrySet()) {
+            if (module.exports(entry.getKey())) anticipateStruct(entry.getKey(), entry.getValue().getOriginModule());
+        }
+        // And what its own functions will import, in turn.
+        for (String[] method : module.getAnticipatedMethods()) anticipateMethod(method[0], method[1]);
+        for (String[] struct : module.getAnticipatedStructs()) anticipateStruct(struct[0], struct[1]);
+        for (String name : module.getDeclaredContested()) {
+            if (module.getDeclaredStructs() != null) anticipateContested(module.getDeclaredStructs().get(name));
+        }
+        for (StructSymbol contested : module.getAnticipatedContested()) anticipateContested(contested);
+    }
+
+    public BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
+        String moduleName = importedModuleName(syntax);
 
         // An alias is part of the identity of an import: the same module may be
         // reached under its own name and under an alias in the same file.
@@ -180,7 +258,14 @@ public class ModuleHandler {
 
         // Get or compile the module
         ModuleSymbol module;
-        if (_registry != null && _registry.isCompiled(moduleFilePath)) {
+        if (_anticipated.containsKey(moduleFilePath)) {
+            // Compiled ahead; a failure was reported then.
+            module = _anticipated.get(moduleFilePath);
+            if (module == null) {
+                _diagnostics.markModuleFailed(shortModuleName(moduleName));
+                return new BoundExpressionStatement(new BoundLiteralExpression(0));
+            }
+        } else if (_registry != null && _registry.isCompiled(moduleFilePath)) {
             module = _registry.getModule(moduleFilePath);
         } else {
             module = compileModule(moduleName, moduleFilePath);
@@ -189,6 +274,15 @@ public class ModuleHandler {
                 return new BoundExpressionStatement(new BoundLiteralExpression(0));
             }
         }
+
+        // Its impl blocks' methods, registered before anything runs: a duplicate
+        // of one is the same for both backends, unless it can win later.
+        for (String method : module.getOwnMethods()) _typeResolver.recordMethod(method, moduleFilePath, false);
+
+        // The order this file's imports were bound in is the order its modules
+        // are initialised in, whichever was compiled first.
+        if (!_importOrder.contains(moduleFilePath)) _importOrder.add(moduleFilePath);
+        if (_root && _registry != null) _registry.activate(moduleFilePath);
 
         // Register imported functions with qualified name: "moduleName.funcName"
         // For nested paths like "util/str", use the last segment as qualifier
@@ -226,6 +320,14 @@ public class ModuleHandler {
             importedFunc.setReturnElementStructName(func.getReturnElementStructName());
             importedFunc.setJvmMethodName(func.getName().replace('.', '$'));
             importedFunc.setOriginModule(func.getOriginModule());
+            // A generic function is generic from any module: the call site
+            // works its result type out from what the declaration wrote.
+            importedFunc.setTypeParameters(func.getTypeParameters());
+            importedFunc.setDeclaredReturnTypeName(func.getDeclaredReturnTypeName());
+            // The names its return type is written with mean the exporter's types
+            // as declared, whatever an import inside one of its functions did later.
+            importedFunc.setReturnOrigin(module.getDeclaredStructs(), module.getDeclaredUnions(),
+                    module.getDeclaredInterfaces(), module.getDeclaredContested());
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
@@ -250,13 +352,24 @@ public class ModuleHandler {
             inherited.setReturnElementStructName(source.getReturnElementStructName());
             inherited.setJvmMethodName(source.getJvmMethodName());
             inherited.setOriginModule(source.getOriginModule());
+            inherited.setTypeParameters(source.getTypeParameters());
+            inherited.setDeclaredReturnTypeName(source.getDeclaredReturnTypeName());
+            if (source.getReturnOriginStructs() != null) {
+                inherited.setReturnOrigin(source.getReturnOriginStructs(), source.getReturnOriginUnions(),
+                        source.getReturnOriginInterfaces(), source.getReturnOriginContested());
+            } else {
+                inherited.setReturnOrigin(module.getDeclaredStructs(), module.getDeclaredUnions(),
+                        module.getDeclaredInterfaces(), module.getDeclaredContested());
+            }
             if (_scope.tryDeclareFunction(inherited) && entry.getValue() != null) {
                 _functionBodies.put(inherited, entry.getValue());
             }
+            _typeResolver.recordMethod(source.getName(), source.getOriginModule(), false);
         }
 
         // Module-level variables are exported as module.name, reading the static
         // field on the module's own class.
+        Map<VariableSymbol, VariableSymbol> structDerivedExports = new java.util.LinkedHashMap<>();
         for (var entry : module.getVariables().entrySet()) {
             String qualifiedName = qualifier + "." + entry.getKey();
             if (!module.exports(entry.getKey())) {
@@ -267,6 +380,7 @@ public class ModuleHandler {
             VariableSymbol imported = new VariableSymbol(
                     qualifiedName, source.isReadOnly(), source.getType());
             imported.setOwner(className, entry.getKey());
+            if (source.isStructDerived()) structDerivedExports.put(imported, source);
             _scope.tryDeclare(imported);
         }
 
@@ -277,6 +391,32 @@ public class ModuleHandler {
                 continue;
             }
             _structTypes.put(entry.getKey(), entry.getValue());
+        }
+
+        // A struct the module found contested is contested here too: its methods
+        // came with it, and the interpreter finds the refused ones by name.
+        for (String name : module.getDeclaredContested()) {
+            if (module.getDeclaredStructs() != null) {
+                _typeResolver.recordImportedContested(name, module.getDeclaredStructs().get(name));
+            }
+        }
+
+        // A struct-derived value's type travels with the exporter's own tables, as
+        // they stood where the value was declared there, so an import inside one of
+        // the exporter's functions cannot change them. Whether those names still
+        // mean the same types here is checked where the value is used
+        // (TypeResolver.originHolds), so a later import cannot be missed.
+        for (var export : structDerivedExports.entrySet()) {
+            VariableSymbol source = export.getValue();
+            export.getKey().setDeclaredTypeName(source.getDeclaredTypeName());
+            export.getKey().setStructDerived(true);
+            if (source.getOriginStructs() != null) {
+                export.getKey().setOriginStructs(source.getOriginStructs());
+                export.getKey().setOriginTypes(source.getOriginUnions(), source.getOriginInterfaces());
+            } else {
+                export.getKey().setOriginStructs(module.getStructs());
+                export.getKey().setOriginTypes(module.getUnions(), module.getInterfaces());
+            }
         }
 
         // Register imported enums so EnumName.Member remains usable across modules.
@@ -325,6 +465,7 @@ public class ModuleHandler {
                 importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
                 importedImpl.setOriginModule(func.getOriginModule());
                 _scope.tryDeclareFunction(importedImpl);
+                _typeResolver.recordMethod(func.getName(), func.getOriginModule(), false);
                 BoundBlockStatement body = module.getFunctionBodies().get(func);
                 if (body != null) {
                     _functionBodies.put(importedImpl, body);
@@ -589,6 +730,15 @@ public class ModuleHandler {
             module.setUnions(new java.util.LinkedHashMap<>(moduleBinder.getModuleHandler().getUnionTypes()));
             module.setInterfaces(new java.util.LinkedHashMap<>(
                     moduleBinder.getTypeResolver().getInterfaceTypes()));
+            module.setDeclaredTables(moduleBinder.getTypeResolver().declaredStructs(),
+                    moduleBinder.getTypeResolver().declaredUnions(),
+                    moduleBinder.getTypeResolver().declaredInterfaces(),
+                    moduleBinder.getTypeResolver().declaredContested());
+            module.setImportOrder(List.copyOf(moduleBinder.getModuleHandler()._importOrder));
+            module.setOwnMethods(List.copyOf(moduleBinder.getModuleHandler()._ownMethods));
+            module.setAnticipated(List.copyOf(moduleBinder.getModuleHandler()._anticipatedMethods),
+                    List.copyOf(moduleBinder.getModuleHandler()._anticipatedStructs),
+                    List.copyOf(moduleBinder.getModuleHandler()._anticipatedContested));
             module.setVariables(collectTopLevelVariables(topLevelBlock, className));
             module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
             module.setImportedClassNames(
@@ -710,6 +860,8 @@ public class ModuleHandler {
         String name = syntax.getIdentifier().getData();
         if (_structTypes.containsKey(name)) return;
 
+        // A field written over a type parameter is erased, as a sum type's payload is.
+        _typeResolver.getTypeParameters().addAll(syntax.getTypeParameters());
         java.util.LinkedHashMap<String, Class<?>> fields = new java.util.LinkedHashMap<>();
         java.util.LinkedHashMap<String, String> fieldTypeNames = new java.util.LinkedHashMap<>();
         for (ParameterSyntax field : syntax.getFields()) {
@@ -720,7 +872,10 @@ public class ModuleHandler {
             fields.put(fieldName, fieldType);
             fieldTypeNames.put(fieldName, typeName);
         }
-        _structTypes.put(name, new StructSymbol(name, fields, fieldTypeNames));
+        StructSymbol struct = new StructSymbol(name, fields, fieldTypeNames);
+        struct.setTypeParameters(syntax.getTypeParameters());
+        struct.setOriginModule(_filePath);
+        _structTypes.put(name, struct);
     }
 
     public void registerImplDeclaration(ImplDeclarationSyntax syntax) {
@@ -771,6 +926,8 @@ public class ModuleHandler {
                 }
             }
             _scope.tryDeclareFunction(func);
+            _typeResolver.recordMethod(qualifiedName, _filePath, true);
+            _ownMethods.add(qualifiedName);
         }
     }
 

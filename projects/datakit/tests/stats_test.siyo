@@ -1,0 +1,91 @@
+import "std/testing"
+import "model"
+import "stats"
+import "pipeline"   // for Group, which Profile.top holds (PAIN_POINTS G11)
+import "helpers"
+
+fn groupsOf(data: string, by: string, sum: string) -> Array<GroupStat> {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "k", "type": "int"}, {"name": "t", "type": "string"},
+        {"name": "n", "type": "int"}, {"name": "x", "type": "float"}]}""")
+    imut c = helpers.csvOf(s, data)
+    imut column = s.columns[if by == "k" { 0 } else { 1 }]
+    match stats.group(c.records, column, sum) {
+        Totals(gs) => { return gs },
+        Overflow(why) => { throw why }
+    }
+}
+
+fn line(g: GroupStat) -> string {
+    (if model.isMissing(g.key) { "-" } else { model.text(g.key) }) + ":" + toString(g.count) + "/" + toString(g.present)
+        + " " + model.text(g.sum) + " " + model.text(g.min) + " " + model.text(g.max) + " " + model.text(g.mean)
+}
+
+fn all(gs: Array<GroupStat>) -> string {
+    mut out = ""
+    for g in gs { out = out + line(g) + "; " }
+    out
+}
+
+fn groupsAreOrderedByValueWithMissingLast() {
+    imut gs = groupsOf("k,t,n,x\n10,a,1,\n9,b,2,\n,c,3,\n10,d,4,\n", "k", "n")
+    testing.assertEq(all(gs), "9:1/1 2 2 2 2.0; 10:2/2 5 1 4 2.5; -:1/1 3 3 3 3.0; ", "numeric order, not text")
+}
+
+fn anIntSumStaysExactAndAFloatSumIsAFloat() {
+    imut ints = groupsOf("k,t,n,x\n1,a,9007199254740993,\n1,a,1,\n", "t", "n")
+    testing.assertEq(model.text(ints[0].sum), "9007199254740994", "beyond what a float holds exactly")
+    imut floats = groupsOf("k,t,n,x\n1,a,,0.1\n1,a,,0.2\n1,b,,\n", "t", "x")
+    testing.assertEq(all(floats), "a:2/2 0.30000000000000004 0.1 0.2 0.15000000000000002; b:1/0    ; ", "floats, and a group with nothing to sum")
+}
+
+fn anOverflowingSumIsReportedNotWrapped() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "t", "type": "string"}, {"name": "n", "type": "int"}]}""")
+    imut c = helpers.csvOf(s, "t,n\na,9223372036854775807\na,1\nb,-9223372036854775808\nb,-1\n")
+    match stats.group(c.records, s.columns[0], "n") {
+        Totals(gs) => testing.assert(false, "expected an overflow"),
+        Overflow(why) => testing.assertEq(why, "the sum of n does not fit a 64-bit integer", "message")
+    }
+}
+
+fn countsAloneLeaveTheRestMissing() {
+    imut gs = groupsOf("k,t,n,x\n1,b,,\n2,a,,\n3,b,,\n4,,,\n", "t", "")
+    testing.assertEq(all(gs), "a:1/0    ; b:2/0    ; -:1/0    ; ", "counts")
+}
+
+fn aProfileRanksFrequentValuesThenByValue() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "t", "type": "string"}, {"name": "d", "type": "date"}, {"name": "b", "type": "bool"}]}""")
+    imut c = helpers.csvOf(s, "t,d,b\nz,2024-03-01,true\ny,2020-01-01,\nz,,false\ny,2021-06-30,true\nx,,\nw,,\n")
+    match stats.profile(s, c.records) {
+        TooLarge(why) => testing.assert(false, why),
+        Profiles(ps) => {
+            mut top = ""
+            for g in ps[0].top { top = top + g.key + toString(len(g.items)) + " " }
+            testing.assertEq(top, "y2 z2 w1 ", "count, then value")
+            testing.assertEq(toString(ps[0].distinct) + " " + ps[1].earliest + " " + ps[1].latest + " " + toString(ps[1].missing),
+                "4 2020-01-01 2024-03-01 3", "dates")
+            testing.assertEq(toString(ps[2].trues) + " " + toString(ps[2].falses) + " " + toString(ps[2].distinct), "2 1 2", "bools")
+        }
+    }
+}
+
+fn tinyFloatsAreSeparateGroupsAndAnInfiniteSumIsAnError() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "x", "type": "float"}, {"name": "t", "type": "string"}]}""")
+    imut c = helpers.csvOf(s, "x,t\n1e-18,a\n2e-18,a\n0.0,a\n-0.0,a\n5e-324,a\n")
+    match stats.group(c.records, s.columns[0], "") {
+        Totals(gs) => testing.assertEq(toString(len(gs)) + " " + model.text(gs[0].key) + " " + toString(gs[0].count),
+            "4 0.0 2", "0.0 and -0.0 are one group, the tiny ones each their own"),
+        Overflow(why) => testing.assert(false, why)
+    }
+    imut big = helpers.csvOf(s, "x,t\n1e308,a\n1e308,a\n")
+    match stats.group(big.records, s.columns[1], "x") {
+        Totals(gs) => testing.assert(false, "expected an overflow"),
+        Overflow(why) => testing.assertEq(why, "the sum of x is too large for a float", "message")
+    }
+}
+
+fn main() {
+    testing.run("stats", [groupsAreOrderedByValueWithMissingLast, anIntSumStaysExactAndAFloatSumIsAFloat,
+                          anOverflowingSumIsReportedNotWrapped, countsAloneLeaveTheRestMissing,
+                          aProfileRanksFrequentValuesThenByValue,
+                          tinyFloatsAreSeparateGroupsAndAnInfiniteSumIsAnError])
+}

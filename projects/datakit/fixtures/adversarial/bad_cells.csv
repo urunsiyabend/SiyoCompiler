@@ -1,0 +1,9 @@
+id,name,dept,salary,start,remote
+1,Ada,eng,100,2020-01-01,true
+x,Bob,eng,12x,2021-02-30,yes
+0,,hr,-5,2021-13-01,TRUE
+3,"multi
+line name",ops,NaN,20210101,false
+4,Dan,ops
+9223372036854775808,Eve,sales,1e999,0000-01-01,
+-9223372036854775808,Fay,sales,Infinity, 2020-01-01,true

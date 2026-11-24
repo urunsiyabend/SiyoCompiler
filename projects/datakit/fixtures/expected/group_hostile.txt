@@ -1,0 +1,4 @@
+name                          count
+bell\u0007 esc\u001b[31m red  1
+c1 \u009b x                   1
+rtl \u202egnp.exe             1

@@ -1,0 +1,144 @@
+// The schema file: what columns a data file has and what each may hold.
+//
+//   {"name": "staff",
+//    "columns": [{"name": "id", "type": "int", "required": true, "min": 1},
+//                {"name": "dept", "type": "string", "values": ["eng", "ops"]}],
+//    "unknown": "reject"}
+
+import "std/json"
+import "model"
+
+pub type Loaded = Ok(Schema) | Rejected(Array<string>)
+
+pub fn parse(text: string, file: string) -> Loaded {
+    match json.parseValue(text) {
+        Malformed(why) => Rejected([file + ": malformed JSON: " + why]),
+        Document(doc) => read(doc, file)
+    }
+}
+
+fn read(doc: object, file: string) -> Loaded {
+    mut problems: Array<string> = []
+    if typeOf(doc) != "map" {
+        return Rejected([file + ": a schema must be an object, got " + typeOf(doc)])
+    }
+    imut m: map = doc
+    for k in m {
+        imut key = toString(k)
+        if key != "name" && key != "columns" && key != "unknown" {
+            push(problems, file + ": unknown field \"" + key + "\"")
+        }
+    }
+    mut name = ""
+    if typeOf(m["name"]) == "string" { name = toString(m["name"]) }
+    else if typeOf(m["name"]) != "null" { push(problems, file + ": \"name\" must be a string") }
+
+    mut rejectUnknown = true
+    imut unknownKind = typeOf(m["unknown"])
+    if unknownKind == "string" && toString(m["unknown"]) == "ignore" { rejectUnknown = false }
+    else if !(unknownKind == "null" || (unknownKind == "string" && toString(m["unknown"]) == "reject")) {
+        push(problems, file + ": \"unknown\" must be \"reject\" or \"ignore\"")
+    }
+
+    mut columns: Array<Column> = []
+    if typeOf(m["columns"]) != "array" {
+        push(problems, file + ": \"columns\" must be an array of columns")
+        return Rejected(problems)
+    }
+    imut raw: object[] = m["columns"]
+    if len(raw) == 0 { push(problems, file + ": \"columns\" is empty") }
+    mut seen: Set<string> = #{}
+    mut i = 0
+    for entry in raw {
+        imut place = file + ": columns[" + toString(i) + "]"
+        i += 1
+        // A repeated name is reported whether or not either declaration is valid.
+        if typeOf(entry) == "map" {
+            imut fields: map = entry
+            if typeOf(fields["name"]) == "string" {
+                imut written = toString(fields["name"])
+                if seen.has(written) { push(problems, place + ": column \"" + written + "\" is declared twice") }
+                seen.add(written)
+            }
+        }
+        match readColumn(entry, place, problems) {
+            Some(c) => push(columns, c),
+            None => {}
+        }
+    }
+    if len(problems) > 0 { return Rejected(problems) }
+    Ok(Schema { name: name, columns: columns, rejectUnknown: rejectUnknown })
+}
+
+fn readColumn(entry: object, place: string, problems: Array<string>) -> Option<Column> {
+    if typeOf(entry) != "map" {
+        push(problems, place + ": a column must be an object, got " + typeOf(entry))
+        return None
+    }
+    imut c: map = entry
+    imut before = len(problems)
+    for k in c {
+        imut key = toString(k)
+        if key != "name" && key != "type" && key != "required" && key != "min" && key != "max" && key != "values" {
+            push(problems, place + ": unknown field \"" + key + "\"")
+        }
+    }
+    mut name = ""
+    if typeOf(c["name"]) == "string" && trim(toString(c["name"])) != "" { name = toString(c["name"]) }
+    else { push(problems, place + ": a column needs a non-empty \"name\"") }
+
+    mut kind = ""
+    if typeOf(c["type"]) == "string" && model.isKind(toString(c["type"])) { kind = toString(c["type"]) }
+    else { push(problems, place + ": \"type\" must be int, float, string, bool or date") }
+
+    mut required = false
+    imut requiredKind = typeOf(c["required"])
+    if requiredKind == "bool" { required = c["required"] == true }
+    else if requiredKind != "null" { push(problems, place + ": \"required\" must be true or false") }
+
+    imut lo = bound(c, "min", kind, place, problems)
+    imut hi = bound(c, "max", kind, place, problems)
+
+    mut allowed: Array<string> = []
+    imut valuesKind = typeOf(c["values"])
+    if valuesKind == "array" {
+        if kind != "string" { push(problems, place + ": \"values\" applies only to a string column") }
+        imut vs: object[] = c["values"]
+        for v in vs {
+            if typeOf(v) == "string" { push(allowed, toString(v)) }
+            else { push(problems, place + ": \"values\" must hold strings, got " + typeOf(v)) }
+        }
+        if len(vs) == 0 { push(problems, place + ": \"values\" is empty, so no value could pass") }
+    } else if valuesKind != "null" {
+        push(problems, place + ": \"values\" must be an array of strings")
+    }
+
+    if len(problems) > before { return None }
+    imut column = Column {
+        name: name, kind: kind, required: required,
+        min: lo, max: hi, allowed: allowed
+    }
+    if !model.isMissing(column.min) && !model.isMissing(column.max) && model.compare(column.min, column.max) > 0 {
+        push(problems, place + ": \"min\" is greater than \"max\"")
+        return None
+    }
+    Some(column)
+}
+
+// A bound as written: an integer stays an exact long, so 9007199254740993 is
+// not rounded to the float 9007199254740992.
+fn bound(c: map, key: string, kind: string, place: string, problems: Array<string>) -> Value {
+    imut k = typeOf(c[key])
+    if k == "null" { return Missing }
+    if kind != "int" && kind != "float" {
+        push(problems, place + ": \"" + key + "\" applies only to a number column")
+        return Missing
+    }
+    if k == "int" || k == "long" { return IntV(parseLong(toString(c[key]))) }
+    if k == "float" {
+        imut x: float = c[key]
+        return FloatV(x)
+    }
+    push(problems, place + ": \"" + key + "\" must be a number, got " + k)
+    Missing
+}

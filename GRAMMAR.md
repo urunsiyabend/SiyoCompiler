@@ -1,4 +1,4 @@
-# Siyo Language Grammar (0.9.0)
+# Siyo Language Grammar (0.10.0)
 
 ## Lexical Grammar
 
@@ -155,7 +155,15 @@ type_parameters
     // is where each one is known, and that is where the result gets its type.
 
 struct_declaration
-    : 'struct' IDENTIFIER '{' field_list '}'
+    : 'struct' IDENTIFIER type_parameters? '{' field_list '}'
+    // A struct may be generic: its fields may use its type parameters,
+    // including inside type arguments:
+    //     struct Group<T> { key: string, items: Array<T> }
+    // A literal takes its type arguments from its fields, so
+    // Group { key: "a", items: rows } with rows: Array<Row> is a Group<Row>,
+    // and an annotation may state them: imut g: Group<Row> = Group { ... }.
+    // A field reads at the value's type arguments: g.items[0] is a Row, and a
+    // Box<float> given 3 holds 3.0. Written without arguments, Group is erased.
 
 field_list
     : field (',' field)*
@@ -460,8 +468,39 @@ Enum members are integer-backed and referenced as `EnumName.Member`.
 - A type may be written with type arguments: `Array<T>` holds what `T[]` holds,
   `Map<K, V>` indexes to a `V`, and `Set<T>` holds a `T`. Type arguments nest
 - A generic declaration is erased: `Option<int>` and `Option<string>` are the
-  same declared type, and a generic function is compiled once. The call site is
-  where a type parameter is known, so that is where the result gets its type
+  same declared type, and a generic function or struct is compiled once. The call
+  site is where a type parameter is known, and what it learns is a name, not a
+  new class for the value. The value of a generic call's result, a payload or
+  an array element stays what it was in 0.9.0, erased where 0.9.0 erased it:
+  - `keep(rows, p)` is an `Array<Row>`, and `Some(r)` on an `Option<Row>` binds
+    a `Row`, through arrays, maps, sets, generic structs and function types,
+    and from another module too. A struct or sum type argument names what the
+    value is, so `keep(rows, p)[0].name` reads a member. The member read casts,
+    so a value of another kind fails there, on both backends alike.
+  - A number, bool or string argument, or a container of them, is erased in a
+    result or payload. `wrap(1)` holds erased values, and `Some(v)` on an
+    `Option<int>` binds an erased `v`; narrow it with a typed variable
+    (`imut k: int = v`).
+  - An erased or null argument, or two that disagree (`both(1, 2.5)`), erases
+    the parameter.
+  - A function whose result is the bare parameter keeps 0.9.0's class for it,
+    so `identity(5) + 1` still adds.
+- A generic struct keeps its type arguments, whatever they are: `mk(1.5)` is a
+  `Box<float>`, and an array literal of them is an `Array<Box<float>>`. Its
+  fields are read at them (`b.value * 2`, `b.value["a"]` on a
+  `Box<Map<string, int>>`), and every read at a declared type is checked the
+  same way on both backends: a null, or a value of another kind put there
+  through an erased path, fails rather than reading as the wrong thing. A field
+  assigned on a generic struct is checked, and a literal is widened as at
+  construction. A generic struct's type arguments follow it through a plain
+  alias, `filter`, a list literal and another module's generic call
+- A value returned from a function declaring a type is checked on both backends:
+  an erased value of another shape fails at the return
+- A payload widens to its declared number type as a parameter does
+- A signature may name a struct, sum type or interface declared further down
+  the file
+- A `match` whose arms give values of different types is an `object` where it
+  ends a function returning `object`; anywhere else its arms must agree
 - A value declared as an interface is some struct that implements it. A method
   call on one dispatches on the struct it turns out to be; every implementor is
   known when the call is compiled
@@ -739,6 +778,11 @@ io.copyFile(src, dst)       // binary-safe file copy
 io.mkdir(path)
 io.delete(path)
 io.eprintln(msg)            // writes a line to standard error
+io.writeNew(path, content)  // create a file that must not exist, exclusively: an existing
+                            // file or symbolic link is never opened; raises "exists: PATH"
+                            // or "cannot write: PATH"; a failed write leaves its partial file
+io.readText(path)           // the file exactly as written (UTF-8, line endings kept);
+                            // readFile reads lines and joins them with "\n"
 ```
 
 ### `std/path`
@@ -771,6 +815,10 @@ strings.lastIndexOf(s, sub)  // index of last occurrence, -1 if absent
 strings.chars(s)             // split into individual characters
 strings.lines(s)             // split by newline
 strings.isInt(s)             // whether parseInt reads all of s; parseInt answers 0 otherwise
+strings.isFloat(s)           // whether s is a finite decimal ("-2.5", "1e3", ".5") and nothing else;
+                             // linear in the length of s
+strings.formatFloat(x, d)    // x with exactly d decimals (0 to 17), rounded half up as it reads:
+                             // formatFloat(2.675, 2) is "2.68"; NaN and the infinities as Java names them
 ```
 
 Built-in string functions (no import needed): `len`, `substring`, `contains`, `indexOf`, `startsWith`, `endsWith`, `replace`, `trim`, `toUpper`, `toLower`, `split`, `chr`, `ord`.
@@ -821,6 +869,28 @@ notation are decoded, and a byte order mark is ignored. Beyond that:
 and a `string` always as a string — `"123"` stays `"123"`. A struct is written by
 its fields and a set as an array. Every character below U+0020 in a string is
 escaped, so the output is valid JSON whatever the text holds.
+
+### `std/csv`
+
+```siyo
+import "std/csv"
+
+pub struct CsvRow { line: int, cells: Array<string>, blank: bool }
+type CsvResult = Table(Array<CsvRow>) | BadCsv(string)
+
+csv.parse(text)         // RFC 4180 → Table(rows) or BadCsv("line N: ...")
+csv.formatRow(cells)    // one row as a line, quoting only the cells that need it
+```
+
+A quoted field may hold commas, line breaks and doubled quotes. CRLF, LF and a
+lone CR end a line, and a byte order mark is skipped. Each row carries the line
+it starts on. An unterminated quote, a quote inside an unquoted field and text
+after a closing quote are reported with their line. Rows of different lengths
+are returned as they are. `blank` marks a line with nothing on it, which a
+caller may skip; a quoted `""` is a record with one empty field, and
+`formatRow([""])` writes it quoted so it reads back. Read the file with
+`io.readText` to keep line breaks
+inside quoted fields as written. `std/csv` is written in Siyo.
 
 ### `std/testing`
 

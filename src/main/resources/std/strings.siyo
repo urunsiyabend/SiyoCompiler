@@ -34,6 +34,20 @@ pub fn isInt(s: string) -> bool {
     return SiyoRuntime.isInt(s)
 }
 
+// Whether s is a finite decimal number with nothing around it: "-2.5", "1e3", ".5".
+// parseFloat answers 0.0 for anything it cannot read, and also reads "NaN",
+// "Infinity" and " 1 ", which a data file does not mean as numbers.
+pub fn isFloat(s: string) -> bool {
+    return SiyoRuntime.isFloat(s)
+}
+
+// x written with exactly `digits` decimals, rounded half up as it reads:
+// formatFloat(2.0 / 3.0, 2) is "0.67" and formatFloat(2.675, 2) is "2.68".
+// Raises for a digit count outside 0 to 17.
+pub fn formatFloat(x: float, digits: int) -> string {
+    return SiyoRuntime.formatFloat(x, digits)
+}
+
 pub fn padLeft(s: string, width: int, ch: string) -> string {
     mut result = s
     while len(result) < width {

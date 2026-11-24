@@ -1,0 +1,161 @@
+// Aggregates over valid records: groups with counts and sums, and a profile
+// of every column.
+
+import "model"
+import "pipeline"
+
+pub struct GroupStat {
+    key: Value,          // the grouping column's value; Missing is a group of its own
+    count: int,
+    present: int,        // records with a value in the summed column
+    sum: Value,          // IntV for an int column, FloatV for a float one, Missing when nothing to sum
+    min: Value,
+    max: Value,
+    mean: Value          // FloatV, or Missing when present is 0
+}
+
+imut LONG_MAX = 9223372036854775807L
+
+pub type Summed = Totals(Array<GroupStat>) | Overflow(string)
+
+// One group per distinct value of `by`, ordered by that value, Missing last.
+// `sum` names a number column, or is "" for counts alone.
+pub fn group(records: Array<Record>, by: Column, sum: string) -> Summed {
+    imut name = by.name
+    imut groups = pipeline.groupBy(records, fn(r: Record) -> string { keyOf(r.cells[name]) })
+    imut ordered = pipeline.sortBy(groups, fn(a: Group<Record>, b: Group<Record>) -> int {
+        model.compare(a.items[0].cells[name], b.items[0].cells[name])
+    })
+    mut out: Array<GroupStat> = []
+    for g in ordered {
+        imut key = g.items[0].cells[name]
+        if sum == "" {
+            push(out, GroupStat { key: key, count: len(g.items), present: 0, sum: Missing, min: Missing, max: Missing, mean: Missing })
+            continue
+        }
+        match summarise(g.items, sum) {
+            Overflow(why) => { return Overflow(why) },
+            Totals(one) => {
+                imut s = one[0]
+                push(out, GroupStat { key: key, count: len(g.items), present: s.present, sum: s.sum, min: s.min, max: s.max, mean: s.mean })
+            }
+        }
+    }
+    Totals(out)
+}
+
+// A key that tells every value apart, including a missing one from an empty
+// string and the number 1 from the text "1".
+fn keyOf(v: Value) -> string {
+    match v {
+        IntV(n) => "i" + toString(n),
+        // Lossless, so 1e-18 and 2e-18 are two groups; -0.0 equals 0.0.
+        FloatV(x) => if x == 0.0 { "f0.0" } else { "f" + model.plain(x) },
+        Text(s) => "t" + s,
+        Flag(b) => if b { "b1" } else { "b0" },
+        Missing => "m"
+    }
+}
+
+// Sum, min, max and mean of one column over some records, as one GroupStat.
+fn summarise(records: Array<Record>, column: string) -> Summed {
+    mut present = 0
+    mut intSum: long = 0
+    mut floatSum = 0.0
+    mut isInt = true
+    mut min: Value = Missing
+    mut max: Value = Missing
+    for r in records {
+        imut v = r.cells[column]
+        if model.isMissing(v) { continue }
+        present += 1
+        match v {
+            IntV(n) => {
+                if (n > 0 && intSum > LONG_MAX - n) || (n < 0 && intSum < (0L - LONG_MAX - 1L) - n) {
+                    return Overflow("the sum of " + column + " does not fit a 64-bit integer")
+                }
+                intSum += n
+            },
+            FloatV(x) => {
+                isInt = false
+                floatSum += x
+            },
+            _ => {}
+        }
+        if model.isMissing(min) || model.compare(v, min) < 0 { min = v }
+        if model.isMissing(max) || model.compare(v, max) > 0 { max = v }
+    }
+    if present == 0 {
+        return Totals([GroupStat { key: Missing, count: len(records), present: 0, sum: Missing, min: Missing, max: Missing, mean: Missing }])
+    }
+    // A float sum past the largest float is infinite: an error, not a value.
+    if !isInt && !(floatSum - floatSum == 0.0) {
+        return Overflow("the sum of " + column + " is too large for a float")
+    }
+    imut total: Value = if isInt { IntV(intSum) } else { FloatV(floatSum) }
+    imut mean = model.number(total) / present
+    Totals([GroupStat { key: Missing, count: len(records), present: present, sum: total, min: min, max: max, mean: FloatV(mean) }])
+}
+
+pub struct Profile {
+    column: Column,
+    present: int,
+    missing: int,
+    distinct: int,
+    stats: GroupStat,             // numbers: sum, min, max, mean
+    earliest: string,             // dates
+    latest: string,
+    trues: int,                   // bools
+    falses: int,
+    top: Array<Group<string>>     // strings: the three most frequent values, as groups of themselves
+}
+
+pub type Profiled = Profiles(Array<Profile>) | TooLarge(string)
+
+pub fn profile(s: Schema, records: Array<Record>) -> Profiled {
+    mut out: Array<Profile> = []
+    for c in s.columns {
+        imut name = c.name
+        mut present = 0
+        mut trues = 0
+        mut falses = 0
+        mut earliest = ""
+        mut latest = ""
+        mut seen: Set<string> = #{}
+        mut texts: Array<string> = []
+        for r in records {
+            imut v = r.cells[name]
+            if model.isMissing(v) { continue }
+            present += 1
+            imut t = model.text(v)
+            seen.add(keyOf(v))
+            push(texts, t)
+            match v {
+                Flag(b) => { if b { trues += 1 } else { falses += 1 } },
+                _ => {}
+            }
+            if c.kind == "date" {
+                if earliest == "" || t < earliest { earliest = t }
+                if latest == "" || t > latest { latest = t }
+            }
+        }
+        mut stats = GroupStat { key: Missing, count: len(records), present: present, sum: Missing, min: Missing, max: Missing, mean: Missing }
+        if model.isNumeric(c) {
+            match summarise(records, name) {
+                Overflow(why) => { return TooLarge(why) },
+                Totals(one) => { stats = one[0] }
+            }
+        }
+        mut top: Array<Group<string>> = []
+        if c.kind == "string" {
+            imut byValue = pipeline.groupBy(texts, fn(t: string) -> string { t })
+            imut ranked = pipeline.sortBy(byValue, fn(a: Group<string>, b: Group<string>) -> int {
+                if len(a.items) != len(b.items) { len(b.items) - len(a.items) } else { model.compareText(a.key, b.key) }
+            })
+            top = pipeline.take(ranked, 3)
+        }
+        push(out, Profile { column: c, present: present, missing: len(records) - present, distinct: len(seen),
+                            stats: stats, earliest: earliest, latest: latest, trues: trues, falses: falses, top: top })
+    }
+    Profiles(out)
+}

@@ -620,6 +620,11 @@ public class Emitter {
                     }
                 }
             }
+            // A number or bool returned from a function returning object is boxed:
+            // `return n` there failed verification.
+            if (_currentReturnType == Object.class && exprType != null && exprType != Object.class) {
+                emitBoxIfNeeded(exprType);
+            }
             Class<?> retType = _currentReturnType != null ? _currentReturnType : exprType;
             _mv.visitInsn(getReturnInsn(retType));
         } else {
@@ -1276,7 +1281,7 @@ public class Emitter {
                 }
 
                 emitMatchArmPreStatements(arm.preStatements());
-                emitExpression(arm.body());
+                emitArmValue(arm.body(), node.getClassType());
                 _mv.visitJumpInsn(GOTO, endLabel);
                 _mv.visitLabel(nextArm);
                 continue;
@@ -1293,7 +1298,7 @@ public class Emitter {
 
             // Match: emit pre-statements (lowered) then body, jump to end
             emitMatchArmPreStatements(arm.preStatements());
-            emitExpression(arm.body());
+            emitArmValue(arm.body(), node.getClassType());
             _mv.visitJumpInsn(GOTO, endLabel);
             _mv.visitLabel(nextArm);
         }
@@ -1304,7 +1309,7 @@ public class Emitter {
         // where the caller reads an int is not a well-typed frame.
         if (defaultArm != null) {
             emitMatchArmPreStatements(defaultArm.preStatements());
-            emitExpression(defaultArm.body());
+            emitArmValue(defaultArm.body(), node.getClassType());
         } else if (node.getClassType() != null) {
             emitNeutralValue(node.getClassType());
         }
@@ -1318,6 +1323,16 @@ public class Emitter {
      *
      * @param type The match's result type.
      */
+
+    /**
+     * An arm's value, boxed when the match is an erased value: a match whose
+     * arms give an int and a string is an object, and each arm has to leave
+     * one on the stack.
+     */
+    private void emitArmValue(BoundExpression body, Class<?> matchType) {
+        emitExpression(body);
+        if (matchType == Object.class && body.getClassType() != null) emitBoxIfNeeded(body.getClassType());
+    }
     private void emitNeutralValue(Class<?> type) {
         if (type == Integer.class || type == Boolean.class) {
             _mv.visitInsn(ICONST_0);
@@ -2253,6 +2268,8 @@ public class Emitter {
     private void emitMemberAccessExpression(BoundMemberAccessExpression node) {
         // map.get("fieldName") -> unbox
         emitExpression(node.getTarget());
+        // An erased value read as the struct its name says it is.
+        if (node.getTarget().getClassType() == Object.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoObject");
         _mv.visitLdcInsn(node.getMemberName());
         _mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", true);
         emitUnboxIfNeeded(node.getClassType());
@@ -2261,6 +2278,7 @@ public class Emitter {
     private void emitMemberAssignmentExpression(BoundMemberAssignmentExpression node) {
         // map.put("fieldName", value) -> we want new value on stack
         emitExpression(node.getTarget());  // map
+        if (node.getTarget().getClassType() == Object.class) _mv.visitTypeInsn(CHECKCAST, "codeanalysis/SiyoObject");
         _mv.visitLdcInsn(node.getMemberName());  // key
         emitExpression(node.getValue());  // value (once only)
         emitBoxIfNeeded(node.getValue().getClassType());

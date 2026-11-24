@@ -1,0 +1,4 @@
+﻿id,name,dept,salary,start,remote
+1,"bell esc[31m red",eng,1,2020-01-01,true
+2,"rtl ‮gnp.exe",ops,2,2020-01-02,false
+3,"c1  x",sales,3,,

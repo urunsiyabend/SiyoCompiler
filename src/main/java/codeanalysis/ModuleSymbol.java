@@ -93,6 +93,63 @@ public class ModuleSymbol {
     public void setUnions(Map<String, UnionSymbol> unions) {
         _unions = unions;
     }
+
+    // The module's tables as its top-level imports and declarations left them,
+    // before any function body (and any import inside one) was bound: what the
+    // names in its functions' signatures mean.
+    private Map<String, StructSymbol> _declaredStructs;
+    private Map<String, UnionSymbol> _declaredUnions;
+    private Map<String, InterfaceSymbol> _declaredInterfaces;
+    private java.util.Set<String> _declaredContested = java.util.Set.of();
+
+    public Map<String, StructSymbol> getDeclaredStructs() { return _declaredStructs; }
+    public Map<String, UnionSymbol> getDeclaredUnions() { return _declaredUnions; }
+    public Map<String, InterfaceSymbol> getDeclaredInterfaces() { return _declaredInterfaces; }
+
+    // What imports nested in this module's functions bring in, its own and theirs
+    // in turn: {qualified method or struct name, declaring file}.
+    private java.util.List<String[]> _anticipatedMethods = java.util.List.of();
+    private java.util.List<String[]> _anticipatedStructs = java.util.List.of();
+
+    public java.util.List<String[]> getAnticipatedMethods() { return _anticipatedMethods; }
+
+    private java.util.List<String> _ownMethods = java.util.List.of();
+
+    /** The methods this module's impl blocks declare, Struct.name, on any struct. */
+    public java.util.List<String> getOwnMethods() { return _ownMethods; }
+
+    public void setOwnMethods(java.util.List<String> methods) { _ownMethods = methods; }
+
+    private java.util.List<String> _importOrder = java.util.List.of();
+
+    /** The modules this module's import statements bound, in the order they were bound. */
+    public java.util.List<String> getImportOrder() { return _importOrder; }
+
+    public void setImportOrder(java.util.List<String> importOrder) { _importOrder = importOrder; }
+    public java.util.List<String[]> getAnticipatedStructs() { return _anticipatedStructs; }
+
+    private java.util.List<StructSymbol> _anticipatedContested = java.util.List.of();
+
+    /** Structs found contested by the modules this module's nested imports bring in. */
+    public java.util.List<StructSymbol> getAnticipatedContested() { return _anticipatedContested; }
+
+    public void setAnticipated(java.util.List<String[]> methods, java.util.List<String[]> structs,
+                               java.util.List<StructSymbol> contested) {
+        _anticipatedMethods = methods;
+        _anticipatedStructs = structs;
+        _anticipatedContested = contested;
+    }
+
+    /** Struct names whose methods here came from another declaration than the struct's. */
+    public java.util.Set<String> getDeclaredContested() { return _declaredContested; }
+
+    public void setDeclaredTables(Map<String, StructSymbol> structs, Map<String, UnionSymbol> unions,
+                                  Map<String, InterfaceSymbol> interfaces, java.util.Set<String> contested) {
+        _declaredContested = contested == null ? java.util.Set.of() : contested;
+        _declaredStructs = structs;
+        _declaredUnions = unions;
+        _declaredInterfaces = interfaces;
+    }
     public BoundBlockStatement getTopLevelBlock() { return _topLevelBlock; }
 
     /**

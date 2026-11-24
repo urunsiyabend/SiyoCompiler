@@ -1,0 +1,3 @@
+id,name,dept,salary,start,remote
+3,"Smith, Jo",ops,4300.0,2021-01-04,true
+6,Mei,eng,7300.0,,true

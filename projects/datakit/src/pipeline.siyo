@@ -1,0 +1,96 @@
+// Typed, reusable steps over arrays of anything: filter, order, group, sum.
+// Nothing here knows about records; validate, query and stats use them on
+// records, the tests on plain numbers and strings.
+
+// The elements that share a key, in the order they came.
+pub struct Group<T> { key: string, items: Array<T> }
+
+pub fn keep<T>(xs: Array<T>, p: fn(T) -> bool) -> Array<T> {
+    mut out: Array<T> = []
+    for x in xs { if p(x) { push(out, x) } }
+    out
+}
+
+pub fn take<T>(xs: Array<T>, n: int) -> Array<T> {
+    mut out: Array<T> = []
+    for x in xs {
+        if len(out) >= n { break }
+        push(out, x)
+    }
+    out
+}
+
+// A stable merge sort: elements that compare equal keep their order. It works
+// bottom-up, so its depth does not grow with the input.
+pub fn sortBy<T>(xs: Array<T>, cmp: fn(T, T) -> int) -> Array<T> {
+    mut src: Array<T> = []
+    for x in xs { push(src, x) }
+    imut n = len(src)
+    mut width = 1
+    while width < n {
+        mut dst: Array<T> = []
+        mut lo = 0
+        while lo < n {
+            imut mid = if lo + width < n { lo + width } else { n }
+            imut hi = if lo + 2 * width < n { lo + 2 * width } else { n }
+            mut i = lo
+            mut j = mid
+            while i < mid || j < hi {
+                if j >= hi || (i < mid && cmp(src[i], src[j]) <= 0) {
+                    push(dst, src[i])
+                    i += 1
+                } else {
+                    push(dst, src[j])
+                    j += 1
+                }
+            }
+            lo = hi
+        }
+        src = dst
+        width = width * 2
+    }
+    src
+}
+
+// Groups in the order their keys first appear.
+pub fn groupBy<T>(xs: Array<T>, key: fn(T) -> string) -> Array<Group<T>> {
+    mut groups: Array<Group<T>> = []
+    mut index: Map<string, int> = {}
+    for x in xs {
+        imut k = key(x)
+        if index.has(k) {
+            push(groups[index[k]].items, x)
+        } else {
+            index[k] = len(groups)
+            push(groups, Group { key: k, items: [x] })
+        }
+    }
+    groups
+}
+
+pub fn sumBy<T>(xs: Array<T>, f: fn(T) -> float) -> float {
+    mut total = 0.0
+    for x in xs { total += f(x) }
+    total
+}
+
+pub fn countBy<T>(xs: Array<T>, key: fn(T) -> string) -> Map<string, int> {
+    mut counts: Map<string, int> = {}
+    for x in xs {
+        imut k = key(x)
+        counts[k] = if counts.has(k) { counts[k] + 1 } else { 1 }
+    }
+    counts
+}
+
+pub fn distinct(xs: Array<string>) -> Array<string> {
+    mut seen: Set<string> = #{}
+    mut out: Array<string> = []
+    for x in xs {
+        if !seen.has(x) {
+            seen.add(x)
+            push(out, x)
+        }
+    }
+    out
+}

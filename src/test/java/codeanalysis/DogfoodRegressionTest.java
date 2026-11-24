@@ -511,7 +511,7 @@ class DogfoodRegressionTest {
 
     // --- helpers -------------------------------------------------------------
 
-    private String firstDiagnostic(String source) {
+    String firstDiagnostic(String source) {
         SyntaxTree tree = SyntaxTree.parse(source);
         if (tree.diagnostics().hasNext()) return tree.diagnostics().get(0).getMessage();
         Compilation compilation = new Compilation(tree, new ModuleRegistry(), sourcePath("Diag"));

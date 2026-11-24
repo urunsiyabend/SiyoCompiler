@@ -1,0 +1,204 @@
+// Raw rows in, typed records and every problem out. A row with any problem is
+// left out of the records, so whatever is computed from them is computed from
+// data that passed.
+
+import "std/strings"
+import "model"
+import "source"
+import "pipeline"
+
+pub struct Checked {
+    records: Array<Record>,
+    problems: Array<Problem>,
+    rows: int,              // data rows read, valid or not
+    invalidRows: int
+}
+
+pub fn check(s: Schema, raw: RawData) -> Checked {
+    mut problems: Array<Problem> = []
+    for p in raw.problems { push(problems, p) }
+    mut invalidRows = 0
+    for p in raw.problems { if isRowProblem(p) { invalidRows += 1 } }
+
+    mut known: Set<string> = #{}
+    for c in s.columns { known.add(c.name) }
+    imut fromText = len(raw.rows) == 0 || raw.rows[0].fromText
+    // An unknown or missing column is reported once, where it was first seen.
+    if fromText {
+        mut present: Set<string> = #{}
+        for name in raw.columns { present.add(name) }
+        for c in s.columns {
+            if c.required && !present.has(c.name) && len(raw.columns) > 0 {
+                push(problems, Problem { row: 1, place: "line 1", column: c.name, message: "a required column is missing from the header" })
+            }
+        }
+        if s.rejectUnknown {
+            for name in raw.columns {
+                if !known.has(name) && trim(name) != "" {
+                    push(problems, Problem { row: 1, place: "line 1", column: name, message: "the schema has no such column" })
+                }
+            }
+        }
+    }
+
+    mut reportedUnknown: Set<string> = #{}
+    mut records: Array<Record> = []
+    for row in raw.rows {
+        // An unknown field is the file's problem, as an unknown CSV column is,
+        // and is reported once, where it first appears.
+        if !fromText && s.rejectUnknown {
+            for k in row.fields {
+                if !known.has(k) && !reportedUnknown.has(k) {
+                    reportedUnknown.add(k)
+                    push(problems, Problem { row: row.row, place: row.place, column: k, message: "the schema has no such column" })
+                }
+            }
+        }
+        imut before = len(problems)
+        mut cells: Map<string, Value> = {}
+        for c in s.columns {
+            imut v = cell(c, row, problems)
+            cells[c.name] = v
+        }
+        if len(problems) > before { invalidRows += 1 } else { push(records, Record { row: row.row, place: row.place, cells: cells }) }
+    }
+    // In file order whatever found them; problems on one row keep their column order.
+    imut ordered = pipeline.sortBy(problems, fn(a: Problem, b: Problem) -> int { a.row - b.row })
+    Checked { records: records, problems: ordered, rows: len(raw.rows) + countRowProblems(raw), invalidRows: invalidRows }
+}
+
+// A problem that rejects a whole row the source could not read: a ragged CSV
+// line, a JSON record that is not an object. Not the header's or the file's.
+fn isRowProblem(p: Problem) -> bool {
+    p.place != "file" && p.place != "line 1"
+}
+
+fn countRowProblems(raw: RawData) -> int {
+    mut n = 0
+    for p in raw.problems { if isRowProblem(p) { n += 1 } }
+    n
+}
+
+fn report(problems: Array<Problem>, row: RawRow, c: Column, message: string) -> Value {
+    push(problems, Problem { row: row.row, place: row.place, column: c.name, message: message })
+    Missing
+}
+
+fn cell(c: Column, row: RawRow, problems: Array<Problem>) -> Value {
+    // A column the CSV header lacks is reported once, against the header.
+    if row.fromText && !row.fields.has(c.name) { return Missing }
+    imut raw = if row.fields.has(c.name) { row.fields[c.name] } else { null }
+    imut kind = typeOf(raw)
+    if kind == "null" || (kind == "string" && toString(raw) == "") {
+        if c.required { return report(problems, row, c, "is required") }
+        return Missing
+    }
+    imut v = if row.fromText { fromText(c, toString(raw), row, problems) } else { fromJson(c, raw, row, problems) }
+    if model.isMissing(v) { return v }
+    checkRange(c, v, row, problems)
+}
+
+fn fromText(c: Column, s: string, row: RawRow, problems: Array<Problem>) -> Value {
+    if c.kind == "int" {
+        if !isLong(s) { return report(problems, row, c, "must be an integer, got \"" + s + "\"") }
+        return IntV(parseLong(s))
+    }
+    if c.kind == "float" {
+        if !strings.isFloat(s) { return report(problems, row, c, "must be a number, got \"" + s + "\"") }
+        return FloatV(parseFloat(s))
+    }
+    if c.kind == "bool" {
+        if s == "true" { return Flag(true) }
+        if s == "false" { return Flag(false) }
+        return report(problems, row, c, "must be true or false, got \"" + s + "\"")
+    }
+    if c.kind == "date" {
+        if !isDate(s) { return report(problems, row, c, "must be a date written YYYY-MM-DD, got \"" + s + "\"") }
+        return Text(s)
+    }
+    Text(s)
+}
+
+fn fromJson(c: Column, raw: object, row: RawRow, problems: Array<Problem>) -> Value {
+    imut kind = typeOf(raw)
+    if c.kind == "int" {
+        if kind != "int" && kind != "long" { return report(problems, row, c, "must be an integer, got " + kind) }
+        return IntV(parseLong(toString(raw)))
+    }
+    if c.kind == "float" {
+        if kind != "int" && kind != "long" && kind != "float" { return report(problems, row, c, "must be a number, got " + kind) }
+        imut x = parseFloat(toString(raw))
+        // An integer too wide for a long reads as a float, and may be too wide for one too.
+        if !strings.isFloat(model.plain(x)) { return report(problems, row, c, "is too large") }
+        return FloatV(x)
+    }
+    if c.kind == "bool" {
+        if kind != "bool" { return report(problems, row, c, "must be true or false, got " + kind) }
+        return Flag(toString(raw) == "true")
+    }
+    if kind != "string" { return report(problems, row, c, "must be a string, got " + kind) }
+    imut s = toString(raw)
+    if c.kind == "date" && !isDate(s) {
+        return report(problems, row, c, "must be a date written YYYY-MM-DD, got \"" + s + "\"")
+    }
+    Text(s)
+}
+
+fn checkRange(c: Column, v: Value, row: RawRow, problems: Array<Problem>) -> Value {
+    if model.isNumeric(c) {
+        if !model.isMissing(c.min) && model.compare(v, c.min) < 0 {
+            return report(problems, row, c, "must be at least " + model.text(c.min) + ", got " + model.text(v))
+        }
+        if !model.isMissing(c.max) && model.compare(v, c.max) > 0 {
+            return report(problems, row, c, "must be at most " + model.text(c.max) + ", got " + model.text(v))
+        }
+    }
+    if len(c.allowed) > 0 {
+        imut s = model.text(v)
+        mut found = false
+        for a in c.allowed { if a == s { found = true } }
+        if !found { return report(problems, row, c, "must be one of " + strings.join(c.allowed, ", ") + ", got \"" + s + "\"") }
+    }
+    v
+}
+
+// An integer that fits a long: an optional minus, then ASCII digits.
+pub fn isLong(s: string) -> bool {
+    imut negative = startsWith(s, "-")
+    mut digits = if negative { substring(s, 1, len(s)) } else { s }
+    if len(digits) == 0 { return false }
+    for ch in strings.chars(digits) { if ch < "0" || ch > "9" { return false } }
+    mut start = 0
+    while start < len(digits) - 1 && substring(digits, start, start + 1) == "0" { start += 1 }
+    digits = substring(digits, start, len(digits))
+    if len(digits) < 19 { return true }
+    if len(digits) > 19 { return false }
+    digits <= (if negative { "9223372036854775808" } else { "9223372036854775807" })
+}
+
+// A calendar date written YYYY-MM-DD, years 0001 to 9999.
+pub fn isDate(s: string) -> bool {
+    if len(s) != 10 || substring(s, 4, 5) != "-" || substring(s, 7, 8) != "-" { return false }
+    imut y = substring(s, 0, 4)
+    imut m = substring(s, 5, 7)
+    imut d = substring(s, 8, 10)
+    if !allDigits(y) || !allDigits(m) || !allDigits(d) { return false }
+    imut year = parseInt(y)
+    imut month = parseInt(m)
+    imut day = parseInt(d)
+    if year < 1 || month < 1 || month > 12 || day < 1 { return false }
+    day <= daysIn(year, month)
+}
+
+fn allDigits(s: string) -> bool {
+    for ch in strings.chars(s) { if ch < "0" || ch > "9" { return false } }
+    true
+}
+
+fn daysIn(year: int, month: int) -> int {
+    if month == 2 {
+        imut leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        return if leap { 29 } else { 28 }
+    }
+    if month == 4 || month == 6 || month == 9 || month == 11 { 30 } else { 31 }
+}

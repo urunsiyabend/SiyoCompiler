@@ -41,8 +41,10 @@ public class Binder {
     private boolean _atFileTopLevel = true;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
-    private final Map<String, StructSymbol> _structTypes = new HashMap<>();
-    private final Map<String, codeanalysis.UnionSymbol> _unionTypes = new java.util.LinkedHashMap<>();
+    // One generation for this file's type tables: see VersionedMap.
+    private final VersionedMap.Version _typeVersion = new VersionedMap.Version();
+    private final VersionedMap<String, StructSymbol> _structTypes = new StructTable(_typeVersion);
+    private final VersionedMap<String, codeanalysis.UnionSymbol> _unionTypes = new VersionedMap<>(_typeVersion);
 
     private final TypeResolver _typeResolver;
     private final ModuleHandler _moduleHandler;
@@ -62,7 +64,7 @@ public class Binder {
      */
     public Binder(BoundScope parent) {
         _scope = new BoundScope(parent);
-        _typeResolver = new TypeResolver(_structTypes, _unionTypes);
+        _typeResolver = new TypeResolver(_structTypes, _unionTypes, _typeVersion);
         _moduleHandler = new ModuleHandler(_structTypes, _unionTypes, _typeResolver, _functionBodies);
         _moduleHandler.setDiagnostics(_diagnostics);
         _moduleHandler.setScope(_scope);
@@ -85,6 +87,7 @@ public class Binder {
         Binder binder = new Binder(parentScope);
         binder._moduleHandler.setRegistry(registry);
         binder._moduleHandler.setFilePath(filePath);
+        binder._moduleHandler.setRoot(true);
         if (!enforceTopLevel) binder._atFileTopLevel = false;
         BoundStatement statement = binder.bindStatement(syntax.getStatement());
         Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
@@ -137,6 +140,9 @@ public class Binder {
             if (!isAllowedAtTopLevel(syntax)) {
                 _diagnostics.reportTopLevelNotAllowed(syntax.getSpan());
             }
+            // A file of one declaration: what its nested imports bring in is
+            // known before its body is bound, as for any other file.
+            if (!(syntax instanceof ImportStatementSyntax)) anticipateNestedImports(syntax);
             _atFileTopLevel = false; // recursive calls are nested, not top-level
         }
         BoundStatement result = bindStatementInternal(syntax);
@@ -191,6 +197,21 @@ public class Binder {
         _scope = new BoundScope(_scope);
         _moduleHandler.setScope(_scope);
 
+        // Every type this block declares is known by kind before any is
+        // registered, so a signature may name one written further down:
+        // fn s() -> Later above struct Later returned null.
+        for (StatementSyntax statementSyntax : syntax.getStatements()) {
+            if (statementSyntax instanceof StructDeclarationSyntax structSyntax) {
+                _typeResolver.declareAhead(structSyntax.getIdentifier().getData(), SiyoStruct.class);
+            } else if (statementSyntax instanceof ActorDeclarationSyntax actorSyntax) {
+                _typeResolver.declareAhead(actorSyntax.getIdentifier().getData(), SiyoStruct.class);
+            } else if (statementSyntax instanceof TypeDeclarationSyntax typeSyntax) {
+                _typeResolver.declareAhead(typeSyntax.getIdentifier().getData(), codeanalysis.SiyoUnion.class);
+            } else if (statementSyntax instanceof InterfaceDeclarationSyntax interfaceSyntax) {
+                _typeResolver.declareAhead(interfaceSyntax.getIdentifier().getData(), SiyoStruct.class);
+            }
+        }
+
         // First pass: process imports, register function/struct/enum declarations
         List<ImplDeclarationSyntax> pendingImplementors = new ArrayList<>();
         for (StatementSyntax statementSyntax : syntax.getStatements()) {
@@ -225,6 +246,7 @@ public class Binder {
                 }
                 StructSymbol symbol = new StructSymbol(name, fields, fieldTypeNames);
                 symbol.setActor(true);
+                symbol.setOriginModule(_moduleHandler.getFilePath());
                 _structTypes.put(name, symbol);
             } else if (statementSyntax instanceof InterfaceDeclarationSyntax interfaceSyntax) {
                 registerInterfaceDeclaration(interfaceSyntax);
@@ -235,6 +257,18 @@ public class Binder {
                 }
             }
         }
+
+        // What an import inside any function or lambda here will bring in is known
+        // before any body is bound (see ModuleHandler.anticipateImport).
+        if (wasFileTopLevel) {
+            for (StatementSyntax statementSyntax : syntax.getStatements()) {
+                if (!(statementSyntax instanceof ImportStatementSyntax)) anticipateNestedImports(statementSyntax);
+            }
+        }
+
+        // What the names in this file's signatures mean: its tables before any
+        // body, and so any import inside a function, is bound.
+        if (wasFileTopLevel) _typeResolver.markDeclarationsComplete();
 
         // Which structs implement which interface is settled before any body is
         // bound. A function that takes an interface may be written above the
@@ -261,6 +295,75 @@ public class Binder {
         _scope = _scope.getParent();
         _moduleHandler.setScope(_scope);
         return new BoundBlockStatement(statements);
+    }
+
+    /**
+     * Finds every import nested in a declaration: in a function or method body, a
+     * lambda, a block, a match arm. Syntax nodes do not all list every child, so
+     * the walk follows each node's fields that hold syntax.
+     */
+    // The fields of a syntax class that may hold syntax, found once per class.
+    private static final ClassValue<List<java.lang.reflect.Field>> SYNTAX_FIELDS = new ClassValue<>() {
+        @Override
+        protected List<java.lang.reflect.Field> computeValue(Class<?> nodeClass) {
+            List<java.lang.reflect.Field> fields = new ArrayList<>();
+            for (Class<?> type = nodeClass; type != null && type != Object.class; type = type.getSuperclass()) {
+                for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                    Class<?> fieldType = field.getType();
+                    if (!codeanalysis.syntax.SyntaxNode.class.isAssignableFrom(fieldType)
+                            && !Iterable.class.isAssignableFrom(fieldType)
+                            && !fieldType.getPackageName().equals("codeanalysis.syntax")) {
+                        continue;
+                    }
+                    try {
+                        field.setAccessible(true);
+                        fields.add(field);
+                    } catch (RuntimeException ignored) {
+                        // A field that cannot be opened holds no import we could see.
+                    }
+                }
+            }
+            return List.copyOf(fields);
+        }
+    };
+
+    private void anticipateNestedImports(Object node) {
+        // Found in any order, compiled in the order the binder would have reached
+        // them, which is their order in the source: a module runs its top level
+        // when it is first compiled, so the order is observable.
+        List<ImportStatementSyntax> found = new ArrayList<>();
+        java.util.Set<Object> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        java.util.ArrayDeque<Object> pending = new java.util.ArrayDeque<>();
+        pending.add(node);
+        while (!pending.isEmpty()) {
+            Object next = pending.pop();
+            if (next == null || !seen.add(next)) continue;
+            if (next instanceof ImportStatementSyntax nested) {
+                found.add(nested);
+                continue;
+            }
+            if (next instanceof Iterable<?> items) {
+                for (Object item : items) {
+                    if (item != null) pending.add(item);
+                }
+                continue;
+            }
+            if (next instanceof SyntaxToken || !(next instanceof codeanalysis.syntax.SyntaxNode
+                    || next.getClass().getPackageName().equals("codeanalysis.syntax"))) {
+                continue;
+            }
+            for (java.lang.reflect.Field field : SYNTAX_FIELDS.get(next.getClass())) {
+                try {
+                    Object value = field.get(next);
+                    if (value != null) pending.add(value);
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                    // A field that cannot be read holds no import we could see.
+                }
+            }
+        }
+        found.sort(java.util.Comparator.comparingInt(nested -> nested.getSpan().getStart()));
+        for (ImportStatementSyntax nested : found) _moduleHandler.anticipateImport(nested);
     }
 
     /**
@@ -366,6 +469,9 @@ public class Binder {
     private BoundStatement bindVariableDeclaration(VariableDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
         var isReadOnly = syntax.getKeyword().getType() == SyntaxType.ImmutableKeyword;
+        // The names the variable's type is written with mean what they mean here,
+        // before an import inside the initializer can change them.
+        long generation = _typeResolver.generation();
         BoundExpression initializer = bindExpressionWithTypeHint(syntax.getInitializer(), syntax.getTypeAnnotation());
         requireValue(initializer, syntax.getInitializer());
 
@@ -387,21 +493,52 @@ public class Binder {
         // `mut h: long = 0` holds a long from the start; interpreted it stayed an
         // int and later additions wrapped.
         if (annotation != null) initializer = widenLiteral(widenTo(initializer, variableType), annotation.getData());
+        if (annotation != null) checkPayloadAgainst(initializer, annotation.getData(), syntax.getInitializer().getSpan());
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
+            variableSymbol.setAnnotated(true);
+            // A struct-derived value under an annotation: the variable holds what
+            // the annotation says, and its aliases do too. Reads stay checked.
+            if (_typeResolver.isStructDerived(initializer)) _typeResolver.markStructDerived(variableSymbol, initializer);
             if (variableType == SiyoClosure.class) {
                 checkAgainstFunctionType(initializer, annotation.getData(),
                         syntax.getInitializer().getSpan());
             }
+        } else if (_typeResolver.isStructDerived(initializer) && _typeResolver.declaredTypeNameOf(initializer) != null) {
+            // Whatever form a struct-derived value arrives in (an alias, an index,
+            // an if or match, a call, a loop), the variable holds its whole type.
+            variableSymbol.setDeclaredTypeName(_typeResolver.declaredTypeNameOf(initializer));
+            _typeResolver.markStructDerived(variableSymbol, initializer);
         } else if (initializer instanceof BoundLambdaExpression lambda) {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
             variableSymbol.setDeclaredTypeName(signatureNameOf(lambda));
-        } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression) {
+        } else if (initializer instanceof BoundIndexExpression || initializer instanceof BoundCallExpression
+                || initializer instanceof BoundMemberAccessExpression
+                || initializer instanceof BoundStructLiteralExpression
+                || initializer instanceof BoundArrayLiteralExpression
+                || initializer instanceof BoundVariableExpression
+                || initializer instanceof BoundClosureCallExpression) {
             // imut recs = groups["e"] is whatever groups declares its values to be.
+            // A field or a literal is followed only for the struct identity it
+            // carries, as in imut its = g.items on a Group<Row>.
             String inherited = _typeResolver.declaredTypeNameOf(initializer);
-            if (inherited != null) variableSymbol.setDeclaredTypeName(inherited);
+            boolean followed = !(initializer instanceof BoundMemberAccessExpression)
+                    && !(initializer instanceof BoundStructLiteralExpression)
+                    && !(initializer instanceof BoundArrayLiteralExpression)
+                    && !(initializer instanceof BoundVariableExpression);
+            // A plain alias, imut c = b, carries a generic struct's type
+            // arguments, and nothing 0.9.0 would not have known.
+            boolean alias = initializer instanceof BoundVariableExpression;
+            boolean structDerived = annotation == null && _typeResolver.isStructDerived(initializer);
+            if (inherited != null && (structDerived || (alias ? _typeResolver.mentionsGenericStruct(inherited)
+                    : (followed || namesADeclaredType(inherited))))) {
+                variableSymbol.setDeclaredTypeName(inherited);
+            }
+            // The variable holds what the struct-derived value does, however it is
+            // later aliased, filtered or indexed.
+            if (structDerived && inherited != null) _typeResolver.markStructDerived(variableSymbol, initializer);
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
@@ -486,6 +623,40 @@ public class Binder {
             }
         }
 
+        // What the value was inferred from. A collection annotation names it afresh,
+        // as 0.9.0 did; a struct one never typed an erased value in 0.9.0, so the
+        // value keeps what it was inferred from.
+        // A collection annotation over a value only 0.10.0 typed restates that typing.
+        if (syntax.getTypeAnnotation() == null || !TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())
+                || typedOnlyBy010ForAnnotation(initializer)) {
+            variableSymbol.addProvenance(_typeResolver.provenanceOf(initializer));
+            shareStorage(variableSymbol, initializer);
+        }
+        _typeResolver.stamp(variableSymbol, generation, !variableSymbol.getProvenance().isEmpty());
+        // A struct literal, or a call typed by its declared return, is typed as
+        // 0.9.0 typed it; an alias, an element or field, or a generic or imported
+        // call's inferred result of a generic struct is typed only by 0.10.0.
+        if (syntax.getTypeAnnotation() == null && typedOnlyBy010(initializer)) {
+            markGenericTypeInferred(variableSymbol);
+        }
+        if (syntax.getTypeAnnotation() == null) markStructTypeInferred(variableSymbol, initializer);
+        // 0.9.0 typed an array where it was made: a literal, an ordinary call, or
+        // filter of an array it typed. A variable alone is not one: 0.9.0 dropped
+        // an annotation over a variable.
+        variableSymbol.setZeroNineArray(!(initializer instanceof BoundVariableExpression)
+                && zeroNineArrayValue(initializer));
+        // 0.9.0 typed a collection annotation over an ordinary call or a literal,
+        // not over a variable, an element, an if or match, or a generic or closure
+        // call: b: Array<W> = a is typed only by 0.10.0.
+        if (syntax.getTypeAnnotation() != null && TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())
+                && typedOnlyBy010ForAnnotation(initializer) && variableSymbol.getOriginStructs() != null) {
+            String element = TypeResolver.elementTypeNameOf(syntax.getTypeAnnotation().getData());
+            if (element == null && syntax.getTypeAnnotation().getData().startsWith("Map<")) {
+                List<String> arguments = TypeResolver.typeArgumentsOf(syntax.getTypeAnnotation().getData());
+                element = arguments.size() == 2 ? arguments.get(1) : null;
+            }
+            if (element != null && _structTypes.containsKey(element)) variableSymbol.setGenericTypeInferred(true);
+        }
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -599,8 +770,224 @@ public class Binder {
         BoundExpression result = bindExpressionInternal(syntax);
         if (result != null) {
             try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
+            recordStoredProvenance(result);
         }
         return result;
+    }
+
+    /**
+     * A value stored into a variable, an element or field of one, or passed to a
+     * builtin with one first (push, insert, ...), adds what it was inferred from
+     * to that variable, which never loses it.
+     */
+    private void recordStoredProvenance(BoundExpression result) {
+        if (result instanceof BoundAssignmentExpression assignment) {
+            // The variable now is the value: an alias of what it aliases.
+            assignment.getVariable().addProvenance(_typeResolver.provenanceOf(assignment.getExpression()));
+            shareStorage(assignment.getVariable(), assignment.getExpression());
+        } else if (result instanceof BoundIndexAssignmentExpression store) {
+            VariableSymbol root = rootVariable(store.getTarget());
+            if (root != null) store(root, store.getValue(), !(store.getTarget() instanceof BoundVariableExpression));
+        } else if (result instanceof BoundMemberAssignmentExpression store) {
+            VariableSymbol root = rootVariable(store.getTarget());
+            if (root != null) store(root, store.getValue(), !(store.getTarget() instanceof BoundVariableExpression));
+        } else if (result instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getArguments().size() > 1) {
+            // A function may store any argument into another: put(w, p) is w.value = p.
+            storeArgumentsIntoEachOther(call.getArguments());
+        } else if (result instanceof BoundClosureCallExpression call && !call.getArguments().isEmpty()) {
+            List<BoundExpression> values = new ArrayList<>(call.getArguments());
+            values.add(call.getClosure());
+            storeArgumentsIntoEachOther(values);
+        } else if (result instanceof BoundCallExpression call && BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getArguments().size() > 1) {
+            VariableSymbol root = rootVariable(call.getArguments().get(0));
+            if (root != null) {
+                boolean deep = !(call.getArguments().get(0) instanceof BoundVariableExpression);
+                for (int i = 1; i < call.getArguments().size(); i++) store(root, call.getArguments().get(i), deep);
+            }
+        }
+    }
+
+    /**
+     * A call may store any of its values into a slot of an argument that can
+     * hold it: put(w, p) may be w.value = p. A closure called counts as one of
+     * its values, since it may store what it captured. An argument whose type
+     * holds only numbers and strings, or nothing of the stored value's type,
+     * receives nothing.
+     */
+    private void storeArgumentsIntoEachOther(List<BoundExpression> arguments) {
+        for (int i = 0; i < arguments.size(); i++) {
+            VariableSymbol root = rootVariable(arguments.get(i));
+            if (root == null) continue;
+            String holder = storageTypeNameOf(arguments.get(i));
+            for (int j = 0; j < arguments.size(); j++) {
+                if (i == j || !_typeResolver.canHold(holder, storageTypeNameOf(arguments.get(j)))) continue;
+                store(root, arguments.get(j), !(arguments.get(i) instanceof BoundVariableExpression));
+            }
+        }
+    }
+
+    /** The type a value is known to have, for what it can hold; null when unknown. */
+    private String storageTypeNameOf(BoundExpression value) {
+        if (value instanceof BoundLambdaExpression) return null;
+        String declared = _typeResolver.declaredTypeNameOf(value);
+        if (declared != null) return declared;
+        if (value.getClassType() == SiyoStruct.class) {
+            StructSymbol struct = _typeResolver.resolveStructType(value);
+            if (struct != null) return struct.getName();
+        }
+        if (value.getClassType() == SiyoArray.class) {
+            StructSymbol element = _typeResolver.resolveStructTypeFromCollection(value);
+            if (element != null) return "Array<" + element.getName() + ">";
+        }
+        return null;
+    }
+
+    /**
+     * A value stored into a variable's storage: the variable now holds what the
+     * value was inferred from, and shares storage with what the value shares,
+     * so every alias of either sees it.
+     */
+    private void store(VariableSymbol into, BoundExpression value, boolean deep) {
+        java.util.Set<Object> roots = _typeResolver.provenanceOf(value);
+        // Into an object it holds: that object may be anything stored into it.
+        if (deep) into.addProvenanceToContents(roots);
+        else into.addProvenance(roots);
+        TypeResolver.Storage storage = _typeResolver.storageOf(value);
+        for (VariableSymbol held : storage.same) if (held != into) held.heldIn(into);
+        for (VariableSymbol held : storage.element) if (held != into) held.heldIn(into);
+        for (VariableSymbol held : storage.held) if (held != into) held.heldIn(into);
+    }
+
+    /**
+     * A variable now holding a value: the same object as what the value is an
+     * alias, element or field of, and the holder of what a literal in it holds.
+     */
+    private void shareStorage(VariableSymbol variable, BoundExpression value) {
+        TypeResolver.Storage storage = _typeResolver.storageOf(value);
+        for (VariableSymbol shared : storage.same) if (shared != variable) variable.shareStorageWith(shared);
+        for (VariableSymbol container : storage.element) if (container != variable) variable.elementOf(container);
+        for (VariableSymbol held : storage.held) if (held != variable) held.heldIn(variable);
+    }
+
+    private void markGenericTypeInferred(VariableSymbol variable) {
+        String name = variable.getDeclaredTypeName();
+        if (name != null && variable.getOriginStructs() != null && !name.startsWith("fn")
+                && _typeResolver.mentionsGenericStruct(name)) {
+            variable.setGenericTypeInferred(true);
+        }
+    }
+
+    /**
+     * A struct-typed local 0.9.0 did not type at all: one taken from a field
+     * (0.9.0 tracked no struct for it), or from a generic or imported call's
+     * result. Its struct identity is 0.10.0's, as for a generic struct's alias.
+     */
+    private void markStructTypeInferred(VariableSymbol variable, BoundExpression initializer) {
+        String name = variable.getDeclaredTypeName();
+        if (name == null || variable.getOriginStructs() == null || name.startsWith("fn")) return;
+        BoundExpression value = initializer instanceof BoundConversionExpression conversion
+                ? conversion.getExpression() : initializer;
+        boolean onlyBy010 = value instanceof BoundMemberAccessExpression
+                || value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                        && (!call.getFunction().getTypeParameters().isEmpty()
+                            || call.getFunction().getReturnOriginStructs() != null);
+        if (onlyBy010 && _structTypes.containsKey(name)) variable.setGenericTypeInferred(true);
+    }
+
+    /** Whether a value's type name comes from 0.10.0's inference rather than from what 0.9.0 typed. */
+    private boolean typedOnlyBy010(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010(conversion.getExpression());
+        if (value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
+                || value instanceof BoundMemberAccessExpression) {
+            return true;
+        }
+        if (!(value instanceof BoundCallExpression call)) return false;
+        // A builtin over a literal of anything but struct literals (pop([w]),
+        // filter([w], f), pop([mk()])): 0.9.0 typed an element of a literal of
+        // struct literals only.
+        if (BuiltinFunctions.isBuiltin(call.getFunction())) {
+            for (BoundExpression argument : call.getArguments()) {
+                if (literalOfNonLiterals(argument)) return true;
+            }
+            return false;
+        }
+        return call.getResultTypeName() != null || call.getFunction().getReturnOriginStructs() != null;
+    }
+
+    /** Whether a collection annotation over this value types what 0.9.0 did not: see bindVariableDeclaration. */
+    private static boolean typedOnlyBy010ForAnnotation(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010ForAnnotation(conversion.getExpression());
+        if (value instanceof BoundCallExpression call && BuiltinFunctions.isBuiltin(call.getFunction())) {
+            // 0.9.0 honoured it over a builtin only when that builtin's result was
+            // an array by 0.9.0's own typing.
+            return !zeroNineArray(call);
+        }
+        return value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
+                || value instanceof BoundMemberAccessExpression || value instanceof BoundMatchExpression
+                || value instanceof BoundClosureCallExpression
+                || value instanceof BoundCallExpression call && !call.getFunction().getTypeParameters().isEmpty();
+    }
+
+    /**
+     * Whether 0.9.0 typed this value as an array: a literal, a variable or an
+     * ordinary call of array class, filter over such an array, or pop of an
+     * element from a variable written as an array of arrays. pop over a literal
+     * or over an unannotated variable, map, and a builtin over those gave 0.9.0
+     * an erased value.
+     */
+    private static boolean zeroNineArray(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return zeroNineArray(conversion.getExpression());
+        if (value instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP) {
+            // An element popped from a variable 0.9.0 typed, written as an array of arrays.
+            return !call.getArguments().isEmpty()
+                    && call.getArguments().get(0) instanceof BoundVariableExpression held
+                    && held.getVariable().isZeroNineArray() && held.getVariable().isAnnotated()
+                    && TypeResolver.namesACollection(String.valueOf(
+                            TypeResolver.elementTypeNameOf(held.getVariable().getDeclaredTypeName())));
+        }
+        return zeroNineArrayValue(value);
+    }
+
+    /** An array 0.9.0 typed as one and kept through filter: not a popped element. */
+    private static boolean zeroNineArrayValue(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return zeroNineArrayValue(conversion.getExpression());
+        if (value instanceof BoundArrayLiteralExpression) return true;
+        if (value instanceof BoundVariableExpression variable) return variable.getVariable().isZeroNineArray();
+        if (value instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.FILTER) {
+            return !call.getArguments().isEmpty() && zeroNineArrayValue(call.getArguments().get(0));
+        }
+        return ordinaryArrayCall(value);
+    }
+
+    /** An ordinary call of array class, local or imported: typed by its declared return in 0.9.0. */
+    private static boolean ordinaryArrayCall(BoundExpression value) {
+        return value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getFunction().getTypeParameters().isEmpty() && value.getClassType() == SiyoArray.class;
+    }
+
+    private static boolean literalOfNonLiterals(BoundExpression value) {
+        List<BoundExpression> elements = value instanceof BoundArrayLiteralExpression array ? array.getElements()
+                : value instanceof BoundSetLiteralExpression set ? set.getElements() : null;
+        if (elements == null) {
+            return value instanceof BoundCallExpression inner && BuiltinFunctions.isBuiltin(inner.getFunction())
+                    && inner.getArguments().stream().anyMatch(Binder::literalOfNonLiterals);
+        }
+        for (BoundExpression element : elements) {
+            if (!(element instanceof BoundStructLiteralExpression)) return true;
+        }
+        return false;
+    }
+
+    /** The variable an element or field access starts from: b in b[0].f. */
+    private static VariableSymbol rootVariable(BoundExpression target) {
+        while (true) {
+            if (target instanceof BoundVariableExpression v) return v.getVariable();
+            if (target instanceof BoundIndexExpression index) target = index.getTarget();
+            else if (target instanceof BoundMemberAccessExpression member) target = member.getTarget();
+            else return null;
+        }
     }
 
     /** Reports an expression with no value where one is needed: a void call, or an if with no tail values. */
@@ -616,6 +1003,8 @@ public class Binder {
 
     private BoundExpression bindExpressionWithTypeHint(ExpressionSyntax syntax, codeanalysis.syntax.SyntaxToken typeAnnotation) {
         BoundExpression result = bindExpressionInternal(syntax);
+        // An initializer is an expression like any other: a call in it may store.
+        if (result != null) recordStoredProvenance(result);
         if (result instanceof BoundArrayLiteralExpression arr && arr.getElements().isEmpty() && typeAnnotation != null) {
             String typeName = typeAnnotation.getData();
             // Both T[] and Array<T> name their element; taking Array<T> itself
@@ -919,6 +1308,66 @@ public class Binder {
      * they first disagree. Such a match is fine run for its effects, and an
      * error if a function turns out to return it.
      */
+    /**
+     * The value-producing form of a match whose arms give values of different
+     * types. It is used only where the match ends a function that returns
+     * {@code object}: there an erased value is what was asked for, as in a
+     * function turning a sum type into JSON values. Anywhere else the arms
+     * still have to agree, or a string would be read back as an int.
+     */
+    private final Map<BoundMatchExpression, BoundMatchExpression> _erasableMatches = new java.util.IdentityHashMap<>();
+    private final Map<BoundMatchExpression, String> _mixedArmMessages = new java.util.IdentityHashMap<>();
+
+    /**
+     * A sum type value written where a generic type is declared: its payload
+     * must be what the type argument says, where that argument is trusted.
+     * imut o: Opt<R> = Some("abc") is reported rather than failing when matched.
+     */
+    private void checkPayloadAgainst(BoundExpression value, String typeName, codeanalysis.text.TextSpan span) {
+        if (!(value instanceof BoundUnionLiteralExpression union)) return;
+        codeanalysis.UnionSymbol symbol = union.getUnionType();
+        if (symbol.getTypeParameters().isEmpty() || !symbol.getName().equals(TypeResolver.genericBaseName(typeName))) return;
+        List<String> parameters = symbol.getTypeParameters();
+        List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
+        if (arguments.size() != parameters.size()) return;
+        Map<String, String> bindings = new HashMap<>();
+        for (int i = 0; i < parameters.size(); i++) {
+            bindings.put(parameters.get(i), _typeResolver.trustedTypeArgument(arguments.get(i)));
+        }
+        codeanalysis.UnionSymbol.Variant variant = symbol.getVariant(union.getVariantName());
+        if (variant == null) return;
+        for (int i = 0; i < union.getArguments().size(); i++) {
+            Class<?> expected = _typeResolver.lookupType(
+                    TypeResolver.substitute(variant.getPayloadTypeNames().get(i), parameters, bindings));
+            Class<?> actual = union.getArguments().get(i).getClassType();
+            if (expected != null && expected != Object.class && actual != null && actual != Object.class
+                    && actual != expected) {
+                _diagnostics.reportCannotConvert(span, actual, expected);
+            }
+        }
+    }
+
+    /** A number, a bool or a string: a value whose kind a slot cannot quietly change. */
+    private static boolean isScalar(Class<?> type) {
+        return type == Integer.class || type == Long.class || type == Double.class
+                || type == Boolean.class || type == String.class;
+    }
+
+    /** Whether a type name mentions a struct or sum type this file can see. */
+    private boolean namesADeclaredType(String typeName) {
+        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
+            if (!word.isEmpty() && (_structTypes.containsKey(word) || _typeResolver.getUnionTypes().containsKey(word))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String differentArmTypes(Class<?> first, Class<?> other) {
+        return "Match arms give different types, " + siyoTypeName(first) + " and " + siyoTypeName(other)
+                + "; they may differ only where the match ends a function returning object";
+    }
+
     private final Map<BoundMatchExpression, codeanalysis.text.TextSpan> _mixedArmMatches =
             new java.util.IdentityHashMap<>();
 
@@ -935,6 +1384,7 @@ public class Binder {
      * @param valueUsed Whether the match's value is read.
      */
     private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax, boolean valueUsed) {
+        long generation = _typeResolver.generation();
         BoundExpression target = bindExpression(syntax.getTarget());
         codeanalysis.UnionSymbol targetUnion = _typeResolver.resolveUnionType(target);
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
@@ -943,6 +1393,8 @@ public class Binder {
         Class<?> resultType = null;
         boolean resultTypeInitialized = false;
         codeanalysis.text.TextSpan mismatch = null;
+        boolean everyArmHasAValue = true;
+        String mismatchMessage = MIXED_ARMS;
         for (MatchArmSyntax arm : syntax.getArms()) {
             if (arm.isDefault()) hasDefault = true;
 
@@ -951,7 +1403,8 @@ public class Binder {
             BoundMatchExpression.BoundVariantPattern variant = null;
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
-                variant = bindVariantPattern(arm, targetUnion);
+                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation,
+                        _typeResolver.provenanceOf(target), _typeResolver.storageOf(target));
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -984,6 +1437,7 @@ public class Binder {
             }
 
             Class<?> bodyType = body.getClassType();
+            if (bodyType == null && !diverges(preStatements, body)) everyArmHasAValue = false;
             if (diverges(preStatements, body)) {
                 // An arm that throws or returns never produces a value, so it
                 // takes no part in deciding what the match evaluates to.
@@ -992,10 +1446,13 @@ public class Binder {
                 resultType = bodyType;
                 resultTypeInitialized = true;
             } else if (resultType != bodyType) {
+                String why = resultType != null && bodyType != null
+                        ? differentArmTypes(resultType, bodyType) : MIXED_ARMS;
                 if (valueUsed) {
-                    _diagnostics.reportError(arm.getBody().getSpan(), MIXED_ARMS);
+                    _diagnostics.reportError(arm.getBody().getSpan(), why);
                 } else if (mismatch == null) {
                     mismatch = arm.getBody().getSpan();
+                    mismatchMessage = why;
                 }
             }
             arms.add(new BoundMatchExpression.BoundMatchArm(pattern, body, arm.isDefault(),
@@ -1027,6 +1484,10 @@ public class Binder {
             }
             BoundMatchExpression statementMatch = new BoundMatchExpression(target, discarded, null);
             _mixedArmMatches.put(statementMatch, mismatch);
+            _mixedArmMessages.put(statementMatch, mismatchMessage);
+            if (everyArmHasAValue) {
+                _erasableMatches.put(statementMatch, new BoundMatchExpression(target, arms, Object.class));
+            }
             return statementMatch;
         }
         if (!resultTypeInitialized) resultType = Object.class;
@@ -1042,7 +1503,11 @@ public class Binder {
      * @return The bound pattern, or null when the pattern was rejected.
      */
     private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
-                                                                       codeanalysis.UnionSymbol targetUnion) {
+                                                                       codeanalysis.UnionSymbol targetUnion,
+                                                                       String targetTypeName,
+                                                                       long generation,
+                                                                       java.util.Set<Object> provenance,
+                                                                       TypeResolver.Storage storage) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1082,6 +1547,17 @@ public class Binder {
             return null;
         }
 
+        // A generic sum type's payload is read at the type arguments the matched
+        // value carries: Some(r) on an Option<Row> binds a Row.
+        List<String> typeParameters = union.getTypeParameters();
+        Map<String, String> typeArguments = new HashMap<>();
+        if (targetTypeName != null && union.getName().equals(TypeResolver.genericBaseName(targetTypeName))) {
+            List<String> arguments = TypeResolver.typeArgumentsOf(targetTypeName);
+            for (int i = 0; i < arguments.size() && i < typeParameters.size(); i++) {
+                typeArguments.put(typeParameters.get(i), _typeResolver.trustedTypeArgument(arguments.get(i)));
+            }
+        }
+
         List<VariableSymbol> bindings = new ArrayList<>();
         for (int i = 0; i < bindingTokens.size(); i++) {
             codeanalysis.syntax.SyntaxToken token = bindingTokens.get(i);
@@ -1089,9 +1565,27 @@ public class Binder {
                 bindings.add(null); // the pattern discarded this slot
                 continue;
             }
-            VariableSymbol binding = new VariableSymbol(token.getData(), true, variant.getPayloadTypes().get(i));
+            String payloadTypeName = TypeResolver.substitute(variant.getPayloadTypeNames().get(i),
+                    typeParameters, typeArguments);
+            Class<?> payloadType = variant.getPayloadTypes().get(i);
+            // The payload keeps 0.9.0's erased class; its name says which struct
+            // it is, so Some(r) => r.name on an Option<Row> reads a Row.
+            VariableSymbol binding = new VariableSymbol(token.getData(), true, payloadType);
+            // The payload's written type is what it holds: T(xs) with T(Array<S>)
+            // binds an Array<S>, whose elements are known to be S.
+            // Only where it says which struct or type argument the payload holds:
+            // a plain float[] payload stays as 0.9.0 read it.
+            if (!payloadTypeName.equals("object") && (!typeArguments.isEmpty() || namesADeclaredType(payloadTypeName))) {
+                binding.setDeclaredTypeName(payloadTypeName);
+                binding.addProvenance(provenance);
+                _typeResolver.stamp(binding, generation, !provenance.isEmpty());
+                markGenericTypeInferred(binding);
+            }
+            binding.addProvenance(provenance);
+            for (VariableSymbol shared : storage.same) binding.elementOf(shared);
+            for (VariableSymbol container : storage.element) binding.elementOf(container);
+            for (VariableSymbol held : storage.held) held.heldIn(binding);
             bindings.add(binding);
-            String payloadTypeName = variant.getPayloadTypeNames().get(i);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
             if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
             codeanalysis.UnionSymbol payloadUnion = _typeResolver.getUnionTypes().get(payloadTypeName);
@@ -1392,6 +1886,30 @@ public class Binder {
             }
             return new BoundMapLiteralExpression(map.getKeys(), values);
         }
+        // A generic struct's field holds what its declared type argument says:
+        // value of a Box<float> given 3 holds 3.0, as a float field would.
+        if (expression instanceof BoundStructLiteralExpression struct
+                && !struct.getStructType().getTypeParameters().isEmpty()
+                && struct.getStructType().getName().equals(TypeResolver.genericBaseName(typeName))) {
+            StructSymbol symbol = struct.getStructType();
+            List<String> parameters = symbol.getTypeParameters();
+            List<String> arguments = TypeResolver.typeArgumentsOf(typeName);
+            if (arguments.size() != parameters.size()) return expression;
+            // A parameter written Box<T> says nothing about this literal's T; only
+            // a type written out (Box<float>) is one to widen to and name it by.
+            if (TypeResolver.mentionsAny(typeName, _typeResolver.getTypeParameters())) return expression;
+            Map<String, String> bindings = new HashMap<>();
+            for (int i = 0; i < parameters.size(); i++) bindings.put(parameters.get(i), arguments.get(i));
+            java.util.LinkedHashMap<String, BoundExpression> values = new java.util.LinkedHashMap<>();
+            for (var entry : struct.getFieldValues().entrySet()) {
+                String fieldTypeName = TypeResolver.substitute(symbol.getFieldTypeName(entry.getKey()), parameters, bindings);
+                Class<?> fieldType = _typeResolver.lookupType(fieldTypeName);
+                BoundExpression value = entry.getValue();
+                if (fieldType != null) value = widenLiteral(widenTo(value, fieldType), fieldTypeName);
+                values.put(entry.getKey(), value);
+            }
+            return new BoundStructLiteralExpression(symbol, values, typeName);
+        }
         return expression;
     }
 
@@ -1482,6 +2000,13 @@ public class Binder {
             _diagnostics.reportWrongVariantPayloadCount(span, union.getName(), variantName,
                     variant.size(), payload.size());
             return new BoundLiteralExpression(0);
+        }
+        // A payload widens as a parameter does: I(2) holds a long when I
+        // carries one, and F([1, 2]) a float array.
+        payload = new ArrayList<>(payload);
+        for (int i = 0; i < payload.size(); i++) {
+            Class<?> declared = variant.getPayloadTypes().get(i);
+            payload.set(i, widenLiteral(widenTo(payload.get(i), declared), variant.getPayloadTypeNames().get(i)));
         }
         for (int i = 0; i < payload.size(); i++) {
             Class<?> declared = variant.getPayloadTypes().get(i);
@@ -1591,6 +2116,9 @@ public class Binder {
             parameterTypeNames.add(declared != null ? declared : siyoTypeName(parameter.getType()));
         }
         String returnTypeName = lambda.getReturnType() == null ? null : siyoTypeName(lambda.getReturnType());
+        // A generic struct's arguments are kept in the signature, so a call
+        // through the name knows them: fn(object) -> Box<Array<float>>.
+        if (_typeResolver.mentionsGenericStruct(lambda.getReturnTypeName())) returnTypeName = lambda.getReturnTypeName();
         return codeanalysis.FunctionTypeSignature.encode(parameterTypeNames, returnTypeName);
     }
 
@@ -2006,6 +2534,17 @@ public class Binder {
         // push widens to what the array holds, as an assignment to a slot does.
         if (function == BuiltinFunctions.PUSH && boundArguments.size() == 2) {
             boundArguments.set(1, widenTo(boundArguments.get(1), slotType(boundArguments.get(0))));
+            // An array declared to hold one kind of value, by an annotation or a
+            // generic result, cannot be given another: compiled, the element
+            // failed when read back. An array only inferred from a literal is
+            // left as 0.9.0 left it.
+            Class<?> holds = slotType(boundArguments.get(0));
+            Class<?> given = boundArguments.get(1).getClassType();
+            boolean declared = _typeResolver.declaredTypeNameOf(boundArguments.get(0)) != null;
+            if (declared && isScalar(holds) && isScalar(given) && holds != given) {
+                _diagnostics.reportError(syntax.getArguments().get(1).getSpan(),
+                        "push: the array holds " + siyoTypeName(holds) + ", not " + siyoTypeName(given));
+            }
         }
 
         // pop is a builtin, so no signature says what it returns: the array does.
@@ -2015,8 +2554,8 @@ public class Binder {
                     elementType == Object.class ? null : elementType);
         }
 
-        return new BoundCallExpression(function, boundArguments,
-                inferGenericResultType(function, boundArguments));
+        GenericResult generic = inferGenericResultType(function, boundArguments);
+        return genericCall(function, boundArguments, generic);
     }
 
     /**
@@ -2032,11 +2571,68 @@ public class Binder {
      * @param arguments The bound arguments.
      * @return The call's type, or null when the declared return type stands.
      */
-    private Class<?> inferGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
-        if (function.getTypeParameters().isEmpty()) return null;
+    private GenericResult inferGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
+        if (function.getTypeParameters().isEmpty()) return GenericResult.NONE;
         String returnTypeName = function.getDeclaredReturnTypeName();
-        if (returnTypeName == null) return null;
+        if (returnTypeName == null) return GenericResult.NONE;
+        List<String> typeParameters = function.getTypeParameters();
+        if (!TypeResolver.mentionsAny(returnTypeName, typeParameters)) return GenericResult.NONE;
 
+        // The written result type, with each parameter bound to what its
+        // arguments say and trusted only as a struct, sum type or interface:
+        // keep(rows, p) is an Array<Row>, wrap(1) an Array<object> as in 0.9.0.
+        Map<String, String> bindings = new HashMap<>();
+        for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
+            TypeResolver.unify(function.getParameters().get(i).getDeclaredTypeName(),
+                    typeNameOf(arguments.get(i)), typeParameters, bindings);
+        }
+        String resultTypeName = _typeResolver.substituteResult(returnTypeName, typeParameters, bindings);
+
+        // The result's own class is what 0.9.0 gave it, so identity(5) + 1 still
+        // adds; a struct or sum type result is also known by name.
+        Class<?> resultType = legacyGenericResultType(function, arguments);
+        // A bare T, or a container written over the parameters (Array<T>,
+        // Map<K, V>), bound through a generic struct argument: g(b: Box<T>) -> T
+        // given a Box<Array<float>>, or h(b: Box<Array<T>>) -> Array<T>. The
+        // struct's argument is known and its reads checked on both backends.
+        String returnBase = TypeResolver.genericBaseName(TypeResolver.canonicalTypeName(returnTypeName));
+        boolean overParameters = typeParameters.contains(returnTypeName)
+                || (("Array".equals(returnBase) || "Map".equals(returnBase) || "Set".equals(returnBase))
+                    && TypeResolver.typeArgumentsOf(TypeResolver.canonicalTypeName(returnTypeName)).stream()
+                        .allMatch(argument -> typeParameters.contains(argument) || !TypeResolver.mentionsAny(argument, typeParameters)));
+        if (resultType == null || !typeParameters.contains(returnTypeName)) {
+            Map<String, String> throughStructs = new HashMap<>();
+            for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
+                String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
+                if (!_typeResolver.mentionsGenericStruct(parameterTypeName)) continue;
+                TypeResolver.unify(parameterTypeName, typeNameOf(arguments.get(i)), typeParameters, throughStructs);
+            }
+            boolean allBound = overParameters;
+            for (String parameter : typeParameters) {
+                if (!TypeResolver.mentionsAny(returnTypeName, List.of(parameter))) continue;
+                String bound = throughStructs.get(parameter);
+                if (bound == null || bound.equals("object") || !bindings.getOrDefault(parameter, bound).equals(bound)) allBound = false;
+            }
+            if (allBound && !throughStructs.isEmpty()) {
+                String name = TypeResolver.substitute(returnTypeName, typeParameters, throughStructs);
+                Class<?> boundType = _typeResolver.lookupType(name);
+                if (boundType != null && boundType != Object.class) return new GenericResult(boundType, name, true);
+            }
+        }
+        Class<?> named = _typeResolver.lookupType(resultTypeName);
+        if (resultType == null && (named == SiyoStruct.class || named == codeanalysis.SiyoUnion.class
+                || named == SiyoArray.class || named == SiyoMap.class || named == SiyoSet.class)) {
+            resultType = named;
+        }
+        return new GenericResult(resultType, resultTypeName.equals("object") ? null : resultTypeName);
+    }
+
+    /**
+     * A generic call's class exactly as 0.9.0 inferred it: from a parameter
+     * written as the bare type parameter, or as an array of it, read off the
+     * argument's own class or tracked element class.
+     */
+    private Class<?> legacyGenericResultType(FunctionSymbol function, List<BoundExpression> arguments) {
         Map<String, Class<?>> bindings = new HashMap<>();
         for (int i = 0; i < arguments.size() && i < function.getParameters().size(); i++) {
             String parameterTypeName = function.getParameters().get(i).getDeclaredTypeName();
@@ -2046,15 +2642,13 @@ public class Binder {
                 bindings.putIfAbsent(parameterTypeName, argumentType);
                 continue;
             }
-            // T[] and Array<T>: the parameter names the container, the
-            // argument's element type says what T is.
             String elementName = TypeResolver.elementTypeNameOf(parameterTypeName);
             if (elementName != null && function.getTypeParameters().contains(elementName)) {
-                Class<?> elementType = _typeResolver.resolveArrayElementType(arguments.get(i));
+                Class<?> elementType = _typeResolver.legacyArrayElementType(arguments.get(i));
                 if (elementType != null) bindings.putIfAbsent(elementName, elementType);
             }
         }
-
+        String returnTypeName = function.getDeclaredReturnTypeName();
         if (function.getTypeParameters().contains(returnTypeName)) {
             Class<?> bound = bindings.get(returnTypeName);
             return bound == null || bound == Object.class ? null : bound;
@@ -2066,8 +2660,116 @@ public class Binder {
         return null;
     }
 
+    private static boolean isUnboxed(Class<?> type) {
+        return type == Integer.class || type == Long.class || type == Double.class || type == Boolean.class;
+    }
+
+    /** What a generic call produces: its type, and that type written out. */
+    private record GenericResult(Class<?> type, String typeName, boolean throughStruct) {
+        GenericResult(Class<?> type, String typeName) {
+            this(type, typeName, false);
+        }
+
+        static final GenericResult NONE = new GenericResult(null, null);
+    }
+
+    /** A generic call, its result typed and, when bound through a generic struct, recorded as such. */
+    private BoundCallExpression genericCall(FunctionSymbol function, List<BoundExpression> arguments, GenericResult generic) {
+        BoundCallExpression call = new BoundCallExpression(function, arguments, generic.type(), generic.typeName());
+        if (generic.throughStruct()) _typeResolver.markBoundThroughStruct(call);
+        return call;
+    }
+
+    /**
+     * The type of an expression written out as a type name, with its type
+     * arguments when they are known, so it can be matched against a generic
+     * declaration: {@code Array<Row>}, {@code int}, {@code fn(Row)->bool}.
+     *
+     * @param expr The expression.
+     * @return The type name, or null when nothing is known about it.
+     */
+    private String typeNameOf(BoundExpression expr) {
+        String name = inferredTypeNameOf(expr);
+        // A value whose inferred roots meet a contested method is not named by a
+        // struct that contest puts at risk; an unrelated struct it holds still is.
+        if (name != null && !_typeResolver.uncontestedName(name)
+                && !_typeResolver.contestFree(_typeResolver.provenanceOf(expr))) {
+            return null;
+        }
+        return name;
+    }
+
+    private String inferredTypeNameOf(BoundExpression expr) {
+        String declared = _typeResolver.declaredTypeNameOf(expr);
+        if (declared != null) return declared;
+        if (expr instanceof BoundLambdaExpression lambda) return signatureNameOf(lambda);
+        // An array literal of one element kind, named element by element so a
+        // nested literal is whole: [[1.5]] is an Array<Array<float>> and
+        // [{"k": 1.5}] an Array<Map<string,float>>. Only inference reads this.
+        if (expr instanceof BoundArrayLiteralExpression array && !array.getElements().isEmpty()
+                && _typeResolver.declaredTypeNameOf(array) == null) {
+            String element = null;
+            for (int i = 0; i < array.getElements().size(); i++) {
+                String one = typeNameOf(array.getElements().get(i));
+                element = i == 0 ? one : TypeResolver.joinTypeNames(element, one);
+                if (element == null) break;
+            }
+            if (element != null && !element.equals("object")) return "Array<" + element + ">";
+        }
+        // A set literal of one element kind, as an array literal is named.
+        if (expr instanceof BoundSetLiteralExpression set && !set.getElements().isEmpty()) {
+            String element = null;
+            for (int i = 0; i < set.getElements().size(); i++) {
+                String one = typeNameOf(set.getElements().get(i));
+                element = i == 0 ? one : TypeResolver.joinTypeNames(element, one);
+                if (element == null) break;
+            }
+            if (element != null && !element.equals("object")) return "Set<" + element + ">";
+        }
+        // A map literal of one key kind and one value kind, number kinds joined
+        // at the wider: Box { value: {"x": 1.5} } is a Box<Map<string,float>>.
+        if (expr instanceof BoundMapLiteralExpression map && !map.getKeys().isEmpty()) {
+            String key = null, value = null;
+            for (int i = 0; i < map.getKeys().size(); i++) {
+                String k = typeNameOf(map.getKeys().get(i));
+                String v = typeNameOf(map.getValues().get(i));
+                key = i == 0 ? k : TypeResolver.joinTypeNames(key, k);
+                value = i == 0 ? v : TypeResolver.joinTypeNames(value, v);
+                if (key == null || value == null) return "map";
+            }
+            return "Map<" + key + "," + value + ">";
+        }
+        // What follows names a value by 0.9.0's routes, for inference alone. A
+        // value whose inferred identity no longer holds is not named by them
+        // either, so a generic call over it stays erased as in 0.9.0.
+        if (!_typeResolver.identityHolds(_typeResolver.provenanceOf(expr))) return null;
+        if (expr instanceof BoundCallExpression call && !_typeResolver.returnOriginHolds(call.getFunction())) {
+            return null;
+        }
+        Class<?> type = expr.getClassType();
+        if (type == SiyoStruct.class) {
+            StructSymbol struct = _typeResolver.resolveStructType(expr);
+            return struct != null ? struct.getName() : null;
+        }
+        if (type == codeanalysis.SiyoUnion.class) {
+            codeanalysis.UnionSymbol union = _typeResolver.resolveUnionType(expr);
+            return union != null ? union.getName() : null;
+        }
+        if (type == SiyoArray.class) {
+            StructSymbol struct = _typeResolver.resolveStructTypeFromCollection(expr);
+            if (struct != null) return "Array<" + struct.getName() + ">";
+            Class<?> elementType = _typeResolver.resolveArrayElementType(expr);
+            return elementType == null || elementType == Object.class
+                    ? null : "Array<" + siyoTypeName(elementType) + ">";
+        }
+        if (type == null || type == Object.class) return null;
+        return siyoTypeName(type);
+    }
+
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
+        long generation = _typeResolver.generation();
         BoundExpression collection = bindExpression(syntax.getCollection());
+        BoundExpression originalCollection = collection;
         String itemName = syntax.getItemName().getData();
 
         // Channel iteration: for msg in ch { ... } → while (true) { msg = ch.receive(); if msg == null break; body }
@@ -2143,8 +2845,19 @@ public class Binder {
         // Walking an Array<Array<T>> gives Array<T>s, whose elements are still Ts.
         String itemTypeName = walkedTypeName != null ? walkedTypeName
                 : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
+        // An item is what its collection was inferred from, named or not.
+        itemVar.addProvenance(_typeResolver.provenanceOf(originalCollection));
+        // An item is taken out of its collection.
+        TypeResolver.Storage collectionStorage = _typeResolver.storageOf(originalCollection);
+        for (VariableSymbol container : collectionStorage.same) itemVar.elementOf(container);
+        for (VariableSymbol container : collectionStorage.element) itemVar.elementOf(container);
+        for (VariableSymbol held : collectionStorage.held) held.heldIn(itemVar);
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
+            // An element, a map key or a set element of a struct-derived collection.
+            if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar, originalCollection);
+            _typeResolver.stamp(itemVar, generation, !itemVar.getProvenance().isEmpty());
+            markGenericTypeInferred(itemVar);
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {
@@ -2346,7 +3059,15 @@ public class Binder {
         BoundExpression target = bindExpression(syntax.getTarget());
         String memberName = syntax.getMember().getData();
 
-        if (target.getClassType() != SiyoStruct.class) {
+        // An erased value whose declared type names a struct, an element of
+        // keep(rows, p) or Some(r) on an Option<Row>, is read as that struct:
+        // the access casts, so a value of another kind fails there on both
+        // backends, and everything else about the value stays as 0.9.0 had it.
+        if (target.getClassType() == Object.class && _typeResolver.resolveStructType(target) == null) {
+            _diagnostics.reportCannotAccessMember(syntax.getDot().getSpan(), target.getClassType());
+            return new BoundLiteralExpression(0);
+        }
+        if (target.getClassType() != SiyoStruct.class && target.getClassType() != Object.class) {
             _diagnostics.reportCannotAccessMember(syntax.getDot().getSpan(), target.getClassType());
             return new BoundLiteralExpression(0);
         }
@@ -2373,6 +3094,12 @@ public class Binder {
         }
         if (structType != null && structType.hasField(memberName)) {
             memberType = structType.getFieldType(memberName);
+            // A generic struct's field reads at the type its value was given:
+            // items of a Group<Row> is an Array<Row>, value of a Box<int> an int.
+            if (!structType.getTypeParameters().isEmpty()) {
+                Class<?> substituted = _typeResolver.lookupType(_typeResolver.fieldTypeNameOf(target, memberName));
+                if (substituted != null) memberType = substituted;
+            }
             // If field is typed "object" but the type name is a known struct/actor, upgrade to SiyoStruct
             if (memberType == Object.class) {
                 String fieldTypeName = structType.getFieldTypeName(memberName);
@@ -2397,13 +3124,27 @@ public class Binder {
         if (syntax.getTarget() instanceof MemberAccessExpressionSyntax memberSyntax) {
             BoundExpression target = bindExpression(memberSyntax.getTarget());
             String memberName = memberSyntax.getMember().getData();
-            StructSymbol structType = target.getClassType() == SiyoStruct.class
+            StructSymbol structType = target.getClassType() == SiyoStruct.class || target.getClassType() == Object.class
                     ? _typeResolver.resolveStructType(target) : null;
             if (structType != null && !structType.hasField(memberName)) {
                 reportNoSuchField(memberSyntax.getMember().getSpan(), structType, memberName);
             }
             if (structType != null && structType.hasField(memberName)) {
-                value = widenTo(value, structType.getFieldType(memberName));
+                Class<?> fieldType = structType.getFieldType(memberName);
+                // A generic struct's field holds what the value's type argument says.
+                if (!structType.getTypeParameters().isEmpty()) {
+                    Class<?> substituted = _typeResolver.lookupType(_typeResolver.fieldTypeNameOf(target, memberName));
+                    if (substituted != null) fieldType = substituted;
+                }
+                value = widenTo(value, fieldType);
+                // A generic struct's literal widens to its type argument, as at
+                // construction; a plain struct's assignment stays as 0.9.0 had it.
+                if (!structType.getTypeParameters().isEmpty()) {
+                    value = widenLiteral(value, _typeResolver.fieldTypeNameOf(target, memberName));
+                }
+                if (isScalar(fieldType) && isScalar(value.getClassType()) && fieldType != value.getClassType()) {
+                    _diagnostics.reportCannotConvert(syntax.getEqualsToken().getSpan(), value.getClassType(), fieldType);
+                }
             }
             return new BoundMemberAssignmentExpression(target, memberName, value);
         }
@@ -2457,7 +3198,31 @@ public class Binder {
             fieldValues.put(fieldName, fieldValue);
         }
 
-        return new BoundStructLiteralExpression(structType, fieldValues);
+        return new BoundStructLiteralExpression(structType, fieldValues, genericStructTypeName(structType, fieldValues));
+    }
+
+    /**
+     * The type a literal of a generic struct has, its type arguments read off
+     * the values its fields were given: {@code Group { key: "a", items: rows }}
+     * with {@code rows: Array<Row>} is a {@code Group<Row>}. A parameter no
+     * field tells is erased to {@code object}.
+     *
+     * @param structType  The struct.
+     * @param fieldValues The values given for its fields.
+     * @return The type name with its arguments, or null for a struct that declares none.
+     */
+    private String genericStructTypeName(StructSymbol structType, Map<String, BoundExpression> fieldValues) {
+        List<String> typeParameters = structType.getTypeParameters();
+        if (typeParameters.isEmpty()) return null;
+        Map<String, String> bindings = new HashMap<>();
+        for (var entry : fieldValues.entrySet()) {
+            TypeResolver.unify(structType.getFieldTypeName(entry.getKey()), typeNameOf(entry.getValue()),
+                    typeParameters, bindings);
+        }
+        List<String> arguments = new ArrayList<>();
+        for (String parameter : typeParameters) arguments.add(bindings.getOrDefault(parameter, "object"));
+        // Kept as inferred: a field read applies the trust rule (TypeResolver.fieldTypeNameOf).
+        return structType.getName() + "<" + String.join(",", arguments) + ">";
     }
 
     private BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
@@ -2728,7 +3493,8 @@ public class Binder {
         BoundBlockStatement loweredBody = codeanalysis.lowering.Lowerer.lower(
                 applyImplicitReturn(blockBody, returnType));
 
-        return new BoundLambdaExpression(parameters, loweredBody, returnType, captured);
+        return new BoundLambdaExpression(parameters, loweredBody, returnType, captured)
+                .withReturnTypeName(syntax.getTypeClause() != null ? syntax.getTypeClause().getIdentifier().getData() : null);
     }
 
     private void collectCapturedVars(BoundNode node, List<ParameterSymbol> params,
@@ -2959,6 +3725,9 @@ public class Binder {
                 }
 
                 for (int i = 0; i < boundArgs.size(); i++) {
+                    // A narrower number widens at a parameter of another
+                    // module's function as at one of this file's.
+                    boundArgs.set(i, widenTo(boundArgs.get(i), func.getParameters().get(i).getType()));
                     BoundExpression arg = boundArgs.get(i);
                     ParameterSymbol param = func.getParameters().get(i);
                     if (param.getType() != Object.class && arg.getClassType() != Object.class && arg.getClassType() != param.getType()) {
@@ -2966,7 +3735,8 @@ public class Binder {
                     }
                 }
 
-                return new BoundCallExpression(func, boundArgs);
+                GenericResult generic = inferGenericResultType(func, boundArgs);
+                return genericCall(func, boundArgs, generic);
             }
 
             // Check if target is a Java class (static method or constructor)
@@ -3032,6 +3802,14 @@ public class Binder {
         // Check for struct instance method: u.greet() → User.greet(u)
         if (target.getClassType() == SiyoStruct.class) {
             StructSymbol structType = _typeResolver.resolveStructType(target);
+            // A value whose identity 0.10.0 inferred, from roots that no longer
+            // hold (see TypeResolver.provenanceOf), is not dispatched through it:
+            // its fields still read as tracked, but which method body runs could
+            // differ by backend. It fails as the erased value 0.9.0 had.
+            if (structType != null && _typeResolver.dispatchAtRisk(structType)
+                    && !_typeResolver.provenanceHolds(target)) {
+                structType = null;
+            }
             if (structType != null) {
                 String qualifiedName = structType.getName() + "." + methodName;
                 if (_scope.tryLookupFunction(qualifiedName)) {
@@ -3142,7 +3920,8 @@ public class Binder {
         for (int i = 0; i < arguments.size(); i++) {
             callArguments.add(widenTo(arguments.get(i), function.getParameters().get(i + 1).getType()));
         }
-        return new BoundCallExpression(function, callArguments);
+        GenericResult generic = inferGenericResultType(function, callArguments);
+        return genericCall(function, callArguments, generic);
     }
 
     /**
@@ -3454,8 +4233,13 @@ public class Binder {
         if (statement instanceof BoundExpressionStatement expressionStatement) {
             BoundExpression value = expressionStatement.getExpression();
             // A match whose arms disagree has no value to return.
+            if (value instanceof BoundMatchExpression match && returnType == Object.class
+                    && _erasableMatches.containsKey(match)) {
+                return new BoundReturnStatement(_erasableMatches.get(match));
+            }
             if (value instanceof BoundMatchExpression match && _mixedArmMatches.containsKey(match)) {
-                _diagnostics.reportError(_mixedArmMatches.get(match), MIXED_ARMS);
+                _diagnostics.reportError(_mixedArmMatches.get(match),
+                        _mixedArmMessages.getOrDefault(match, MIXED_ARMS));
                 return null;
             }
             // An assignment used as a statement is a side effect, not a value,

@@ -1,0 +1,55 @@
+[
+  {
+    "id": 1,
+    "name": "Ada Lovelace",
+    "dept": "eng",
+    "salary": 8200.5,
+    "start": "2019-03-01",
+    "remote": true
+  },
+  {
+    "id": 2,
+    "name": "Grace Hopper",
+    "dept": "eng",
+    "salary": 9100,
+    "start": "2017-07-15",
+    "remote": false
+  },
+  {
+    "id": 3,
+    "name": "Smith, Jo",
+    "dept": "ops",
+    "salary": 4300,
+    "start": "2021-01-04",
+    "remote": true
+  },
+  {
+    "id": 4,
+    "name": "Linus",
+    "dept": "sales",
+    "start": "2022-11-30"
+  },
+  {
+    "id": 5,
+    "name": "Quote \"Q\" Person",
+    "dept": "ops",
+    "salary": 5150.25,
+    "start": "2020-02-29",
+    "remote": false
+  },
+  {
+    "id": 6,
+    "name": "Mei",
+    "dept": "eng",
+    "salary": 7300,
+    "remote": true
+  },
+  {
+    "id": 7,
+    "name": "Omar",
+    "dept": "sales",
+    "salary": 3900.75,
+    "start": "2023-06-01",
+    "remote": false
+  }
+]

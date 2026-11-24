@@ -1,0 +1,111 @@
+import "std/testing"
+import "model"
+import "validate"
+import "helpers"
+
+fn longsAreReadToTheirLimit() {
+    testing.assert(validate.isLong("0") && validate.isLong("-7") && validate.isLong("007"), "plain")
+    testing.assert(validate.isLong("9223372036854775807"), "max")
+    testing.assert(validate.isLong("-9223372036854775808"), "min")
+    testing.assert(validate.isLong("0009223372036854775807"), "leading zeros do not count")
+    testing.assert(!validate.isLong("9223372036854775808"), "max + 1")
+    testing.assert(!validate.isLong("-9223372036854775809"), "min - 1")
+    testing.assert(!validate.isLong("") && !validate.isLong("-") && !validate.isLong("+1") && !validate.isLong("1.0")
+        && !validate.isLong(" 1") && !validate.isLong("1e3") && !validate.isLong("٣"), "not integers")
+}
+
+fn datesAreCalendarDates() {
+    testing.assert(validate.isDate("2024-02-29") && validate.isDate("2000-02-29") && validate.isDate("0001-01-01"), "valid")
+    testing.assert(!validate.isDate("2023-02-29") && !validate.isDate("1900-02-29"), "not leap years")
+    testing.assert(!validate.isDate("2024-04-31") && !validate.isDate("2024-13-01") && !validate.isDate("2024-00-10"), "no such day or month")
+    testing.assert(!validate.isDate("0000-01-01") && !validate.isDate("2024-1-01") && !validate.isDate("2024/01/01")
+        && !validate.isDate("2024-01-01T00") && !validate.isDate("２０２４-01-01"), "not YYYY-MM-DD")
+}
+
+fn everyProblemInARowIsReported() {
+    imut c = helpers.csvOf(helpers.staff(), "id,dept,pay,start,remote\nx,eng,1.5.0,2024-02-30,maybe\n")
+    testing.assertEq(helpers.problems(c),
+        "line 2 id: must be an integer, got \"x\" | line 2 pay: must be a number, got \"1.5.0\" | line 2 start: must be a date written YYYY-MM-DD, got \"2024-02-30\" | line 2 remote: must be true or false, got \"maybe\"",
+        "four problems")
+    testing.assertEq(toString(len(c.records)) + " " + toString(c.invalidRows) + " " + toString(c.rows), "0 1 1", "counts")
+}
+
+fn emptyCellsAreMissingUnlessRequired() {
+    imut c = helpers.csvOf(helpers.staff(), "id,dept,pay,start,remote\n1,,,,\n,eng,1,2024-01-01,true\n")
+    testing.assertEq(helpers.problems(c), "line 3 id: is required", "only the required one")
+    testing.assert(model.isMissing(c.records[0].cells["pay"]), "missing")
+}
+
+fn aRaggedRowIsRejectedAndTheRestIsChecked() {
+    imut c = helpers.csvOf(helpers.staff(), "id,dept\n1,eng,extra\n2,ops\n")
+    testing.assertEq(helpers.problems(c), "line 2 : has 3 fields, the header has 2", "ragged")
+    testing.assertEq(helpers.column(c.records, "id"), "2", "the other row passed")
+    testing.assertEq(toString(c.rows) + " " + toString(c.invalidRows), "2 1", "a ragged row counts as a row")
+}
+
+fn aQuotedLineBreakKeepsLineNumbersTrue() {
+    imut c = helpers.csvOf(helpers.staff(), "id,dept\n1,\"two\nlines\"\nx,ops\n")
+    testing.assertEq(helpers.problems(c), "line 4 id: must be an integer, got \"x\"", "the line the row starts on")
+}
+
+fn jsonFieldsAreCheckedByKind() {
+    imut c = helpers.jsonOf(helpers.staff(), """[{"id": 1, "pay": 2, "remote": false},
+        {"id": "2", "pay": "2.5", "remote": 1, "start": "2024-01-01"}, {"id": 3, "pay": null}]""")
+    testing.assertEq(helpers.problems(c),
+        "record 2 id: must be an integer, got string | record 2 pay: must be a number, got string | record 2 remote: must be true or false, got int",
+        "kinds")
+    testing.assertEq(helpers.column(c.records, "pay"), "2.0,", "an int reads as a float; null is missing")
+}
+
+fn unknownColumnsAreTheFilesProblem() {
+    imut csv = helpers.csvOf(helpers.staff(), "id,bonus\n1,5\n")
+    testing.assertEq(helpers.problems(csv), "line 1 bonus: the schema has no such column", "csv")
+    imut js = helpers.jsonOf(helpers.staff(), """[{"id": 1, "bonus": 5}, {"id": 2, "bonus": 6}]""")
+    testing.assertEq(helpers.problems(js), "record 1 bonus: the schema has no such column", "json, once")
+    testing.assertEq(toString(js.invalidRows), "0", "no row is rejected for it")
+}
+
+fn unknownColumnsMayBeIgnored() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "id", "type": "int"}], "unknown": "ignore"}""")
+    imut c = helpers.csvOf(s, "id,bonus\n1,5\n")
+    testing.assertEq(helpers.problems(c), "", "ignored")
+    testing.assertEq(helpers.column(c.records, "id"), "1", "kept")
+}
+
+fn boundsAndValuesAreChecked() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "n", "type": "int", "min": 1, "max": 10},
+        {"name": "x", "type": "float", "min": -0.5}, {"name": "k", "type": "string", "values": ["a", "b"]}]}""")
+    imut c = helpers.csvOf(s, "n,x,k\n0,-0.6,c\n11,1,a\n10,-0.5,b\n")
+    testing.assertEq(helpers.problems(c),
+        "line 2 n: must be at least 1, got 0 | line 2 x: must be at least -0.5, got -0.6 | line 2 k: must be one of a, b, got \"c\" | line 3 n: must be at most 10, got 11",
+        "bounds")
+    testing.assertEq(helpers.column(c.records, "n"), "10", "the edges pass")
+}
+
+fn integerBoundsAreExact() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "n", "type": "int", "min": 9007199254740993, "max": 9223372036854775807}]}""")
+    imut c = helpers.csvOf(s, "n\n9007199254740992\n9007199254740993\n9223372036854775807\n")
+    testing.assertEq(helpers.problems(c), "line 2 n: must be at least 9007199254740993, got 9007199254740992", "one below an int64 bound")
+    testing.assertEq(helpers.column(c.records, "n"), "9007199254740993,9223372036854775807", "the edges pass")
+}
+
+fn aQuotedEmptyRecordIsNotABlankLine() {
+    imut s = helpers.schemaOf("""{"columns": [{"name": "v", "type": "int", "required": true}]}""")
+    imut c = helpers.csvOf(s, "v\n\"\"\n\n1\n")
+    testing.assertEq(helpers.problems(c), "line 2 v: is required", "the quoted record is checked")
+    testing.assertEq(toString(c.rows) + " " + toString(c.invalidRows), "2 1", "and counted; the blank line is not")
+}
+
+fn aJsonRecordThatIsNotAnObjectIsCountedWhereverItIs() {
+    imut c = helpers.jsonOf(helpers.staff(), "[1, null, {\"id\": 3}]")
+    testing.assertEq(toString(c.rows) + " " + toString(c.invalidRows) + " " + toString(len(c.records)), "3 2 1", "records 1 and 2 are rejected rows")
+}
+
+fn main() {
+    testing.run("validate", [longsAreReadToTheirLimit, datesAreCalendarDates, everyProblemInARowIsReported,
+                             emptyCellsAreMissingUnlessRequired, aRaggedRowIsRejectedAndTheRestIsChecked,
+                             aQuotedLineBreakKeepsLineNumbersTrue, jsonFieldsAreCheckedByKind,
+                             unknownColumnsAreTheFilesProblem, unknownColumnsMayBeIgnored, boundsAndValuesAreChecked,
+                             integerBoundsAreExact, aQuotedEmptyRecordIsNotABlankLine,
+                             aJsonRecordThatIsNotAnObjectIsCountedWhereverItIs])
+}

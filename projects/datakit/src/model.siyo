@@ -1,0 +1,190 @@
+// What every other module talks about: a schema, the values a row holds once
+// it is typed, and what can be wrong with them.
+
+import "std/strings"
+
+// One cell, typed by its column. A cell that was empty, null or absent is Missing.
+pub type Value = IntV(long) | FloatV(float) | Text(string) | Flag(bool) | Missing
+
+pub struct Column {
+    name: string,
+    kind: string,            // int | float | string | bool | date
+    required: bool,
+    min: Value,              // Missing when there is no bound; IntV keeps an int64 bound exact
+    max: Value,
+    allowed: Array<string>   // empty: any value
+}
+
+pub struct Schema {
+    name: string,
+    columns: Array<Column>,
+    rejectUnknown: bool
+}
+
+// A row that passed every check. `place` names it in messages: "line 4" for
+// CSV, "record 3" for JSON.
+pub struct Record {
+    row: int,
+    place: string,
+    cells: Map<string, Value>
+}
+
+pub struct Problem {
+    row: int,                // where it is in the file: a line or record number, 0 for the file itself
+    place: string,
+    column: string,          // "" when the problem is not one column's
+    message: string
+}
+
+pub fn isKind(s: string) -> bool {
+    s == "int" || s == "float" || s == "string" || s == "bool" || s == "date"
+}
+
+pub fn isNumeric(c: Column) -> bool {
+    c.kind == "int" || c.kind == "float"
+}
+
+pub fn column(s: Schema, name: string) -> Option<Column> {
+    for c in s.columns { if c.name == name { return Some(c) } }
+    None
+}
+
+pub type Option<T> = Some(T) | None
+
+// A value as text, the way it is written back to CSV and shown in reports.
+pub fn text(v: Value) -> string {
+    match v {
+        IntV(n) => toString(n),
+        FloatV(x) => plain(x),
+        Text(s) => s,
+        Flag(b) => if b { "true" } else { "false" },
+        Missing => ""
+    }
+}
+
+// The shortest decimal that reads back as x, never in exponent form:
+// 1e20 is 100000000000000000000.0, 0.1 is 0.1 and 5e-324 keeps all its zeros.
+// toString gives the shortest form that reads back, sometimes with an
+// exponent; the digits are only moved, never rounded.
+pub fn plain(x: float) -> string {
+    imut written = toString(x)
+    imut e = indexOf(written, "E")
+    if e < 0 { return written }
+    imut negative = startsWith(written, "-")
+    imut mantissa = substring(written, if negative { 1 } else { 0 }, e)
+    imut exponent = parseInt(substring(written, e + 1, len(written)))
+    imut point = indexOf(mantissa, ".")
+    mut digits = substring(mantissa, 0, point) + substring(mantissa, point + 1, len(mantissa))
+    mut at = point + exponent
+    // Leading zeros of the digits only move the point.
+    while len(digits) > 1 && startsWith(digits, "0") {
+        digits = substring(digits, 1, len(digits))
+        at -= 1
+    }
+    mut out = ""
+    if at <= 0 {
+        out = "0." + strings.repeat("0", 0 - at) + digits
+    } else if at >= len(digits) {
+        out = digits + strings.repeat("0", at - len(digits)) + ".0"
+    } else {
+        out = substring(digits, 0, at) + "." + substring(digits, at, len(digits))
+    }
+    // No trailing zeros past the first decimal.
+    mut end = len(out)
+    while substring(out, end - 1, end) == "0" && substring(out, end - 2, end - 1) != "." { end -= 1 }
+    (if negative { "-" } else { "" }) + substring(out, 0, end)
+}
+
+// A number as a float, for sums and means; null-free since Missing is skipped by callers.
+pub fn number(v: Value) -> float {
+    match v {
+        IntV(n) => n * 1.0,      // toFloat takes only an int (PAIN_POINTS D-toFloat)
+        FloatV(x) => x,
+        _ => 0.0
+    }
+}
+
+pub fn isMissing(v: Value) -> bool {
+    match v {
+        Missing => true,
+        _ => false
+    }
+}
+
+// Orders two values of one column: numbers by value, text and dates as text,
+// false before true, and Missing after everything.
+pub fn compare(a: Value, b: Value) -> int {
+    if isMissing(a) || isMissing(b) {
+        if isMissing(a) && isMissing(b) { return 0 }
+        return if isMissing(a) { 1 } else { -1 }
+    }
+    match a {
+        IntV(x) => match b {
+            IntV(y) => if x < y { -1 } else if x > y { 1 } else { 0 },
+            FloatV(y) => compareLongFloat(x, y),
+            _ => order(number(a), number(b))
+        },
+        FloatV(x) => match b {
+            IntV(y) => 0 - compareLongFloat(y, x),
+            _ => order(x, number(b))
+        },
+        Text(s) => compareText(s, text(b)),
+        Flag(p) => compareText(text(a), text(b)),
+        Missing => 0
+    }
+}
+
+// A long against a float exactly: 9007199254740993 is greater than
+// 9007199254740992.0. Rounding a long to a float keeps order, so a float that
+// compares unequal to it decides; one that compares equal is an integer in the
+// long range, recovered exactly from its 32- and 16-bit parts.
+pub fn compareLongFloat(x: long, y: float) -> int {
+    if y >= 9223372036854775807.0 { return -1 }    // 2^63, above every long
+    imut xd = x * 1.0
+    if xd < y { return -1 }
+    if xd > y { return 1 }
+    imut high = toInt(y / 4294967296.0)
+    imut rest = y - high * 4294967296.0
+    imut middle = toInt(rest / 65536.0)
+    imut low = toInt(rest - middle * 65536.0)
+    imut exact = high * 4294967296L + middle * 65536L + low
+    if x < exact { -1 } else if x > exact { 1 } else { 0 }
+}
+
+// Compared, not subtracted: a difference of two large floats overflows and one
+// of two tiny ones may round to zero.
+fn order(x: float, y: float) -> int {
+    if x < y { -1 } else if x > y { 1 } else { 0 }
+}
+
+pub fn compareText(a: string, b: string) -> int {
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+}
+
+fn hex4(n: int) -> string {
+    imut digits = "0123456789abcdef"
+    mut out = ""
+    mut rest = n
+    for mut i = 0 i < 4 i = i + 1 {
+        out = substring(digits, rest % 16, rest % 16 + 1) + out
+        rest = rest / 16
+    }
+    out
+}
+
+// Text comes from a file, and a terminal obeys control sequences and reorders
+// text around bidirectional controls, so a text report shows C0 and C1
+// controls and the bidirectional overrides and isolates as escapes.
+pub fn safe(s: string) -> string {
+    imut out = strings.builder()
+    for c in strings.chars(s) {
+        imut code = ord(c)
+        if code < 32 || (code >= 127 && code < 160) || (code >= 8234 && code <= 8238)
+            || (code >= 8294 && code <= 8297) || code == 8206 || code == 8207 {
+            out.append("\\u" + hex4(code))
+        } else {
+            out.append(c)
+        }
+    }
+    toString(out)
+}

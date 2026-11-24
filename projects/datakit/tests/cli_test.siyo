@@ -1,0 +1,62 @@
+import "std/testing"
+import "cli"
+
+fn usageError(args: string[]) -> string {
+    match cli.parseArgs(args) {
+        Usage(why) => why,
+        Help => "help",
+        Opts(o) => "accepted"
+    }
+}
+
+fn options(args: string[]) -> Options {
+    match cli.parseArgs(args) {
+        Opts(o) => { return o },
+        Usage(why) => { throw why },
+        Help => { throw "help" }
+    }
+}
+
+fn aFlagIsNeverAValue() {
+    testing.assertEq(usageError(["transform", "d.csv", "--schema", "s.json", "--out", "--select"]), "--out needs a value", "out")
+    testing.assertEq(usageError(["validate", "d.csv", "--schema", "--json"]), "--schema needs a value", "schema")
+    testing.assertEq(usageError(["group", "d.csv", "--schema", "s.json", "--by"]), "--by needs a value", "at the end")
+    testing.assertEq(usageError(["group", "d.csv", "--schema", "s.json", "--by", ""]), "--by needs a value", "empty")
+}
+
+fn eachCommandTakesItsOwnFlags() {
+    testing.assertEq(usageError(["transform", "d.csv", "--schema", "s", "--json"]), "--json does not apply to transform", "json")
+    testing.assertEq(usageError(["report", "d.csv", "--schema", "s", "--by", "x"]), "--by does not apply to report", "by")
+    testing.assertEq(usageError(["validate", "d.csv", "--schema", "s", "--force"]), "unknown flag \"--force\"", "unknown")
+    testing.assertEq(usageError(["validate", "d.csv", "--schema", "s", "--schema", "t"]), "--schema is given twice", "twice")
+    testing.assertEq(usageError(["validate", "a.csv", "b.csv", "--schema", "s"]), "only one DATA file is read, got \"a.csv\" and \"b.csv\"", "two files")
+    testing.assertEq(usageError(["help"]), "help", "help")
+    testing.assertEq(usageError([]), "no command given", "nothing")
+}
+
+fn numbersAndChoicesAreChecked() {
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--limit", "-1"]), "--limit needs a whole number of rows, got \"-1\"", "negative")
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--limit", "1e3"]), "--limit needs a whole number of rows, got \"1e3\"", "not an int")
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--limit", "99999999999"]), "--limit needs a whole number of rows, got \"99999999999\"", "too large")
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--format", "xml"]), "--format must be csv or json, got \"xml\"", "format")
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--sort", ":desc"]), "--sort needs a column, got \":desc\"", "sort")
+}
+
+fn theFormatFollowsTheOutputFile() {
+    testing.assertEq(options(["transform", "d", "--schema", "s"]).format, "csv", "default")
+    testing.assertEq(options(["transform", "d", "--schema", "s", "--out", "x.JSON"]).format, "json", "from the extension")
+    testing.assertEq(options(["transform", "d", "--schema", "s", "--out", "x.txt", "--format", "json"]).format, "json", "stated")
+    testing.assertEq(usageError(["transform", "d", "--schema", "s", "--out", "x.csv", "--format", "json"]),
+        "--format json does not match --out x.csv", "contradiction")
+}
+
+fn wheresAccumulateAndSortReadsItsDirection() {
+    imut o = options(["transform", "d", "--schema", "s", "--where", "a=1", "--where", "b>2", "--sort", "pay:desc", "--limit", "0"])
+    testing.assertEq(toString(o.wheres) + " " + o.sort + " " + toString(o.descending) + " " + toString(o.limit),
+        "[a=1, b>2] pay true 0", "parsed")
+}
+
+fn main() {
+    testing.run("cli", [aFlagIsNeverAValue, eachCommandTakesItsOwnFlags, numbersAndChoicesAreChecked,
+                        theFormatFollowsTheOutputFile, wheresAccumulateAndSortReadsItsDirection])
+}

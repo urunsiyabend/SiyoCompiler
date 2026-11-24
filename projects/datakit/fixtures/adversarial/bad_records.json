@@ -1,0 +1,40 @@
+[
+ {
+  "id": 1,
+  "name": "A",
+  "dept": "eng",
+  "salary": 10,
+  "start": "2020-01-01",
+  "remote": true
+ },
+ {
+  "id": "2",
+  "name": "B",
+  "dept": "eng",
+  "salary": "10",
+  "start": 20200101,
+  "remote": "true"
+ },
+ {
+  "id": 3.5,
+  "name": [
+   "x"
+  ],
+  "dept": null,
+  "salary": null
+ },
+ "not an object",
+ {
+  "id": 4,
+  "name": "D",
+  "dept": "ops",
+  "extra": 1,
+  "salary": 12345678901234567890123
+ },
+ {
+  "id": 5,
+  "name": "E",
+  "dept": "ops",
+  "extra": 2
+ }
+]

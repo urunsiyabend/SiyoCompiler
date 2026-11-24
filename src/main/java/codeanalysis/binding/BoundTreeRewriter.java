@@ -427,6 +427,7 @@ public abstract class BoundTreeRewriter {
             return node;
         }
 
-        return new BoundCallExpression(node.getFunction(), arguments);
+        return new BoundCallExpression(node.getFunction(), arguments,
+                node.getResultTypeOverride(), node.getResultTypeName());
     }
 }

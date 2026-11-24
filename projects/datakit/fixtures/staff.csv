@@ -1,0 +1,8 @@
+id,name,dept,salary,start,remote
+1,Ada Lovelace,eng,8200.50,2019-03-01,true
+2,Grace Hopper,eng,9100,2017-07-15,false
+3,"Smith, Jo",ops,4300,2021-01-04,true
+4,Linus,sales,,2022-11-30,
+5,"Quote ""Q"" Person",ops,5150.25,2020-02-29,false
+6,Mei,eng,7300,,true
+7,Omar,sales,3900.75,2023-06-01,false

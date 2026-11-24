@@ -273,19 +273,44 @@ task files — and fixing what it hit. See `RELEASE_NOTES_0.9.0.md` and
 
 ---
 
-## 0.10.0 — Tooling & Generic Data (Next)
+## 0.10.0 — Dogfooding: DataKit (Released)
 
-### Generics
-- Generic structs: `struct Box<T> { value: T }`
-- An interface as a bound on a type parameter: `fn largest<T: Ord>(xs: T[]) -> T`
+Writing a third real CLI, `projects/datakit`, and fixing what it hit. DataKit is
+a CSV and JSON validation, transform, grouping and reporting tool built on typed
+generic pipeline functions. See `RELEASE_NOTES_0.10.0.md` and
+`projects/datakit/PAIN_POINTS.md`.
+
+- **Generic data APIs.** Generic structs (`struct Group<T>`). A generic call's
+  result keeps its type arguments (`Array<T>`, `Map<string, Array<T>>`), from
+  another module too. A sum type's payload keeps its written type and is read at
+  the matched value's type argument.
+- **Type rules.** A signature may name a type declared later in the file. A
+  payload, and an argument to another module's function, widens like a
+  parameter. A match ending a function returning `object` may mix value types.
+- **Stdlib.** `std/csv`, `io.readText`, `strings.formatFloat`, `strings.isFloat`.
+- **Not done, moved on:** interface default methods and bounds, `Empty { }`,
+  numeric `as`, `siyoc fmt` and `siyoc check`. DataKit did not need them.
+- 3,174 tests pass, up from 2,743
+
+---
+
+## 0.11.0 — Interfaces, Ergonomics & Tooling (Next)
 
 ### Interfaces
 - Default method bodies
 - An interface that requires another
+- An interface as a bound on a type parameter: `fn largest<T: Ord>(xs: T[]) -> T`
+
+### Types and modules
+- A struct reached through another module's struct field resolves without
+  importing its module (DataKit G11)
+- Module-qualified type names, so two modules may export a type of one name
+  (DataKit G12, LogScope D1)
 
 ### Ergonomics
 - A struct literal with no fields: `Empty { }`
 - Numeric conversion with `as`: `n as float`
+- A float literal with an exponent: `1e20`
 
 ### Tooling
 - `siyoc fmt` — formatter

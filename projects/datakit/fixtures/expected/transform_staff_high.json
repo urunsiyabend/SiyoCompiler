@@ -1,0 +1,1 @@
+[{"id":1,"name":"Ada Lovelace","dept":"eng","salary":8200.5,"start":"2019-03-01","remote":true},{"id":2,"name":"Grace Hopper","dept":"eng","salary":9100.0,"start":"2017-07-15","remote":false},{"id":5,"name":"Quote \"Q\" Person","dept":"ops","salary":5150.25,"start":"2020-02-29","remote":false},{"id":6,"name":"Mei","dept":"eng","salary":7300.0,"start":null,"remote":true}]

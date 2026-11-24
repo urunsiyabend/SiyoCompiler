@@ -138,7 +138,7 @@ public class Compilation {
         // Imported modules are initialised first, dependencies before their
         // importers — the order the bytecode backend's class initialisers run
         // in. Without this every module-level variable read as null.
-        for (ModuleSymbol module : getRegistry().getAllModules()) {
+        for (ModuleSymbol module : getRegistry().getInitialisationOrder()) {
             initialiseModule(module, variables, functions, moduleVariables, moduleFunctions);
         }
         Object value = evaluator.evaluate();

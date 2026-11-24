@@ -1,0 +1,2 @@
+datakit: fixtures/adversarial/schema_not_object.json: a schema must be an object, got array
+datakit: the schema is invalid, nothing was checked

@@ -1,0 +1,12 @@
+{
+  "name": "staff",
+  "columns": [
+    {"name": "id", "type": "int", "required": true, "min": 1},
+    {"name": "name", "type": "string", "required": true},
+    {"name": "dept", "type": "string", "required": true, "values": ["eng", "ops", "sales"]},
+    {"name": "salary", "type": "float", "min": 0},
+    {"name": "start", "type": "date"},
+    {"name": "remote", "type": "bool"}
+  ],
+  "unknown": "reject"
+}

@@ -1,0 +1,165 @@
+// DataKit: validate, transform, group and report on CSV and JSON data files.
+//
+//   siyoc run validate  fixtures/staff.csv --schema fixtures/staff.schema.json
+//   siyoc run transform fixtures/staff.csv --schema fixtures/staff.schema.json --where dept=eng --sort salary:desc
+//   siyoc run group     fixtures/staff.csv --schema fixtures/staff.schema.json --by dept --sum salary
+//   siyoc run report    fixtures/staff.json --schema fixtures/staff.schema.json --json
+
+import "std/io"
+import "std/os"
+import "std/strings"
+import "cli"
+import "model"
+import "schema"
+import "source"
+import "validate"
+import "query"
+import "pipeline"
+import "stats"
+import "render"
+
+imut EXIT_USAGE = 1
+imut EXIT_FILE = 2
+imut EXIT_INVALID = 3
+
+fn fail(code: int, msg: string) {
+    io.eprintln("datakit: " + model.safe(msg))
+    os.exit(code)
+}
+
+fn loadSchema(file: string) -> Schema {
+    if !io.isFile(file) { fail(EXIT_FILE, "cannot read " + file) }
+    match schema.parse(io.readFile(file), file) {
+        Rejected(problems) => {
+            for p in problems { io.eprintln("datakit: " + model.safe(p)) }
+            fail(EXIT_INVALID, "the schema is invalid, nothing was checked")
+        },
+        Ok(s) => { return s }
+    }
+    // Not reached: fail exits. The compiler wants a value on every path.
+    Schema { name: "", columns: [], rejectUnknown: true }
+}
+
+fn loadData(o: Options, s: Schema) -> Checked {
+    match source.load(o.data) {
+        Unreadable(why) => fail(EXIT_FILE, why),
+        Data(raw) => { return validate.check(s, raw) }
+    }
+    Checked { records: [], problems: [], rows: 0, invalidRows: 0 }
+}
+
+// Commands other than validate compute from records, and say nothing true
+// about data that did not pass, so they refuse it.
+fn requireValid(c: Checked) {
+    if len(c.problems) > 0 {
+        io.eprintln(strings.trimEnd(render.problemsText(c)))
+        fail(EXIT_INVALID, "the data is invalid (" + toString(len(c.problems)) + " "
+            + (if len(c.problems) == 1 { "problem" } else { "problems" }) + "), nothing was computed; run validate for details")
+    }
+}
+
+fn columnOrFail(s: Schema, name: string, flag: string) -> Column {
+    match model.column(s, name) {
+        Some(c) => { return c },
+        None => fail(EXIT_USAGE, flag + " names a column the schema does not have: \"" + name + "\"")
+    }
+    s.columns[0]
+}
+
+fn runValidate(o: Options, s: Schema, c: Checked) {
+    if o.json { println(render.validateJson(c)) } else { print(render.validateText(s, c)) }
+    if len(c.problems) > 0 { os.exit(EXIT_INVALID) }
+}
+
+fn runTransform(o: Options, s: Schema, c: Checked) {
+    // Everything that can be wrong with the command is found before anything is written.
+    mut conditions: Array<Condition> = []
+    for w in o.wheres {
+        match query.condition(s, w) {
+            Bad(why) => fail(EXIT_USAGE, why),
+            Good(cond) => push(conditions, cond)
+        }
+    }
+    mut columns: Array<string> = []
+    if o.select == "" {
+        for col in s.columns { push(columns, col.name) }
+    } else {
+        mut chosen: Set<string> = #{}
+        for name in split(o.select, ",") {
+            imut col = columnOrFail(s, name, "--select")
+            if chosen.has(col.name) { fail(EXIT_USAGE, "--select names \"" + col.name + "\" twice") }
+            chosen.add(col.name)
+            push(columns, col.name)
+        }
+    }
+    imut sortColumn = if o.sort == "" { s.columns[0] } else { columnOrFail(s, o.sort, "--sort") }
+    if o.out != "" {
+        if o.out == o.data || o.out == o.schema { fail(EXIT_FILE, "refusing to write over an input file: " + o.out) }
+        if io.exists(o.out) { fail(EXIT_FILE, "refusing to overwrite " + o.out + ": it already exists") }
+    }
+    requireValid(c)
+
+    mut rows = query.filter(c.records, conditions)
+    if o.sort != "" { rows = query.order(rows, sortColumn, o.descending) }
+    if o.limit >= 0 { rows = pipeline.take(rows, o.limit) }
+    imut text = if o.format == "json" { render.rowsJson(columns, rows) + "\n" } else { render.rowsCsv(columns, rows) }
+    if o.out == "" {
+        print(text)
+        return
+    }
+    // Created atomically: the check above only fails early, and a file or
+    // link that appears since is refused here rather than written through.
+    mut refused = ""
+    try {
+        io.writeNew(o.out, text)
+    } catch e {
+        refused = toString(e)
+    }
+    if startsWith(refused, "exists") { fail(EXIT_FILE, "refusing to overwrite " + o.out + ": it already exists") }
+    if refused != "" { fail(EXIT_FILE, "cannot write " + o.out) }
+    io.eprintln("datakit: wrote " + toString(len(rows)) + " " + (if len(rows) == 1 { "row" } else { "rows" }) + " to " + model.safe(o.out))
+}
+
+fn runGroup(o: Options, s: Schema, c: Checked) {
+    imut by = columnOrFail(s, o.by, "--by")
+    if o.sum != "" {
+        imut summed = columnOrFail(s, o.sum, "--sum")
+        if !model.isNumeric(summed) { fail(EXIT_USAGE, "--sum needs a number column, and \"" + summed.name + "\" is " + summed.kind) }
+    }
+    requireValid(c)
+    match stats.group(c.records, by, o.sum) {
+        Overflow(why) => fail(EXIT_INVALID, why),
+        Totals(groups) => {
+            if o.json { println(render.groupJson(by.name, o.sum, groups)) } else { print(render.groupText(by.name, o.sum, groups)) }
+        }
+    }
+}
+
+fn runReport(o: Options, s: Schema, c: Checked) {
+    requireValid(c)
+    match stats.profile(s, c.records) {
+        TooLarge(why) => fail(EXIT_INVALID, why),
+        Profiles(ps) => {
+            if o.json { println(render.reportJson(s, c.rows, ps)) } else { print(render.reportText(s, c.rows, ps)) }
+        }
+    }
+}
+
+fn main() {
+    match cli.parseArgs(os.args()) {
+        Help => println(cli.usage()),
+        Usage(why) => {
+            io.eprintln("datakit: " + model.safe(why))
+            io.eprintln("run datakit help for usage")
+            os.exit(EXIT_USAGE)
+        },
+        Opts(o) => {
+            imut s = loadSchema(o.schema)
+            imut c = loadData(o, s)
+            if o.command == "validate" { runValidate(o, s, c) }
+            else if o.command == "transform" { runTransform(o, s, c) }
+            else if o.command == "group" { runGroup(o, s, c) }
+            else { runReport(o, s, c) }
+        }
+    }
+}

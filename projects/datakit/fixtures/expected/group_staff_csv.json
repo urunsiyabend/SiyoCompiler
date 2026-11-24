@@ -1,0 +1,1 @@
+{"by":"dept","sum":"salary","groups":[{"key":"eng","count":3,"present":3,"sum":24600.5,"min":7300.0,"max":9100.0,"mean":8200.166666666666},{"key":"ops","count":2,"present":2,"sum":9450.25,"min":4300.0,"max":5150.25,"mean":4725.125},{"key":"sales","count":2,"present":1,"sum":3900.75,"min":3900.75,"max":3900.75,"mean":3900.75}]}

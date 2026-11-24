@@ -87,6 +87,27 @@ public class FunctionSymbol {
 
     public void setDeclaredReturnTypeName(String name) { _returnTypeName = name; }
 
+    // For a function imported from another module: that module's struct, sum
+    // type and interface tables as its declarations stood, which the names its
+    // return type is written with mean. Null for a function of this file.
+    private java.util.Map<String, StructSymbol> _returnOriginStructs;
+    private java.util.Map<String, UnionSymbol> _returnOriginUnions;
+    private java.util.Map<String, InterfaceSymbol> _returnOriginInterfaces;
+    private java.util.Set<String> _returnOriginContested = java.util.Set.of();
+
+    public java.util.Map<String, StructSymbol> getReturnOriginStructs() { return _returnOriginStructs; }
+    public java.util.Map<String, UnionSymbol> getReturnOriginUnions() { return _returnOriginUnions; }
+    public java.util.Map<String, InterfaceSymbol> getReturnOriginInterfaces() { return _returnOriginInterfaces; }
+    public java.util.Set<String> getReturnOriginContested() { return _returnOriginContested; }
+
+    public void setReturnOrigin(java.util.Map<String, StructSymbol> structs, java.util.Map<String, UnionSymbol> unions,
+                                java.util.Map<String, InterfaceSymbol> interfaces, java.util.Set<String> contested) {
+        _returnOriginContested = contested == null ? java.util.Set.of() : contested;
+        _returnOriginStructs = structs;
+        _returnOriginUnions = unions;
+        _returnOriginInterfaces = interfaces;
+    }
+
     public String getModuleName() { return _moduleName; }
     public String getReturnStructName() { return _returnStructName; }
     public void setReturnStructName(String name) { _returnStructName = name; }

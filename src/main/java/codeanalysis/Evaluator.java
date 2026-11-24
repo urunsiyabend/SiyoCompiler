@@ -27,6 +27,8 @@ public class Evaluator {
     private Object _lastValue;
     private boolean _returnTriggered = false;
     private Object _returnValue = null;
+    // An actor's method evaluator: its methods' returns are left as 0.9.0 had them.
+    private boolean _insideActor = false;
 
     /**
      * Evaluates the expression syntax tree and computes the result.
@@ -94,6 +96,15 @@ public class Evaluator {
                 case ReturnStatement -> {
                     BoundReturnStatement rs = (BoundReturnStatement) s;
                     _returnValue = rs.getExpression() == null ? null : evaluateExpression(rs.getExpression());
+                    // An erased value returned where a function declares a type is
+                    // cast compiled (Emitter.emitReturnStatement); it is checked
+                    // the same way here, so a Box<T> function returning a string
+                    // fails on both backends.
+                    if (rs.getExpression() != null && rs.getExpression().getClassType() == Object.class
+                            && !_insideActor && !_callStack.isEmpty()) {
+                        Class<?> declared = _callStack.peek().getDeclaredReturnType();
+                        if (declared != null && declared != Object.class) _returnValue = readPayloadAs(declared, _returnValue);
+                    }
                     _returnTriggered = true;
                 }
                 case ThrowStatement -> {
@@ -330,7 +341,12 @@ public class Evaluator {
             case AssignmentExpression -> evaluateAssignmentExpression((BoundAssignmentExpression) node);
             case UnaryExpression -> evaluateUnaryExpression((BoundUnaryExpression) node);
             case BinaryExpression -> evaluateBinaryExpression((BoundBinaryExpression) node);
-            case CallExpression -> evaluateCallExpression((BoundCallExpression) node);
+            case CallExpression -> {
+                BoundCallExpression call = (BoundCallExpression) node;
+                Object value = evaluateCallExpression(call);
+                // Read at the type the call was given, as the compiled unboxing reads it.
+                yield call.getResultTypeOverride() != null ? readPayloadAs(call.getResultTypeOverride(), value) : value;
+            }
             case InterfaceCallExpression -> evaluateInterfaceCall((BoundInterfaceCallExpression) node);
             case ArrayLiteralExpression -> evaluateArrayLiteralExpression((BoundArrayLiteralExpression) node);
             case MapLiteralExpression -> evaluateMapLiteralExpression((codeanalysis.binding.BoundMapLiteralExpression) node);
@@ -803,7 +819,7 @@ public class Evaluator {
         }
 
         // Create stack frame with captured variables + parameters
-        StackFrame frame = new StackFrame(null);
+        StackFrame frame = new StackFrame(null, closure.getReturnType());
 
         // Load captured variables
         for (var entry : closure.getCapturedVars().entrySet()) {
@@ -841,7 +857,7 @@ public class Evaluator {
      * @throws Exception If the body fails.
      */
     private Object invokeClosure(SiyoClosure closure, Object... args) throws Exception {
-        StackFrame frame = new StackFrame(null);
+        StackFrame frame = new StackFrame(null, closure.getReturnType());
         for (var entry : closure.getCapturedVars().entrySet()) {
             frame.getLocals().put(entry.getKey(), entry.getValue());
         }
@@ -966,7 +982,9 @@ public class Evaluator {
                 }
                 var bindings = arm.variant().bindings();
                 for (int i = 0; i < bindings.size(); i++) {
-                    if (bindings.get(i) != null) declareVariable(bindings.get(i), union.get(i));
+                    if (bindings.get(i) != null) {
+                        declareVariable(bindings.get(i), readPayloadAs(bindings.get(i).getType(), union.get(i)));
+                    }
                 }
                 evaluatePreStatements(arm.preStatements());
                 return evaluateExpression(arm.body());
@@ -1126,6 +1144,9 @@ public class Evaluator {
                     }
 
                     actorEval._callStack.push(frame);
+                    // A failed return check would end the actor's method silently
+                    // and leave its caller waiting, so it is not made there.
+                    actorEval._insideActor = true;
                     try {
                         actorEval._actorTypeNames = _actorTypeNames; // propagate actor types
                         actorEval.evaluateBlock(body);
@@ -1278,14 +1299,17 @@ public class Evaluator {
         Object target = evaluateExpression(node.getTarget());
         Object indexValue = evaluateExpression(node.getIndex());
 
+        // A read at a declared element or value type is checked as the compiled
+        // read is: a float element given an int reads as a float, and null or
+        // another kind where a number is declared fails on both backends.
         if (target instanceof SiyoMap map) {
-            return map.get(indexValue);
+            return readPayloadAs(node.getClassType(), map.get(indexValue));
         }
 
         int index = (int) indexValue;
 
         if (target instanceof SiyoArray arr) {
-            return arr.get(index);
+            return readPayloadAs(node.getClassType(), arr.get(index));
         } else if (target instanceof String str) {
             return String.valueOf(str.charAt(index));
         }
@@ -1295,9 +1319,44 @@ public class Evaluator {
     private Object evaluateMemberAccessExpression(BoundMemberAccessExpression node) throws Exception {
         Object target = evaluateExpression(node.getTarget());
         if (target instanceof SiyoStruct struct) {
-            return struct.getField(node.getMemberName());
+            return readPayloadAs(node.getClassType(), struct.getField(node.getMemberName()));
         }
         throw new Exception("Cannot access member on type: " + target.getClass());
+    }
+
+    /**
+     * An erased value read at a declared number type, widened the way the
+     * compiled backend's unboxing widens it: a Box<float>'s value given 3
+     * reads as 3.0 on both backends.
+     */
+    /**
+     * A payload or field read at the type its declaration, or a generic type
+     * argument, gives it. A value of another kind fails here as the compiled
+     * cast does, rather than passing as the wrong type: an Option<int> built
+     * from a string, or a Box<int> whose value was set through an erased Box.
+     */
+    private static Object readPayloadAs(Class<?> type, Object value) {
+        Object read = readAs(type, value);
+        boolean unboxed = type == Integer.class || type == Long.class || type == Double.class
+                || type == Boolean.class;
+        if (unboxed && read == null) {
+            // Compiled, unboxing null fails; it must not read as null here.
+            throw new NullPointerException("a " + type.getSimpleName() + " was expected, and there is no value");
+        }
+        boolean checked = unboxed || type == String.class || type == SiyoStruct.class || type == SiyoUnion.class
+                || type == SiyoArray.class || type == SiyoMap.class || type == SiyoSet.class;
+        if (checked && read != null && !type.isInstance(read)) {
+            throw new ClassCastException("class " + read.getClass().getName() + " cannot be cast to class " + type.getName());
+        }
+        return read;
+    }
+
+    private static Object readAs(Class<?> type, Object value) {
+        if (type == Double.class && (value instanceof Integer || value instanceof Long)) {
+            return ((Number) value).doubleValue();
+        }
+        if (type == Long.class && value instanceof Integer i) return i.longValue();
+        return value;
     }
 
     /**

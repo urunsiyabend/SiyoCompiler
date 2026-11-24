@@ -466,6 +466,97 @@ public class SiyoRuntime {
     }
 
     /**
+     * Writes text to a file that must not exist yet, creating it atomically:
+     * an existing file, directory or symbolic link (dangling or not) is never
+     * opened, so a check followed by a write cannot be raced into clobbering
+     * something. Raises "exists: PATH" when it is there, "cannot write: PATH"
+     * otherwise. Creation is exclusive, not an atomic publication of the whole
+     * content: a write that fails part-way leaves the partial file it created,
+     * since removing it by name could remove someone else's file.
+     */
+    public static void writeNew(String path, String content) {
+        java.nio.file.Path target = java.nio.file.Path.of(path);
+        java.io.OutputStream out;
+        try {
+            out = java.nio.file.Files.newOutputStream(target,
+                    java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            throw new SiyoThrow("exists: " + path);
+        } catch (java.io.IOException | RuntimeException e) {
+            throw new SiyoThrow("cannot write: " + path);
+        }
+        try (out) {
+            out.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            // The file is left as it is. Deleting by name could remove whatever
+            // another process put at that path after this file was moved aside.
+            throw new SiyoThrow("cannot write: " + path);
+        }
+    }
+
+    /** A file's text exactly as written, decoded as UTF-8 with malformed bytes replaced. */
+    public static String readText(String path) {
+        try {
+            return new String(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(path)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new SiyoThrow("cannot read " + path);
+        }
+    }
+
+    /**
+     * Whether s is a finite decimal number, in plain or exponent form, with
+     * nothing around it. {@link Double#parseDouble} also reads {@code NaN},
+     * {@code Infinity}, {@code 0x1p3}, {@code 1f} and surrounding whitespace,
+     * none of which a data file means as a number.
+     */
+    public static boolean isFloat(String s) {
+        // One pass over -?(digits[.digits?] | .digits)([eE][+-]?digits)?: a
+        // backtracking pattern took seconds on a long run of digits that failed.
+        if (s == null) return false;
+        int i = 0, n = s.length();
+        if (i < n && s.charAt(i) == '-') i++;
+        int whole = 0;
+        while (i < n && isAsciiDigit(s.charAt(i))) { i++; whole++; }
+        int fraction = 0;
+        if (i < n && s.charAt(i) == '.') {
+            i++;
+            while (i < n && isAsciiDigit(s.charAt(i))) { i++; fraction++; }
+        }
+        if (whole == 0 && fraction == 0) return false;
+        if (i < n && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) {
+            i++;
+            if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;
+            int exponent = 0;
+            while (i < n && isAsciiDigit(s.charAt(i))) { i++; exponent++; }
+            if (exponent == 0) return false;
+        }
+        if (i != n) return false;
+        return Double.isFinite(Double.parseDouble(s));
+    }
+
+    private static boolean isAsciiDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    /**
+     * A float written with exactly {@code digits} decimals, rounding half up
+     * from its shortest decimal form, so 2.675 is {@code 2.68} as it reads
+     * rather than {@code 2.67} as it is stored. Negative zero is written as
+     * zero; NaN and the infinities as Java names them.
+     */
+    public static String formatFloat(double value, int digits) {
+        if (digits < 0 || digits > 17) {
+            throw new SiyoThrow("formatFloat: digits must be between 0 and 17, got " + digits);
+        }
+        if (!Double.isFinite(value)) return Double.toString(value);
+        java.math.BigDecimal rounded = new java.math.BigDecimal(Double.toString(value))
+                .setScale(digits, java.math.RoundingMode.HALF_UP);
+        if (rounded.signum() == 0) rounded = rounded.abs();
+        return rounded.toPlainString();
+    }
+
+    /**
      * Parses a JSON object, reporting malformed input.
      *
      * <p>The lenient {@link #jsonParse(String)} cannot distinguish a document

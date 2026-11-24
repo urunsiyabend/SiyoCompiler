@@ -1,0 +1,2 @@
+file: a JSON data file must be an array of objects, got int
+invalid: 1 problem, 0 of 0 rows rejected
