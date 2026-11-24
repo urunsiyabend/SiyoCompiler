@@ -627,6 +627,60 @@ changes some of these. `direct_map_null` (a missing key through a generic
   where 0.9.0 failed. Each is now refused, as in 0.9.0. A plain struct element
   of an annotated array, which 0.9.0 typed, is unchanged.
 
+  **A builtin over a literal of a generic holder.** The gate at 648348d found
+  `imut a = pop([w])`, with `w` a `W<P>`, then `a.value.who()` after dup's
+  nested import, printing `lib` compiled and `dup` interpreted. So did
+  `pop(filter([w], ..))`. The plain `struct W { value: P }` twin fails in
+  0.9.0, which typed an element of a literal of struct literals but not of a
+  literal holding a variable. Now three kinds of typing count as only
+  0.10.0's, and the local they give is a root, refused through a contested
+  `P`:
+  - **A builtin over a literal.** One of its arguments is a literal with an
+    element that is not a struct literal: `pop([w])`, `pop([mkw()])`,
+    `filter([w], ..)`.
+  - **A literal of non-literals.** An array or set literal of elements that
+    are not all struct literals carries its inferred element type as a root of
+    its own, so `[b][0].value.who()` is refused too.
+  - **A collection annotation over what 0.9.0 left untyped.** That is a
+    variable (`b: Array<W> = a`), an element, an `if` or `match`, or a generic
+    or closure call. 0.9.0 does not compile these. Such an annotation keeps the
+    value's provenance. Over an ordinary call or a literal it starts afresh, as
+    0.9.0 typed it, so `a: Array<P> = lib.mk()` keeps 0.9.0's route.
+  - **A closure call's result.** Named from the closure's signature
+    (`f = fn() -> W<P> { .. }; f().value.who()`), it carries that name as a
+    root.
+
+  `pop([W { .. }])` and `pop([W { value: p }])` behave as their 0.9.0 plain
+  twins do.
+
+  **A union of storage keeps each root once.** The same gate found 4,000
+  chained aliases of a `W<P>` running out of a 256 MB heap, where 79348c0 runs
+  them in 0.15 s. Every union left the cell it retired holding all the roots
+  so far: 499,500 entries for 1,000 aliases, 1,999,000 for 2,000. A retired
+  cell is now only a link to its new root, without roots or edges of its own.
+
+  Each alias, and each link of a `pop([prev])` or `id(prev)` chain, had also
+  become a root of its own. Such a local's root is now its type and the tables
+  it was stamped against, so locals of one type stamped in one generation
+  share one root: each passes exactly the check the first does. Review found
+  that a first attempt, skipping aliases of checked locals, missed an alias
+  taken through a collection annotation. Measured interpreted:
+
+  | Aliases | 648348d | Final |
+  |---|---|---|
+  | 1,000 | 0.19 s | 0.13 s, 68 MB |
+  | 2,000 | 0.40 s | 0.15 s, 85 MB |
+  | 4,000 | out of memory at 256 MB | 0.18 s, 97 MB; runs with `-Xmx64m` |
+  | 4,000 links of `pop([prev])` | — | 0.28 s; runs with `-Xmx64m` |
+
+  Compiled, the 4,000 locals of one method need 128 MB, as at 79348c0.
+  `aLongChainOfGenericHolderAliasesStaysWithinABoundedHeap` runs the chain with
+  `-Xmx64m` interpreted and `-Xmx128m` compiled, and
+  `aLongChainOfPoppedGenericHoldersStaysWithinABoundedHeap` the `pop` chain with
+  `-Xmx64m`. `aUnionOfStorageKeepsEachRootOnce`
+  checks directly that a chain of 2,000 unions keeps 1,999 root entries in
+  total.
+
   **A duplicate brought in at the top level contests nothing alone.** Review of
   this round found a false rejection. With `import "dup"` at the top level, a
   store `arr[0] = lib.mk()[0]` into an annotated `Array<P>` and then
