@@ -287,16 +287,22 @@ public class ModuleHandler {
             _structTypes.put(entry.getKey(), entry.getValue());
         }
 
-        // A struct-derived value's type travels with the exporter's own struct
-        // table. Whether those names still mean the same structs here is checked
-        // where the value is used (TypeResolver.originHolds), after every import,
-        // so a later import replacing a name cannot be missed.
+        // A struct-derived value's type travels with the exporter's own tables, as
+        // they stood where the value was declared there, so an import inside one of
+        // the exporter's functions cannot change them. Whether those names still
+        // mean the same types here is checked where the value is used
+        // (TypeResolver.originHolds), so a later import cannot be missed.
         for (var export : structDerivedExports.entrySet()) {
             VariableSymbol source = export.getValue();
             export.getKey().setDeclaredTypeName(source.getDeclaredTypeName());
             export.getKey().setStructDerived(true);
-            export.getKey().setOriginStructs(module.getStructs());
-            export.getKey().setOriginTypes(module.getUnions(), module.getInterfaces());
+            if (source.getOriginStructs() != null) {
+                export.getKey().setOriginStructs(source.getOriginStructs());
+                export.getKey().setOriginTypes(source.getOriginUnions(), source.getOriginInterfaces());
+            } else {
+                export.getKey().setOriginStructs(module.getStructs());
+                export.getKey().setOriginTypes(module.getUnions(), module.getInterfaces());
+            }
         }
 
         // Register imported enums so EnumName.Member remains usable across modules.

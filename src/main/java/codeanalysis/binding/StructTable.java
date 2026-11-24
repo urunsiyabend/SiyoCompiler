@@ -2,7 +2,6 @@ package codeanalysis.binding;
 
 import codeanalysis.StructSymbol;
 
-import java.util.HashMap;
 
 /**
  * The structs a file can name, found by the name a type is written with.
@@ -12,7 +11,11 @@ import java.util.HashMap;
  * are carried as written throughout the binder, and every place that looks a
  * struct up by one would otherwise have to remember to drop the arguments.
  */
-final class StructTable extends HashMap<String, StructSymbol> {
+final class StructTable extends VersionedMap<String, StructSymbol> {
+    StructTable(VersionedMap.Version version) {
+        super(version);
+    }
+
     @Override
     public StructSymbol get(Object key) {
         StructSymbol found = super.get(key);

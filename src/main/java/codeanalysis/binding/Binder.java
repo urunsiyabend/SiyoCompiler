@@ -41,8 +41,10 @@ public class Binder {
     private boolean _atFileTopLevel = true;
     final Map<FunctionSymbol, BoundBlockStatement> _functionBodies = new HashMap<>();
     private final Stack<LoopLabels> _loopStack = new Stack<>();
-    private final Map<String, StructSymbol> _structTypes = new StructTable();
-    private final Map<String, codeanalysis.UnionSymbol> _unionTypes = new java.util.LinkedHashMap<>();
+    // One generation for this file's type tables: see VersionedMap.
+    private final VersionedMap.Version _typeVersion = new VersionedMap.Version();
+    private final VersionedMap<String, StructSymbol> _structTypes = new StructTable(_typeVersion);
+    private final VersionedMap<String, codeanalysis.UnionSymbol> _unionTypes = new VersionedMap<>(_typeVersion);
 
     private final TypeResolver _typeResolver;
     private final ModuleHandler _moduleHandler;
@@ -62,7 +64,7 @@ public class Binder {
      */
     public Binder(BoundScope parent) {
         _scope = new BoundScope(parent);
-        _typeResolver = new TypeResolver(_structTypes, _unionTypes);
+        _typeResolver = new TypeResolver(_structTypes, _unionTypes, _typeVersion);
         _moduleHandler = new ModuleHandler(_structTypes, _unionTypes, _typeResolver, _functionBodies);
         _moduleHandler.setDiagnostics(_diagnostics);
         _moduleHandler.setScope(_scope);
@@ -381,6 +383,9 @@ public class Binder {
     private BoundStatement bindVariableDeclaration(VariableDeclarationSyntax syntax) {
         String name = syntax.getIdentifier().getData();
         var isReadOnly = syntax.getKeyword().getType() == SyntaxType.ImmutableKeyword;
+        // The names the variable's type is written with mean what they mean here,
+        // before an import inside the initializer can change them.
+        long generation = _typeResolver.generation();
         BoundExpression initializer = bindExpressionWithTypeHint(syntax.getInitializer(), syntax.getTypeAnnotation());
         requireValue(initializer, syntax.getInitializer());
 
@@ -408,7 +413,7 @@ public class Binder {
             variableSymbol.setDeclaredTypeName(annotation.getData());
             // A struct-derived value under an annotation: the variable holds what
             // the annotation says, and its aliases do too. Reads stay checked.
-            if (_typeResolver.isStructDerived(initializer)) _typeResolver.markStructDerived(variableSymbol);
+            if (_typeResolver.isStructDerived(initializer)) _typeResolver.markStructDerived(variableSymbol, initializer);
             if (variableType == SiyoClosure.class) {
                 checkAgainstFunctionType(initializer, annotation.getData(),
                         syntax.getInitializer().getSpan());
@@ -417,7 +422,7 @@ public class Binder {
             // Whatever form a struct-derived value arrives in (an alias, an index,
             // an if or match, a call, a loop), the variable holds its whole type.
             variableSymbol.setDeclaredTypeName(_typeResolver.declaredTypeNameOf(initializer));
-            _typeResolver.markStructDerived(variableSymbol);
+            _typeResolver.markStructDerived(variableSymbol, initializer);
         } else if (initializer instanceof BoundLambdaExpression lambda) {
             // With no annotation the lambda's own shape is the declaration, so
             // a later call through the name is still checked.
@@ -446,7 +451,7 @@ public class Binder {
             }
             // The variable holds what the struct-derived value does, however it is
             // later aliased, filtered or indexed.
-            if (structDerived && inherited != null) _typeResolver.markStructDerived(variableSymbol);
+            if (structDerived && inherited != null) _typeResolver.markStructDerived(variableSymbol, initializer);
         }
 
         if (!_scope.tryDeclare(variableSymbol)) {
@@ -531,6 +536,7 @@ public class Binder {
             }
         }
 
+        _typeResolver.stamp(variableSymbol, generation);
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -1040,6 +1046,7 @@ public class Binder {
      * @param valueUsed Whether the match's value is read.
      */
     private BoundExpression bindMatchExpression(MatchExpressionSyntax syntax, boolean valueUsed) {
+        long generation = _typeResolver.generation();
         BoundExpression target = bindExpression(syntax.getTarget());
         codeanalysis.UnionSymbol targetUnion = _typeResolver.resolveUnionType(target);
         List<BoundMatchExpression.BoundMatchArm> arms = new ArrayList<>();
@@ -1058,7 +1065,7 @@ public class Binder {
             BoundMatchExpression.BoundVariantPattern variant = null;
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
-                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target));
+                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation);
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -1158,7 +1165,8 @@ public class Binder {
      */
     private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
                                                                        codeanalysis.UnionSymbol targetUnion,
-                                                                       String targetTypeName) {
+                                                                       String targetTypeName,
+                                                                       long generation) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1228,6 +1236,7 @@ public class Binder {
             // a plain float[] payload stays as 0.9.0 read it.
             if (!payloadTypeName.equals("object") && (!typeArguments.isEmpty() || namesADeclaredType(payloadTypeName))) {
                 binding.setDeclaredTypeName(payloadTypeName);
+                _typeResolver.stamp(binding, generation);
             }
             bindings.add(binding);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
@@ -2393,6 +2402,7 @@ public class Binder {
     }
 
     private BoundStatement bindForInStatement(ForInStatementSyntax syntax) {
+        long generation = _typeResolver.generation();
         BoundExpression collection = bindExpression(syntax.getCollection());
         BoundExpression originalCollection = collection;
         String itemName = syntax.getItemName().getData();
@@ -2473,7 +2483,8 @@ public class Binder {
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
             // An element, a map key or a set element of a struct-derived collection.
-            if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar);
+            if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar, originalCollection);
+            _typeResolver.stamp(itemVar, generation);
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {

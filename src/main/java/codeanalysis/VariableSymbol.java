@@ -98,6 +98,13 @@ public class VariableSymbol {
         _originStructs = originStructs;
     }
 
+    private long _originVersion = -1;
+
+    /** The generation of this file's tables a local variable's types were captured in; -1 for an exporter's. */
+    public long getOriginVersion() { return _originVersion; }
+
+    public void setOriginVersion(long version) { _originVersion = version; }
+
     private java.util.Map<String, UnionSymbol> _originUnions = java.util.Map.of();
     private java.util.Map<String, InterfaceSymbol> _originInterfaces = java.util.Map.of();
 

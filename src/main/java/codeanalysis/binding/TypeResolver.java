@@ -13,18 +13,22 @@ import java.util.Map;
 public class TypeResolver {
     private final Map<VariableSymbol, VariableTypeInfo> _typeInfo = new HashMap<>();
     private final Map<String, JavaClassInfo> _javaClasses = new HashMap<>();
-    private final Map<String, StructSymbol> _structTypes;
-    private final Map<String, UnionSymbol> _unionTypes;
-    private final Map<String, InterfaceSymbol> _interfaceTypes = new HashMap<>();
+    private final VersionedMap<String, StructSymbol> _structTypes;
+    private final VersionedMap<String, UnionSymbol> _unionTypes;
+    private final VersionedMap.Version _version;
+    private final VersionedMap<String, InterfaceSymbol> _interfaceTypes;
     private final Map<VariableSymbol, InterfaceSymbol> _variableInterfaces = new HashMap<>();
     private final java.util.Set<String> _typeParameters = new java.util.LinkedHashSet<>();
     // Types a file declares, known by kind before each declaration is registered,
     // so a signature may name a struct or sum type written further down.
     private final Map<String, Class<?>> _declaredAhead = new java.util.HashMap<>();
 
-    public TypeResolver(Map<String, StructSymbol> structTypes, Map<String, UnionSymbol> unionTypes) {
+    public TypeResolver(VersionedMap<String, StructSymbol> structTypes, VersionedMap<String, UnionSymbol> unionTypes,
+                        VersionedMap.Version version) {
         _structTypes = structTypes;
         _unionTypes = unionTypes;
+        _version = version;
+        _interfaceTypes = new VersionedMap<>(version);
     }
 
     /** The interfaces in scope, keyed by name. */
@@ -106,7 +110,8 @@ public class TypeResolver {
         // ha(x) with ha: fn(float) -> Box<Array<float>>.
         if (expr instanceof BoundClosureCallExpression closureCall
                 && closureCall.getClosure() instanceof BoundVariableExpression callee) {
-            var signature = codeanalysis.FunctionTypeSignature.parse(callee.getVariable().getDeclaredTypeName());
+            // Through declaredTypeNameOf, so a signature whose names changed since is not read.
+            var signature = codeanalysis.FunctionTypeSignature.parse(declaredTypeNameOf(callee));
             String returned = signature != null ? signature.getReturnTypeName() : null;
             return mentionsGenericStruct(returned) ? returned : null;
         }
@@ -236,17 +241,90 @@ public class TypeResolver {
      * private P, or a public P a later import replaced, is never read as the
      * type of that name here. A name this module cannot write at all cannot be
      * mistaken, and a struct's own type parameters are not type names. Checked
-     * where the value is used, after every import, once per variable. A local
-     * variable holds trivially.
+     * where the value is used, against the tables as they stand there. A local
+     * variable is checked the same way against this file's tables at the
+     * generation it was stamped in, and holds at once while none has changed.
      */
     boolean originHolds(VariableSymbol var) {
         if (var.getOriginStructs() == null) return true;
-        return _originChecked.computeIfAbsent(var, this::checkOrigin);
+        // Stamped in this generation: nothing it names can have changed.
+        if (var.getOriginVersion() == _version.value()) return true;
+        Map<String, OriginCheck> byName = _originChecked.computeIfAbsent(var.getOriginStructs(),
+                k -> new HashMap<>());
+        String name = var.getDeclaredTypeName() == null ? "" : var.getDeclaredTypeName();
+        OriginCheck cached = byName.get(name);
+        if (cached != null && cached.stillHolds()) return cached.holds;
+        // An imported value is checked against its exporter's fixed tables in every
+        // generation after an import, so its check keeps the names it consulted and
+        // is redone only when one of them changed. A local's stamp is checked in few
+        // generations, and keeps nothing.
+        java.util.Set<String> consulted = var.getOriginVersion() < 0 ? new java.util.HashSet<>() : null;
+        boolean holds = checkOrigin(var, consulted);
+        byName.put(name, new OriginCheck(_version.value(), holds, consulted));
+        return holds;
     }
 
-    private final Map<VariableSymbol, Boolean> _originChecked = new java.util.IdentityHashMap<>();
+    // Checks remembered per origin (an exporter's tables, or this file's at a
+    // generation) and type name, so aliases of one value share one walk. A check
+    // holds in the generation it was made in, and later only while no name it
+    // consulted has changed since, whichever import, at the top of the file or
+    // inside a function, changed the tables.
+    private final Map<Map<String, StructSymbol>, Map<String, OriginCheck>> _originChecked = new java.util.IdentityHashMap<>();
 
-    private boolean checkOrigin(VariableSymbol var) {
+    private final class OriginCheck {
+        private long version;
+        final boolean holds;
+        private final java.util.Set<String> consulted;
+
+        OriginCheck(long version, boolean holds, java.util.Set<String> consulted) {
+            this.version = version;
+            this.holds = holds;
+            this.consulted = consulted;
+        }
+
+        boolean stillHolds() {
+            if (version == _version.value()) return true;
+            if (consulted == null) return false;
+            for (Object changed : _version.changedSince(version)) {
+                if (consulted.contains(changed)) return false;
+            }
+            version = _version.value();
+            return true;
+        }
+    }
+
+    // This file's tables as they stood at each generation a variable was stamped
+    // in, shared by every variable stamped in it. Each is a view, not a copy.
+    private final Map<Long, Snapshot> _snapshots = new HashMap<>();
+
+    private record Snapshot(Map<String, StructSymbol> structs, Map<String, UnionSymbol> unions,
+                            Map<String, InterfaceSymbol> interfaces) {
+    }
+
+    /** The generation this file's type tables are at; see {@link #stamp}. */
+    public long generation() {
+        return _version.value();
+    }
+
+    /**
+     * Records, on a local variable that names types, what those names meant at
+     * {@code generation}, taken before the statement giving it its type was
+     * bound. A later import, at the top of the file, inside a function, or
+     * inside that very statement, may make a name mean something else; the
+     * variable is then checked against what it meant, as an imported value is
+     * checked against its exporter, and reads erased if any name changed. An
+     * imported variable keeps its exporter's tables.
+     */
+    public void stamp(VariableSymbol var, long generation) {
+        if (var.getOriginStructs() != null || var.getDeclaredTypeName() == null) return;
+        Snapshot snapshot = _snapshots.computeIfAbsent(generation, g -> new Snapshot(
+                _structTypes.asOf(g), _unionTypes.asOf(g), _interfaceTypes.asOf(g)));
+        var.setOriginStructs(snapshot.structs());
+        var.setOriginTypes(snapshot.unions(), snapshot.interfaces());
+        var.setOriginVersion(generation);
+    }
+
+    private boolean checkOrigin(VariableSymbol var, java.util.Set<String> consulted) {
         Map<String, StructSymbol> structs = var.getOriginStructs();
         Map<String, UnionSymbol> unions = var.getOriginUnions();
         Map<String, InterfaceSymbol> interfaces = var.getOriginInterfaces();
@@ -258,6 +336,7 @@ public class TypeResolver {
             Map.Entry<String, List<String>> next = pending.pop();
             for (String word : next.getKey().split("[^A-Za-z0-9_]+")) {
                 if (word.isEmpty() || next.getValue().contains(word)) continue;
+                if (consulted != null) consulted.add(word);
                 StructSymbol theirStruct = structs.get(word);
                 UnionSymbol theirUnion = unions.get(word);
                 InterfaceSymbol theirInterface = interfaces.get(word);
@@ -283,7 +362,8 @@ public class TypeResolver {
         return true;
     }
 
-    public void markStructDerived(VariableSymbol var) {
+    /** Marks a variable struct-derived from the value it took; its names are stamped where it is declared. */
+    public void markStructDerived(VariableSymbol var, BoundExpression source) {
         var.setStructDerived(true);
     }
 

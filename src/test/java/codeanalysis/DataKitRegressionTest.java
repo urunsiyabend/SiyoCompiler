@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -1418,5 +1419,198 @@ fn main() {
                 }
             }
         }));
+    }
+
+    // --- Gate at 6864526: an import inside a function changes names after a check --
+
+    private static final String LIB_P = LIB_HEAD + "pub struct P { x: float }\nimpl P { fn who(self) -> string { \"lib\" } }\n"
+            + "pub imut values = g(Box { value: [P { x: 1.5 }] })\n";
+    private static final String OTHER_P = "pub struct P { x: float }\nimpl P { fn who(self) -> string { \"other\" } }\n";
+
+    /**
+     * One nested-import case. {@code expected} is the exact output; "lib-or-rejected"
+     * means the value may be read through lib's own P or refused, but never through
+     * another module's; a prefix ending "|rejected" means that output, then a refusal.
+     */
+    private record NestedCase(String name, String main, String expected) {
+    }
+
+    private static final String NESTED_HEAD = "import \"lib\"\nstruct W<T> { v: T }\ntype Opt<T> = Some(T) | Nothing\n"
+                    + "fn wrap<T>(x: T) -> W<T> { W { v: x } }\nfn call0(f: fn() -> int) -> int { f() }\n"
+                    + "fn first<A>(x: A, y: int) -> A { x }\n";
+    private static final String IMPORTING_LAMBDA = "call0(fn() -> int {\n        import \"other\"\n        0\n    })";
+
+    private static final List<NestedCase> NESTED_CASES = List.of(
+            // An unused function reads lib.values first, then main imports other.
+            new NestedCase("primedThenNestedImport", "import \"lib\"\nfn unused() { imut ignored = lib.values }\n"
+                    + "fn main() {\n    import \"other\"\n    imut a = lib.values\n    println(a[0].who())\n}\n", "|rejected"),
+            new NestedCase("unprimedNestedImport", "import \"lib\"\n"
+                    + "fn main() {\n    import \"other\"\n    imut a = lib.values\n    println(a[0].who())\n}\n", "|rejected"),
+            // An alias made before the import is re-checked where it is used after it.
+            new NestedCase("aliasBeforeNestedImport", "import \"lib\"\n"
+                    + "fn main() {\n    imut a = lib.values\n    imut b = a\n    import \"other\"\n    println(b[0].who())\n}\n", "|rejected"),
+            // A read before the import is lib's; the read after it is refused.
+            new NestedCase("readBeforeAndAfterNestedImport", "import \"lib\"\n"
+                    + "fn early() { imut a = lib.values\n    println(a[0].who()) }\n"
+                    + "fn main() {\n    early()\n    import \"other\"\n    imut b = lib.values\n    println(b[0].who())\n}\n", "lib|rejected"),
+            // A function's own import, declared before or after main.
+            new NestedCase("functionImportBeforeMain", "import \"lib\"\nfn side() { import \"other\" }\n"
+                    + "fn main() {\n    imut a = lib.values\n    println(a[0].who())\n}\n", "lib-or-rejected"),
+            new NestedCase("functionImportAfterMain", "import \"lib\"\n"
+                    + "fn main() {\n    imut a = lib.values\n    println(a[0].who())\n}\nfn side() { import \"other\" }\n", "lib-or-rejected"),
+            // Captured into a struct literal, a generic wrapper, a lambda's declared
+            // return, a loop and a field local before the import: each re-checked.
+            new NestedCase("structLiteralBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
+                    + "fn main() {\n    imut w = W { v: lib.values }\n    import \"other\"\n    println(w.v[0].who())\n}\n", "|rejected"),
+            new NestedCase("genericWrapperBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
+                    + "fn wrap<T>(x: T) -> W<T> { W { v: x } }\n"
+                    + "fn main() {\n    imut w = wrap(lib.values)\n    import \"other\"\n    println(w.v[0].who())\n}\n", "|rejected"),
+            new NestedCase("lambdaReturnBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
+                    + "fn main() {\n    imut f = fn() -> W<Array<P>> { W { v: lib.values } }\n    import \"other\"\n"
+                    + "    println(f().v[0].who())\n}\n", "|rejected"),
+            new NestedCase("loopAndFieldLocalBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
+                    + "fn main() {\n    imut w = W { v: lib.values }\n    imut b = w.v\n    imut p = b[0]\n"
+                    + "    import \"other\"\n    for q in b { println(q.who()) }\n}\n", "|rejected"),
+            // An import inside the very statement that gives a local its type, in a
+            // lambda bound after the value: a declaration, a loop's collection and a
+            // match's target. The names mean what they meant before the statement.
+            // `as o2` registers other's methods in main as well.
+            new NestedCase("importInsideTheInitializer", NESTED_HEAD
+                    + "fn main() {\n    imut w = first(wrap(lib.values), " + IMPORTING_LAMBDA + ")\n"
+                    + "    import \"other\" as o2\n    println(w.v[0].who())\n}\n", "|rejected"),
+            new NestedCase("importInsideTheLoopCollection", NESTED_HEAD
+                    + "fn main() {\n    for w in first([wrap(lib.values)], " + IMPORTING_LAMBDA + ") {\n"
+                    + "        import \"other\" as o2\n        println(w.v[0].who())\n    }\n}\n", "|rejected"),
+            new NestedCase("importInsideTheMatchTarget", NESTED_HEAD
+                    + "fn main() {\n    imut o: Opt<W<Array<P>>> = Some(wrap(lib.values))\n"
+                    + "    match first(o, " + IMPORTING_LAMBDA + ") {\n"
+                    + "        Some(w) => {\n            import \"other\" as o2\n            println(w.v[0].who())\n        }\n"
+                    + "        Nothing => println(\"none\")\n    }\n}\n", "|rejected"),
+            // The same three without the imports read lib's own P.
+            new NestedCase("theSameStatementsWithoutImportsReadLib", NESTED_HEAD
+                    + "fn main() {\n    imut w = first(wrap(lib.values), 0)\n    println(w.v[0].who())\n"
+                    + "    for x in first([wrap(lib.values)], 0) { println(x.v[0].who()) }\n"
+                    + "    imut o: Opt<W<Array<P>>> = Some(wrap(lib.values))\n"
+                    + "    match first(o, 0) {\n        Some(y) => println(y.v[0].who())\n        Nothing => println(\"none\")\n    }\n}\n",
+                    "lib\nlib\nlib"));
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aLaterImportNeverLetsAnImportedValueReadAnotherModulesType(@TempDir Path dir) {
+        return NESTED_CASES.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
+            Path project = Files.createDirectories(dir.resolve(c.name()));
+            Files.writeString(project.resolve("lib.siyo"), LIB_P);
+            Files.writeString(project.resolve("other.siyo"), OTHER_P);
+            Files.writeString(project.resolve("main.siyo"), c.main());
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                String where = c.name() + " " + mode + ": " + result.stdout() + " / " + result.stderr();
+                assertFalse(result.stdout().contains("other"), where);
+                if (!c.expected().contains("rejected")) {
+                    assertEquals(0, result.exitCode(), where);
+                    assertEquals(c.expected(), result.stdout(), where);
+                } else if (c.expected().equals("lib-or-rejected")) {
+                    assertTrue(result.exitCode() == 0 ? result.stdout().equals("lib") : result.stdout().isEmpty(), where);
+                } else {
+                    String before = c.expected().substring(0, c.expected().indexOf("|rejected"));
+                    assertEquals(1, result.exitCode(), where);
+                    assertEquals(before, result.stdout(), where);
+                }
+            }
+        }));
+    }
+
+    @Test
+    void anImportInsideTheExportersOwnFunctionDoesNotChangeWhatItsValueMeans(@TempDir Path dir) throws Exception {
+        // lib's own function imports other, replacing lib's P in lib's tables after
+        // `values` was declared. The importer, which never names other, must not
+        // read lib's value as other's P.
+        Files.writeString(dir.resolve("lib.siyo"), LIB_P + "fn side() { import \"other\" }\n");
+        Files.writeString(dir.resolve("other.siyo"), OTHER_P);
+        Files.writeString(dir.resolve("main.siyo"),
+                "import \"lib\"\nfn main() {\n    imut a = lib.values\n    println(a[0].who())\n}\n");
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, dir.resolve("main.siyo").toString());
+            String where = mode + ": " + result.stdout() + " / " + result.stderr();
+            assertFalse(result.stdout().contains("other"), where);
+            assertTrue(result.exitCode() == 0 ? result.stdout().equals("lib") : result.stdout().isEmpty(), where);
+        }
+    }
+
+    @Test
+    void manyNestedImportsKeepTheOriginCheckBounded(@TempDir Path dir) throws Exception {
+        // 1,500 functions, each taking a local of a 2,000-struct chain and then
+        // importing a module of its own: 1,500 generations of the type tables. A
+        // copy of the tables per generation ran out of memory here.
+        StringBuilder lib = new StringBuilder(LIB_HEAD);
+        int n = 2000;
+        for (int i = 0; i < n; i++) {
+            lib.append("pub struct S").append(i).append(" { n: int, k: ")
+                    .append(i + 1 < n ? "Array<S" + (i + 1) + ">" : "int").append(" }\n");
+        }
+        lib.append("pub imut values = g(Box { value: [S0 { n: 1, k: [] }] })\n");
+        Files.writeString(dir.resolve("lib.siyo"), lib.toString());
+        StringBuilder main = new StringBuilder("import \"lib\"\n");
+        int functions = 1500;
+        for (int i = 0; i < functions; i++) {
+            Files.writeString(dir.resolve("o" + i + ".siyo"), "pub struct Q" + i + " { x: int }\n");
+            main.append("fn f").append(i).append("() -> int {\n    imut a = lib.values\n    import \"o").append(i)
+                    .append("\"\n    a[0].n\n}\n");
+        }
+        main.append("fn main() {\n    println(toString(f0() + f").append(functions - 1).append("()))\n}\n");
+        Files.writeString(dir.resolve("main.siyo"), main.toString());
+        long start = System.nanoTime();
+        CliParityTest.Result result = CliParityTest.siyoc(dir, "interpret", dir.resolve("main.siyo").toString());
+        long seconds = (System.nanoTime() - start) / 1_000_000_000L;
+        assertEquals("2", result.stdout(), result.stderr());
+        assertTrue(seconds < 30, "took " + seconds + " s");
+    }
+
+    @Test
+    void anOriginCheckStaysFastOnALargeCyclicGraphWithManyAliases(@TempDir Path dir) throws Exception {
+        StringBuilder lib = new StringBuilder(LIB_HEAD);
+        int n = 500;
+        for (int i = 0; i < n; i++) {
+            lib.append("pub struct S").append(i).append(" { a: Array<S").append((i + 1) % n).append(">, b: Array<S")
+                    .append((i * 7) % n).append(">, v: float }\n");
+        }
+        lib.append("pub imut values = g(Box { value: [S0 { a: [], b: [], v: 1.5 }] })\n");
+        StringBuilder main = new StringBuilder("import \"lib\"\nfn main() {\n    imut a0 = lib.values\n");
+        for (int i = 1; i <= 200; i++) main.append("    imut a").append(i).append(" = a").append(i - 1).append("\n");
+        main.append("    println(toString(a200[0].v * 2))\n}\n");
+        Files.writeString(dir.resolve("lib.siyo"), lib.toString());
+        Files.writeString(dir.resolve("main.siyo"), main.toString());
+        for (String mode : List.of("run", "interpret")) {
+            long start = System.nanoTime();
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, dir.resolve("main.siyo").toString());
+            long seconds = (System.nanoTime() - start) / 1_000_000_000L;
+            assertEquals("3.0", result.stdout(), mode + ": " + result.stderr());
+            assertTrue(seconds < 20, mode + " took " + seconds + " s");
+        }
+    }
+
+    @Test
+    void anOriginCheckIsSharedAcrossAliasesOfALongChain(@TempDir Path dir) throws Exception {
+        // 3,000 chained structs and 3,000 chained aliases, each read: before aliases
+        // shared one check, this ran out of memory.
+        StringBuilder lib = new StringBuilder(LIB_HEAD);
+        int n = 3000;
+        for (int i = 0; i < n; i++) {
+            lib.append("pub struct S").append(i).append(" { n: int, k: ")
+                    .append(i + 1 < n ? "Array<S" + (i + 1) + ">" : "int").append(" }\n");
+        }
+        lib.append("pub imut values = g(Box { value: [S0 { n: 1, k: [] }] })\n");
+        StringBuilder main = new StringBuilder("import \"lib\"\nfn main() {\n    imut a0 = lib.values\n    mut t = 0\n");
+        for (int i = 1; i < 3000; i++) {
+            main.append("    imut a").append(i).append(" = a").append(i - 1).append("\n    t = t + a").append(i).append("[0].n\n");
+        }
+        main.append("    println(toString(t))\n}\n");
+        Files.writeString(dir.resolve("lib.siyo"), lib.toString());
+        Files.writeString(dir.resolve("main.siyo"), main.toString());
+        long start = System.nanoTime();
+        // Interpreted only: a main this long passes the JVM's 64 KB method limit compiled.
+        CliParityTest.Result result = CliParityTest.siyoc(dir, "interpret", dir.resolve("main.siyo").toString());
+        long seconds = (System.nanoTime() - start) / 1_000_000_000L;
+        assertEquals("2999", result.stdout(), result.stderr());
+        assertTrue(seconds < 20, "took " + seconds + " s");
     }
 }
