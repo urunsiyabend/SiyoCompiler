@@ -159,6 +159,7 @@ public class ModuleHandler {
     }
 
     private final List<String> _importOrder = new ArrayList<>();
+    private final List<String> _ownMethods = new ArrayList<>();
     private boolean _root;
 
     /** Marks the handler of the file being run, whose imports place modules in initialisation order. */
@@ -174,7 +175,7 @@ public class ModuleHandler {
 
     private void anticipateMethod(String qualifiedName, String module) {
         _anticipatedMethods.add(new String[]{qualifiedName, module});
-        _typeResolver.recordMethod(qualifiedName, module);
+        _typeResolver.recordMethod(qualifiedName, module, true);
     }
 
     private final List<StructSymbol> _anticipatedContested = new ArrayList<>();
@@ -212,6 +213,9 @@ public class ModuleHandler {
         for (FunctionSymbol func : module.getFunctions()) {
             if (func.getName().contains(".")) anticipateMethod(func.getName(), func.getOriginModule());
         }
+        // Its impl blocks, on its own structs or another module's: once the
+        // import has run, the interpreter may find any of them by name.
+        for (String method : module.getOwnMethods()) anticipateMethod(method, moduleFilePath);
         for (FunctionSymbol inherited : module.getInheritedMethods().keySet()) {
             anticipateMethod(inherited.getName(), inherited.getOriginModule());
         }
@@ -270,6 +274,10 @@ public class ModuleHandler {
                 return new BoundExpressionStatement(new BoundLiteralExpression(0));
             }
         }
+
+        // Its impl blocks' methods, registered before anything runs: a duplicate
+        // of one is the same for both backends, unless it can win later.
+        for (String method : module.getOwnMethods()) _typeResolver.recordMethod(method, moduleFilePath, false);
 
         // The order this file's imports were bound in is the order its modules
         // are initialised in, whichever was compiled first.
@@ -356,7 +364,7 @@ public class ModuleHandler {
             if (_scope.tryDeclareFunction(inherited) && entry.getValue() != null) {
                 _functionBodies.put(inherited, entry.getValue());
             }
-            _typeResolver.recordMethod(source.getName(), source.getOriginModule());
+            _typeResolver.recordMethod(source.getName(), source.getOriginModule(), false);
         }
 
         // Module-level variables are exported as module.name, reading the static
@@ -457,7 +465,7 @@ public class ModuleHandler {
                 importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
                 importedImpl.setOriginModule(func.getOriginModule());
                 _scope.tryDeclareFunction(importedImpl);
-                _typeResolver.recordMethod(func.getName(), func.getOriginModule());
+                _typeResolver.recordMethod(func.getName(), func.getOriginModule(), false);
                 BoundBlockStatement body = module.getFunctionBodies().get(func);
                 if (body != null) {
                     _functionBodies.put(importedImpl, body);
@@ -727,6 +735,7 @@ public class ModuleHandler {
                     moduleBinder.getTypeResolver().declaredInterfaces(),
                     moduleBinder.getTypeResolver().declaredContested());
             module.setImportOrder(List.copyOf(moduleBinder.getModuleHandler()._importOrder));
+            module.setOwnMethods(List.copyOf(moduleBinder.getModuleHandler()._ownMethods));
             module.setAnticipated(List.copyOf(moduleBinder.getModuleHandler()._anticipatedMethods),
                     List.copyOf(moduleBinder.getModuleHandler()._anticipatedStructs),
                     List.copyOf(moduleBinder.getModuleHandler()._anticipatedContested));
@@ -917,7 +926,8 @@ public class ModuleHandler {
                 }
             }
             _scope.tryDeclareFunction(func);
-            _typeResolver.recordMethod(qualifiedName, _filePath);
+            _typeResolver.recordMethod(qualifiedName, _filePath, true);
+            _ownMethods.add(qualifiedName);
         }
     }
 

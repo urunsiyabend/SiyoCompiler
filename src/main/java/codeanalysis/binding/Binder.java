@@ -630,6 +630,13 @@ public class Binder {
             shareStorage(variableSymbol, initializer);
         }
         _typeResolver.stamp(variableSymbol, generation, !variableSymbol.getProvenance().isEmpty());
+        // A struct literal, or a call typed by its declared return, is typed as
+        // 0.9.0 typed it; an alias, an element or field, or a generic or imported
+        // call's inferred result of a generic struct is typed only by 0.10.0.
+        if (syntax.getTypeAnnotation() == null && typedOnlyBy010(initializer)) {
+            markGenericTypeInferred(variableSymbol);
+        }
+        if (syntax.getTypeAnnotation() == null) markStructTypeInferred(variableSymbol, initializer);
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -842,6 +849,42 @@ public class Binder {
         for (VariableSymbol shared : storage.same) if (shared != variable) variable.shareStorageWith(shared);
         for (VariableSymbol container : storage.element) if (container != variable) variable.elementOf(container);
         for (VariableSymbol held : storage.held) if (held != variable) held.heldIn(variable);
+    }
+
+    private void markGenericTypeInferred(VariableSymbol variable) {
+        String name = variable.getDeclaredTypeName();
+        if (name != null && variable.getOriginStructs() != null && !name.startsWith("fn")
+                && _typeResolver.mentionsGenericStruct(name)) {
+            variable.setGenericTypeInferred(true);
+        }
+    }
+
+    /**
+     * A struct-typed local 0.9.0 did not type at all: one taken from a field
+     * (0.9.0 tracked no struct for it), or from a generic or imported call's
+     * result. Its struct identity is 0.10.0's, as for a generic struct's alias.
+     */
+    private void markStructTypeInferred(VariableSymbol variable, BoundExpression initializer) {
+        String name = variable.getDeclaredTypeName();
+        if (name == null || variable.getOriginStructs() == null || name.startsWith("fn")) return;
+        BoundExpression value = initializer instanceof BoundConversionExpression conversion
+                ? conversion.getExpression() : initializer;
+        boolean onlyBy010 = value instanceof BoundMemberAccessExpression
+                || value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                        && (!call.getFunction().getTypeParameters().isEmpty()
+                            || call.getFunction().getReturnOriginStructs() != null);
+        if (onlyBy010 && _structTypes.containsKey(name)) variable.setGenericTypeInferred(true);
+    }
+
+    /** Whether a value's type name comes from 0.10.0's inference rather than from what 0.9.0 typed. */
+    private static boolean typedOnlyBy010(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010(conversion.getExpression());
+        if (value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
+                || value instanceof BoundMemberAccessExpression) {
+            return true;
+        }
+        return value instanceof BoundCallExpression call
+                && (call.getResultTypeName() != null || call.getFunction().getReturnOriginStructs() != null);
     }
 
     /** The variable an element or field access starts from: b in b[0].f. */
@@ -1443,6 +1486,7 @@ public class Binder {
                 binding.setDeclaredTypeName(payloadTypeName);
                 binding.addProvenance(provenance);
                 _typeResolver.stamp(binding, generation, !provenance.isEmpty());
+                markGenericTypeInferred(binding);
             }
             binding.addProvenance(provenance);
             for (VariableSymbol shared : storage.same) binding.elementOf(shared);
@@ -2720,6 +2764,7 @@ public class Binder {
             // An element, a map key or a set element of a struct-derived collection.
             if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar, originalCollection);
             _typeResolver.stamp(itemVar, generation, !itemVar.getProvenance().isEmpty());
+            markGenericTypeInferred(itemVar);
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {

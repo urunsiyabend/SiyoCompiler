@@ -239,6 +239,18 @@ public class VariableSymbol {
         ProvenanceCell.flow(holder, new java.util.ArrayList<>(held._roots));
     }
 
+    private boolean _genericTypeInferred;
+
+    /**
+     * Whether 0.10.0 gave this local a generic struct type from something other
+     * than a struct literal: an alias, an element, a call, a loop item. 0.9.0
+     * typed no such local, so the struct identity it is dispatched through is
+     * one 0.10.0 inferred (see TypeResolver.provenanceOf).
+     */
+    public boolean isGenericTypeInferred() { return _genericTypeInferred; }
+
+    public void setGenericTypeInferred(boolean inferred) { _genericTypeInferred = inferred; }
+
     /** Whether a local's type name was inferred by 0.10.0 rather than written in an annotation. */
     public boolean isInferredType() { return _inferredType; }
 

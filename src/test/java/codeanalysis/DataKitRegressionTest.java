@@ -1691,6 +1691,22 @@ fn main() {
 
     /** {name, program after the head, expected}: stores reached through calls, closures, loops and holders. */
     private static final List<String[]> ALIAS_ROUTES = List.of(
+            // 0.9.0 typed no local taken from a field or a generic call, and the
+            // re-registration of lib's own who by a nested module changes nothing.
+            new String[]{"aPlainStructLocalTakenFromAField", "struct PW { value: P }\nstruct H { w: PW }\nfn main() {\n    imut h = H { w: PW { value: P { x: 1.0 } } }\n    imut a = h.w\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"aPlainStructLocalFromALocalGenericCall", "struct PW { value: P }\nstruct H { w: PW }\nfn main() {\n    imut a = id(PW { value: P { x: 1.0 } })\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"aPlainStructLocalFromAnImportedGenericCall", "struct PW { value: P }\nstruct H { w: PW }\nfn main() {\n    imut a = lib.id(PW { value: P { x: 1.0 } })\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"topLevelDupBesideANestedModuleAddingAnotherMethod", "import \"dup\"\nfn main() {\n    import \"ext\"\n    imut a = W { value: lib.mk()[0] }\n    println(a.value.who())\n}\n", "lib"},
+            // A duplicate a top-level import brings in is registered before anything
+            // runs, the same for both backends: these run as 0.9.0 runs them. An
+            // alias of a generic struct is typed only by 0.10.0 (0.9.0 lost an
+            // alias's struct), so through a contested P it is refused.
+            new String[]{"topLevelDupAnnotatedArrayStore", "import \"dup\"\nfn main() {\n    mut arr: Array<P> = [P { x: 0.0 }]\n    arr[0] = lib.mk()[0]\n    println(arr[0].who())\n}\n", "lib"},
+            new String[]{"topLevelDupAnnotatedMapStore", "import \"dup\"\nfn main() {\n    mut m: Map<string, P> = {}\n    m[\"k\"] = lib.mk()[0]\n    println(m[\"k\"].who())\n}\n", "lib"},
+            new String[]{"topLevelDupGenericFieldStore", "import \"dup\"\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    w.value = p\n    println(w.value.who())\n}\n", "lib"},
+            new String[]{"aGenericAliasReadAfterAStore", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut alias = w\n    import \"dup\"\n    w.value = p\n    println(alias.value.who())\n}\n", "rejected"},
+            new String[]{"aGenericAliasOfAFreshValue", "fn main() {\n    mut w = W { value: P { x: 0.0 } }\n    imut alias = w\n    import \"dup\"\n    w.value = P { x: 3.0 }\n    println(alias.value.who())\n}\n", "rejected"},
+            new String[]{"aGenericAliasReadInAClosure", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut alias = w\n    imut f = fn() -> string { alias.value.who() }\n    import \"dup\"\n    w.value = p\n    println(f())\n}\n", "rejected"},
             new String[]{"aStoreByACallInADeclaration", "fn put(t: W<P>, q: P) -> int {\n    t.value = q\n    1\n}\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    import \"dup\"\n    imut n = put(w, p)\n    println(w.value.who())\n}\n", "rejected"},
             new String[]{"aOneArgumentClosureThatCapturedTheValue", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut setter = fn(t: W<P>) { t.value = p }\n    import \"dup\"\n    setter(w)\n    println(w.value.who())\n}\n", "rejected"},
             new String[]{"aCallThatCannotStoreIntoItsArgument", "fn show(q: P, xs: Array<P>) -> int { 1 }\nimport \"dup\"\nfn main() {\n    imut xs = lib.mk()\n    imut fresh = P { x: 2.0 }\n    show(fresh, xs)\n    println(fresh.who())\n}\n", "lib"},
@@ -1710,6 +1726,8 @@ fn main() {
             Path project = Files.createDirectories(dir.resolve(c[0]));
             Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
             Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+            Files.writeString(project.resolve("ext.siyo"),
+                    "import \"lib\"\nimpl P { fn other(self) -> string { \"other\" } }\n");
             Files.writeString(project.resolve("main.siyo"), TRANSPORT_HEAD + c[1]);
             for (String mode : List.of("run", "interpret")) {
                 CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
@@ -1722,6 +1740,40 @@ fn main() {
                     assertEquals(0, result.exitCode(), where);
                     assertEquals(c[2], result.stdout(), where);
                 }
+            }
+        }));
+    }
+
+    /** {name, program with VALUE where the stored P goes}: a field typed P read after dup's import. */
+    private static final List<String[]> FIELD_READ_ROUTES = List.of(
+            new String[]{"putFetchesItsOwnValue", "fn put1(t: W<P>) { t.value = VALUE }\nfn main() {\n    mut w = W { value: P { x: 0.0 } }\n    import \"dup\"\n    put1(w)\n    println(w.value.who())\n}\n"},
+            new String[]{"closureReadsBeforeTheStore", "fn main() {\n    imut p = VALUE\n    mut w = W { value: P { x: 0.0 } }\n    imut f = fn() -> string { w.value.who() }\n    import \"dup\"\n    w.value = p\n    println(f())\n}\n"},
+            new String[]{"loopReadsAfterABackEdgeStore", "fn main() {\n    imut p = VALUE\n    mut w = W { value: P { x: 0.0 } }\n    mut i = 0\n    import \"dup\"\n    while i < 2 {\n        if i == 1 { println(w.value.who()) } else { w.value = p }\n        i = i + 1\n    }\n}\n"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aFieldTypedPReadsTheSameWhetherItsValueWasInferredOrNot(@TempDir Path dir) {
+        // Reading a field typed P after dup redeclared P.who is 0.9.0's own
+        // same-name dispatch: with a plain struct W { value: P }, 0.9.0 gives
+        // these exact routes the same per-backend output. What 0.10.0 infers
+        // must neither add to nor hide from that: the value fetched from
+        // lib.mk() behaves as a fresh P literal does, on each backend.
+        return FIELD_READ_ROUTES.stream().map(c -> DynamicTest.dynamicTest(c[0], () -> {
+            Map<String, CliParityTest.Result> results = new java.util.HashMap<>();
+            for (String value : List.of("lib.mk()[0]", "P { x: 3.0 }")) {
+                Path project = Files.createDirectories(dir.resolve(c[0] + (value.startsWith("lib") ? "_inferred" : "_fresh")));
+                Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+                Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+                Files.writeString(project.resolve("main.siyo"), TRANSPORT_HEAD + c[1].replace("VALUE", value));
+                for (String mode : List.of("run", "interpret")) {
+                    results.put(value + mode, CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString()));
+                }
+            }
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result inferred = results.get("lib.mk()[0]" + mode);
+                CliParityTest.Result fresh = results.get("P { x: 3.0 }" + mode);
+                String where = c[0] + " " + mode + ": " + inferred.stdout() + " / " + fresh.stdout() + " / " + inferred.stderr();
+                assertEquals(fresh.exitCode(), inferred.exitCode(), where);
+                assertEquals(fresh.stdout(), inferred.stdout(), where);
             }
         }));
     }

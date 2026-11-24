@@ -348,16 +348,31 @@ public class TypeResolver {
     // P is lib's and P.who may be other's, as in 0.9.0.
     private final Map<String, Map<String, java.util.Set<String>>> _methodModules = new HashMap<>();
 
-    /** Records that {@code module} declared a method {@code Struct.name} here. */
-    public void recordMethod(String qualifiedName, String module) {
+    // The declarations among those that can still change which body the
+    // interpreter runs by name after the first was registered: a method this
+    // file declares itself, and one an import nested in a function brings in
+    // when it runs. A duplicate a top-level import brings in is registered
+    // before anything runs, the same for both backends.
+    private final Map<String, Map<String, java.util.Set<String>>> _lateMethodModules = new HashMap<>();
+
+    /**
+     * Records that {@code module} declared a method {@code Struct.name} here;
+     * {@code late} when it is this file's own or comes from a nested import.
+     */
+    public void recordMethod(String qualifiedName, String module, boolean late) {
         int dot = qualifiedName.indexOf('.');
         if (dot <= 0 || module == null) return;
         String struct = qualifiedName.substring(0, dot);
+        String method = qualifiedName.substring(dot + 1);
         // A new declarer can change what a name means here, so it is a change like any other.
-        if (_methodModules.computeIfAbsent(struct, k -> new HashMap<>())
-                .computeIfAbsent(qualifiedName.substring(dot + 1), k -> new java.util.HashSet<>()).add(module)) {
-            _version.bump(struct);
+        // In the order registered: the first is the body a call binds to.
+        boolean changed = _methodModules.computeIfAbsent(struct, k -> new HashMap<>())
+                .computeIfAbsent(method, k -> new java.util.LinkedHashSet<>()).add(module);
+        if (late) {
+            changed |= _lateMethodModules.computeIfAbsent(struct, k -> new HashMap<>())
+                    .computeIfAbsent(method, k -> new java.util.HashSet<>()).add(module);
         }
+        if (changed) _version.bump(struct);
     }
 
     // Structs an imported module found contested, as its declarations stood. Its
@@ -391,16 +406,46 @@ public class TypeResolver {
      * re-checked after an import, are held to what changed since, not to this.
      */
     private boolean methodsContested(String name, StructSymbol here) {
+        return methodsContested(name, here, true);
+    }
+
+    /**
+     * As above; without {@code duplicates}, only what contests a struct for any
+     * file importing this one: a second struct of the name, or a contest an
+     * import of this file's found. A method this file declares again is carried
+     * to its importers as a method instead (see ModuleSymbol.getOwnMethods), which
+     * contests only where it can still win by name later.
+     */
+    private boolean methodsContested(String name, StructSymbol here, boolean duplicates) {
         if (here != null && _importedContested.contains(here)) return true;
         Map<String, java.util.Set<String>> methods = _methodModules.get(name);
         if (methods == null || here == null) return false;
         java.util.Set<String> declarers = new java.util.HashSet<>();
         for (StructSymbol declared : _structTypes.everHeld(name)) declarers.add(declared.getOriginModule());
         declarers.addAll(_futureStructs.getOrDefault(name, java.util.Set.of()));
-        boolean twoStructs = declarers.size() > 1;
-        for (java.util.Set<String> modules : methods.values()) {
-            if (modules.size() > 1) return true;
-            if (twoStructs && !modules.contains(here.getOriginModule())) return true;
+        // Files whose own struct of this name is another struct than this one.
+        java.util.Set<String> otherStructs = new java.util.HashSet<>(declarers);
+        otherStructs.remove(here.getOriginModule());
+        Map<String, java.util.Set<String>> late = _lateMethodModules.getOrDefault(name, Map.of());
+        for (var method : methods.entrySet()) {
+            java.util.Set<String> from = method.getValue();
+            // A method of another struct of the name: it may run on this one.
+            for (String module : from) {
+                if (otherStructs.contains(module)) return true;
+            }
+            if (from.size() < 2) continue;
+            // One method from two files, the struct's own file not registered first.
+            if (from.contains(here.getOriginModule()) && !from.iterator().next().equals(here.getOriginModule())) {
+                return true;
+            }
+            // One method from two files, another body than the first registered
+            // able to win by name later.
+            if (duplicates) {
+                String first = from.iterator().next();
+                for (String module : late.getOrDefault(method.getKey(), java.util.Set.of())) {
+                    if (!module.equals(first)) return true;
+                }
+            }
         }
         return false;
     }
@@ -415,7 +460,7 @@ public class TypeResolver {
         _declared = snapshotAt(_version.value());
         java.util.Set<String> contested = new java.util.HashSet<>();
         for (String name : _structTypes.keySet()) {
-            if (methodsContested(name, _structTypes.get(name))) contested.add(name);
+            if (methodsContested(name, _structTypes.get(name), false)) contested.add(name);
         }
         _declaredContested = contested;
     }
@@ -508,10 +553,14 @@ public class TypeResolver {
         int next = depth + 1;
         if (expr instanceof BoundVariableExpression v) {
             VariableSymbol variable = v.getVariable();
-            // An imported value is a root. A local is not: what it was inferred
-            // from already is, which keeps a container of many locals' values to
-            // the few roots they share.
-            if (variable.getOriginStructs() != null && variable.getOriginVersion() < 0) roots.add(variable);
+            // An imported value is a root, and so is a local whose generic struct
+            // type 0.10.0 inferred. Another local is not: what it was inferred from
+            // already is, which keeps a container of many locals' values to the
+            // few roots they share.
+            if (variable.getOriginStructs() != null
+                    && (variable.getOriginVersion() < 0 || variable.isGenericTypeInferred())) {
+                roots.add(variable);
+            }
             roots.addAll(variable.getProvenance());
             if (storage != null) {
                 (storage.inside ? storage.held : storage.derived ? storage.element : storage.same).add(variable);

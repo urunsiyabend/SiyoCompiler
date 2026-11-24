@@ -113,6 +113,13 @@ public class ModuleSymbol {
 
     public java.util.List<String[]> getAnticipatedMethods() { return _anticipatedMethods; }
 
+    private java.util.List<String> _ownMethods = java.util.List.of();
+
+    /** The methods this module's impl blocks declare, Struct.name, on any struct. */
+    public java.util.List<String> getOwnMethods() { return _ownMethods; }
+
+    public void setOwnMethods(java.util.List<String> methods) { _ownMethods = methods; }
+
     private java.util.List<String> _importOrder = java.util.List.of();
 
     /** The modules this module's import statements bound, in the order they were bound. */
