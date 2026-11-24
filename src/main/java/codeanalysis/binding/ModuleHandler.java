@@ -146,7 +146,7 @@ public class ModuleHandler {
 
     // --- Import handling ---
 
-    public BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
+    private static String importedModuleName(ImportStatementSyntax syntax) {
         String moduleName = (String) syntax.getModuleName().getValue();
         if (moduleName == null) {
             moduleName = syntax.getModuleName().getData();
@@ -155,6 +155,74 @@ public class ModuleHandler {
                 moduleName = moduleName.substring(1, moduleName.length() - 1);
             }
         }
+        return moduleName;
+    }
+
+    // Modules an import inside a function will bring in, compiled ahead by
+    // anticipateImport; a failed one maps to null and is reported once.
+    private final Map<String, ModuleSymbol> _anticipated = new HashMap<>();
+    // What those imports bring in, theirs included, so a file importing this one
+    // inside a function learns it too: {name, declaring file}.
+    private final List<String[]> _anticipatedMethods = new ArrayList<>();
+    private final List<String[]> _anticipatedStructs = new ArrayList<>();
+
+    private void anticipateMethod(String qualifiedName, String module) {
+        _anticipatedMethods.add(new String[]{qualifiedName, module});
+        _typeResolver.recordMethod(qualifiedName, module);
+    }
+
+    private final List<StructSymbol> _anticipatedContested = new ArrayList<>();
+
+    private void anticipateContested(StructSymbol struct) {
+        if (struct == null) return;
+        _anticipatedContested.add(struct);
+        _typeResolver.recordImportedContested(struct.getName(), struct);
+    }
+
+    private void anticipateStruct(String name, String module) {
+        _anticipatedStructs.add(new String[]{name, module});
+        _typeResolver.recordFutureStruct(name, module);
+    }
+
+    /**
+     * Compiles the module an import nested in a function or lambda will bring in,
+     * before any body of this file is bound, and records the methods and struct
+     * declarations it will add. The interpreter finds a method by name once that
+     * import has run, whichever order the code was bound in, so a struct its
+     * methods will contest is contested from the start for what 0.10.0 infers.
+     * Nothing is declared into scope: the import itself still does that.
+     */
+    public void anticipateImport(ImportStatementSyntax syntax) {
+        String moduleName = importedModuleName(syntax);
+        if (moduleName == null) return;
+        String moduleFilePath = resolveModulePath(moduleName);
+        if (moduleFilePath == null || _anticipated.containsKey(moduleFilePath)) return;
+        if (_registry != null && _registry.isInProgress(moduleFilePath)) return;
+        ModuleSymbol module = _registry != null && _registry.isCompiled(moduleFilePath)
+                ? _registry.getModule(moduleFilePath)
+                : compileModule(moduleName, moduleFilePath);
+        _anticipated.put(moduleFilePath, module);
+        if (module == null) return;
+        for (FunctionSymbol func : module.getFunctions()) {
+            if (func.getName().contains(".")) anticipateMethod(func.getName(), func.getOriginModule());
+        }
+        for (FunctionSymbol inherited : module.getInheritedMethods().keySet()) {
+            anticipateMethod(inherited.getName(), inherited.getOriginModule());
+        }
+        for (var entry : module.getStructs().entrySet()) {
+            if (module.exports(entry.getKey())) anticipateStruct(entry.getKey(), entry.getValue().getOriginModule());
+        }
+        // And what its own functions will import, in turn.
+        for (String[] method : module.getAnticipatedMethods()) anticipateMethod(method[0], method[1]);
+        for (String[] struct : module.getAnticipatedStructs()) anticipateStruct(struct[0], struct[1]);
+        for (String name : module.getDeclaredContested()) {
+            if (module.getDeclaredStructs() != null) anticipateContested(module.getDeclaredStructs().get(name));
+        }
+        for (StructSymbol contested : module.getAnticipatedContested()) anticipateContested(contested);
+    }
+
+    public BoundStatement bindImportStatement(ImportStatementSyntax syntax) {
+        String moduleName = importedModuleName(syntax);
 
         // An alias is part of the identity of an import: the same module may be
         // reached under its own name and under an alias in the same file.
@@ -180,7 +248,14 @@ public class ModuleHandler {
 
         // Get or compile the module
         ModuleSymbol module;
-        if (_registry != null && _registry.isCompiled(moduleFilePath)) {
+        if (_anticipated.containsKey(moduleFilePath)) {
+            // Compiled ahead; a failure was reported then.
+            module = _anticipated.get(moduleFilePath);
+            if (module == null) {
+                _diagnostics.markModuleFailed(shortModuleName(moduleName));
+                return new BoundExpressionStatement(new BoundLiteralExpression(0));
+            }
+        } else if (_registry != null && _registry.isCompiled(moduleFilePath)) {
             module = _registry.getModule(moduleFilePath);
         } else {
             module = compileModule(moduleName, moduleFilePath);
@@ -640,6 +715,9 @@ public class ModuleHandler {
                     moduleBinder.getTypeResolver().declaredUnions(),
                     moduleBinder.getTypeResolver().declaredInterfaces(),
                     moduleBinder.getTypeResolver().declaredContested());
+            module.setAnticipated(List.copyOf(moduleBinder.getModuleHandler()._anticipatedMethods),
+                    List.copyOf(moduleBinder.getModuleHandler()._anticipatedStructs),
+                    List.copyOf(moduleBinder.getModuleHandler()._anticipatedContested));
             module.setVariables(collectTopLevelVariables(topLevelBlock, className));
             module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
             module.setImportedClassNames(

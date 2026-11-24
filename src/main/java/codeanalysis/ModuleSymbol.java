@@ -106,6 +106,26 @@ public class ModuleSymbol {
     public Map<String, UnionSymbol> getDeclaredUnions() { return _declaredUnions; }
     public Map<String, InterfaceSymbol> getDeclaredInterfaces() { return _declaredInterfaces; }
 
+    // What imports nested in this module's functions bring in, its own and theirs
+    // in turn: {qualified method or struct name, declaring file}.
+    private java.util.List<String[]> _anticipatedMethods = java.util.List.of();
+    private java.util.List<String[]> _anticipatedStructs = java.util.List.of();
+
+    public java.util.List<String[]> getAnticipatedMethods() { return _anticipatedMethods; }
+    public java.util.List<String[]> getAnticipatedStructs() { return _anticipatedStructs; }
+
+    private java.util.List<StructSymbol> _anticipatedContested = java.util.List.of();
+
+    /** Structs found contested by the modules this module's nested imports bring in. */
+    public java.util.List<StructSymbol> getAnticipatedContested() { return _anticipatedContested; }
+
+    public void setAnticipated(java.util.List<String[]> methods, java.util.List<String[]> structs,
+                               java.util.List<StructSymbol> contested) {
+        _anticipatedMethods = methods;
+        _anticipatedStructs = structs;
+        _anticipatedContested = contested;
+    }
+
     /** Struct names whose methods here came from another declaration than the struct's. */
     public java.util.Set<String> getDeclaredContested() { return _declaredContested; }
 

@@ -122,7 +122,31 @@ class VersionedMap<K, V> extends LinkedHashMap<K, V> {
 
     @Override
     public Set<Map.Entry<K, V>> entrySet() {
-        return Collections.unmodifiableSet(super.entrySet());
+        // Entries are copies: setValue on one would change the table unrecorded.
+        Set<Map.Entry<K, V>> entries = super.entrySet();
+        return new java.util.AbstractSet<>() {
+            @Override
+            public java.util.Iterator<Map.Entry<K, V>> iterator() {
+                java.util.Iterator<Map.Entry<K, V>> inner = entries.iterator();
+                return new java.util.Iterator<>() {
+                    @Override
+                    public boolean hasNext() {
+                        return inner.hasNext();
+                    }
+
+                    @Override
+                    public Map.Entry<K, V> next() {
+                        Map.Entry<K, V> entry = inner.next();
+                        return new AbstractMap.SimpleImmutableEntry<>(entry.getKey(), entry.getValue());
+                    }
+                };
+            }
+
+            @Override
+            public int size() {
+                return entries.size();
+            }
+        };
     }
 
     private static UnsupportedOperationException unrecorded() {

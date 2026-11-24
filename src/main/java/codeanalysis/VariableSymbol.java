@@ -100,6 +100,22 @@ public class VariableSymbol {
 
     private long _originVersion = -1;
     private boolean _inferredType;
+    private java.util.Set<Object> _provenance = java.util.Set.of();
+
+    /**
+     * What this variable's value was inferred from by 0.10.0: imported values,
+     * imported calls named from their declaration, and generic results (see
+     * TypeResolver.provenanceOf). It only grows: an assignment, a push or a
+     * stored field adds what was stored.
+     */
+    public java.util.Set<Object> getProvenance() { return _provenance; }
+
+    public void addProvenance(java.util.Set<Object> roots) {
+        if (roots.isEmpty() || _provenance.containsAll(roots)) return;
+        java.util.Set<Object> grown = new java.util.LinkedHashSet<>(_provenance);
+        grown.addAll(roots);
+        _provenance = grown;
+    }
 
     /** Whether a local's type name was inferred by 0.10.0 rather than written in an annotation. */
     public boolean isInferredType() { return _inferredType; }

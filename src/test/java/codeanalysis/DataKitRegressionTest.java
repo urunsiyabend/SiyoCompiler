@@ -1449,10 +1449,11 @@ fn main() {
             // An alias made before the import is re-checked where it is used after it.
             new NestedCase("aliasBeforeNestedImport", "import \"lib\"\n"
                     + "fn main() {\n    imut a = lib.values\n    imut b = a\n    import \"other\"\n    println(b[0].who())\n}\n", "|rejected"),
-            // A read before the import is lib's; the read after it is refused.
+            // A read bound before the import is refused too: other's methods are
+            // known from the start, since which runs first is not known statically.
             new NestedCase("readBeforeAndAfterNestedImport", "import \"lib\"\n"
                     + "fn early() { imut a = lib.values\n    println(a[0].who()) }\n"
-                    + "fn main() {\n    early()\n    import \"other\"\n    imut b = lib.values\n    println(b[0].who())\n}\n", "lib|rejected"),
+                    + "fn main() {\n    early()\n    import \"other\"\n    imut b = lib.values\n    println(b[0].who())\n}\n", "|rejected"),
             // A function's own import, declared before or after main.
             new NestedCase("functionImportBeforeMain", "import \"lib\"\nfn side() { import \"other\" }\n"
                     + "fn main() {\n    imut a = lib.values\n    println(a[0].who())\n}\n", "lib-or-rejected"),
@@ -1471,11 +1472,11 @@ fn main() {
             new NestedCase("loopAndFieldLocalBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
                     + "fn main() {\n    imut w = W { v: lib.values }\n    imut b = w.v\n    imut p = b[0]\n"
                     + "    import \"other\"\n    for q in b { println(q.who()) }\n}\n", "|rejected"),
-            // A struct local taken from it: its method before the import is lib's,
-            // after it refused rather than dispatched by name.
+            // A struct local taken from it: refused before the import as after it,
+            // rather than dispatched by name.
             new NestedCase("structLocalMethodBeforeAndAfterNestedImport", "import \"lib\"\n"
                     + "fn main() {\n    imut a = lib.values\n    imut p = a[0]\n    println(p.who())\n"
-                    + "    import \"other\"\n    println(p.who())\n}\n", "lib|rejected"),
+                    + "    import \"other\"\n    println(p.who())\n}\n", "|rejected"),
             // An import inside the very statement that gives a local its type, in a
             // lambda bound after the value: a declaration, a loop's collection and a
             // match's target. The names mean what they meant before the statement.
@@ -1522,6 +1523,141 @@ fn main() {
                 }
             }
         }));
+    }
+
+    // --- Gate at 40f6f7f: an inferred identity is never regained by repackaging ----
+
+    private static final String TRANSPORT_LIB = LIB_HEAD + "pub struct P { x: float }\n"
+            + "impl P { fn who(self) -> string { \"lib\" } }\n"
+            + "pub fn mk() -> Array<P> { [P { x: 1.5 }] }\npub fn id<T>(x: T) -> T { x }\n"
+            + "pub imut values = g(Box { value: [P { x: 1.5 }] })\n";
+    private static final String TRANSPORT_DUP = "import \"lib\"\nimpl P { fn who(self) -> string { \"dup\" } }\n";
+    private static final String TRANSPORT_HEAD = "import \"lib\"\nstruct W<T> { value: T }\nfn id<T>(x: T) -> T { x }\n";
+
+    /** Each way a value p is rebuilt or passed on, as {declaration, use}; empty declaration for none. */
+    private static final Map<String, String[]> REBUILDS = new java.util.LinkedHashMap<>();
+
+    static {
+        REBUILDS.put("alias", new String[]{"imut q = p", "println(q.who())"});
+        REBUILDS.put("arrayVar", new String[]{"imut b = [p]", "println(b[0].who())"});
+        REBUILDS.put("inlineArray", new String[]{"", "println([p][0].who())"});
+        REBUILDS.put("pop", new String[]{"mut b = [p]", "println(pop(b).who())"});
+        REBUILDS.put("filter", new String[]{"imut b = filter([p], fn(x: P) -> bool { true })", "println(b[0].who())"});
+        REBUILDS.put("genericField", new String[]{"imut w = W { value: p }", "println(w.value.who())"});
+        REBUILDS.put("ifValue", new String[]{"imut q = if true { p } else { p }", "println(q.who())"});
+        REBUILDS.put("loopItem", new String[]{"imut b = [p]", "for it in b { println(it.who()) }"});
+        REBUILDS.put("push", new String[]{"mut b = [p]\n    push(b, p)", "println(b[1].who())"});
+        REBUILDS.put("importedId", new String[]{"", "println(lib.id(p).who())"});
+        REBUILDS.put("localId", new String[]{"", "println(id(p).who())"});
+        REBUILDS.put("idOfArray", new String[]{"imut b = id([p])", "println(b[0].who())"});
+    }
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> anInferredIdentityRejectedOnceIsNeverRegainedByRepackaging(@TempDir Path dir) {
+        // p is lib's P, taken from an imported call (0.10.0 names its result) or an
+        // imported value. dup declares lib's who again, which the interpreter would
+        // find by name. Imported before or after p is rebuilt, every rebuilding
+        // fails as 0.9.0 failed; with no such import none prints dup, and both
+        // backends agree.
+        List<DynamicTest> tests = new java.util.ArrayList<>();
+        for (String source : List.of("lib.mk()", "lib.values")) {
+            for (var transport : REBUILDS.entrySet()) {
+                for (String when : List.of("none", "before", "after")) {
+                    String name = (source.equals("lib.mk()") ? "call" : "value") + "_" + transport.getKey() + "_" + when;
+                    StringBuilder main = new StringBuilder(TRANSPORT_HEAD + "fn main() {\n    imut a = " + source
+                            + "\n    imut p = a[0]\n");
+                    if (when.equals("before")) main.append("    import \"dup\"\n");
+                    if (!transport.getValue()[0].isEmpty()) main.append("    ").append(transport.getValue()[0]).append("\n");
+                    if (when.equals("after")) main.append("    import \"dup\"\n");
+                    main.append("    ").append(transport.getValue()[1]).append("\n}\n");
+                    tests.add(DynamicTest.dynamicTest(name, () -> {
+                        Path project = Files.createDirectories(dir.resolve(name));
+                        Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+                        Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+                        Files.writeString(project.resolve("main.siyo"), main.toString());
+                        List<CliParityTest.Result> results = new java.util.ArrayList<>();
+                        for (String mode : List.of("run", "interpret")) {
+                            results.add(CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString()));
+                        }
+                        String where = name + ": " + results.get(0).stdout() + " / " + results.get(1).stdout()
+                                + " / " + results.get(1).stderr();
+                        for (CliParityTest.Result result : results) {
+                            assertFalse(result.stdout().contains("dup"), where);
+                            if (!when.equals("none")) {
+                                assertEquals(1, result.exitCode(), where);
+                                assertEquals("", result.stdout(), where);
+                            }
+                        }
+                        assertEquals(results.get(0).stdout(), results.get(1).stdout(), where);
+                        assertEquals(results.get(0).exitCode(), results.get(1).exitCode(), where);
+                    }));
+                }
+            }
+        }
+        return tests.stream();
+    }
+
+    private static final List<String[]> HELD_CASES = List.of(
+            // dup2's own function imports dup: what that brings in reaches main too.
+            new String[]{"aModuleWhoseFunctionImportsItImportedNested", "import \"lib\"\nfn main() {\n    imut p = lib.mk()[0]\n    import \"dup2\"\n    dup2.inner()\n    println(p.who())\n}\n", "rejected"},
+            new String[]{"thatModuleImportedAtTopLevel", "import \"lib\"\nimport \"dup2\"\nfn main() {\n    imut p = lib.mk()[0]\n    println(p.who())\n}\n", "lib"},
+            new String[]{"closureBoundBeforeTheImport", "import \"lib\"\nfn main() {\n    imut p = lib.mk()[0]\n    imut f = fn() -> string { p.who() }\n    import \"dup\"\n    println(f())\n}\n", "rejected"},
+            new String[]{"lambdaOverACallBoundBeforeTheImport", "import \"lib\"\nfn main() {\n    imut f = fn() -> string { lib.mk()[0].who() }\n    import \"dup\"\n    println(f())\n}\n", "rejected"},
+            new String[]{"functionBoundBeforeMainsImport", "import \"lib\"\nfn show() {\n    imut p = lib.mk()[0]\n    println(p.who())\n}\nfn main() {\n    import \"dup\"\n    show()\n}\n", "rejected"},
+            new String[]{"importInAFunctionDeclaredAfterMain", "import \"lib\"\nfn main() {\n    imut p = lib.mk()[0]\n    loadDup()\n    println(p.who())\n}\nfn loadDup() { import \"dup\" }\n", "rejected"},
+            new String[]{"closureWithNoSuchImport", "import \"lib\"\nfn main() {\n    imut p = lib.mk()[0]\n    imut f = fn() -> string { p.who() }\n    println(f())\n}\n", "lib"},
+            new String[]{"structAnnotationOverAnInferredValue", "import \"lib\"\nfn main() {\n    import \"dup\"\n    imut q: P = lib.mk()[0]\n    println(q.who())\n}\n", "rejected"},
+            new String[]{"anUnrelatedStructStoredALength", "import \"lib\"\nstruct S { q: P, n: int }\nimpl S { fn hello(self) -> string { \"hello\" } }\nstruct W { n: int }\nimpl W { fn hello(self) -> string { \"w\" } }\nfn id<T>(x: T) -> T { x }\nfn main() {\n    imut a = lib.mk()\n    mut w = W { n: 1 }\n    w.n = len(a)\n    import \"dup\"\n    println(w.hello())\n}\n", "w"},
+            new String[]{"anUnrelatedStructBuiltFromAField", "import \"lib\"\nstruct S { q: P, n: int }\nimpl S { fn hello(self) -> string { \"hello\" } }\nstruct W { n: int }\nimpl W { fn hello(self) -> string { \"w\" } }\nfn id<T>(x: T) -> T { x }\nfn main() {\n    imut p = lib.mk()[0]\n    imut w = W { n: toInt(p.x) }\n    import \"dup\"\n    println(w.hello())\n}\n", "w"},
+            new String[]{"aStructHoldingTheValue", "import \"lib\"\nstruct S { q: P, n: int }\nimpl S { fn hello(self) -> string { \"hello\" } }\nstruct W { n: int }\nimpl W { fn hello(self) -> string { \"w\" } }\nfn id<T>(x: T) -> T { x }\nfn main() {\n    imut a = lib.mk()\n    import \"dup\"\n    println(S { q: a[0], n: 1 }.hello())\n}\n", "hello"},
+            new String[]{"aGenericCallOverAStructHoldingTheValue", "import \"lib\"\nstruct S { q: P, n: int }\nimpl S { fn hello(self) -> string { \"hello\" } }\nstruct W { n: int }\nimpl W { fn hello(self) -> string { \"w\" } }\nfn id<T>(x: T) -> T { x }\nfn main() {\n    imut a = lib.mk()\n    imut s = S { q: a[0], n: 1 }\n    import \"dup\"\n    println(id(s).hello())\n}\n", "hello"},
+            new String[]{"theHeldValuesOwnMethodThroughIt", "import \"lib\"\nstruct S { q: P, n: int }\nimpl S { fn hello(self) -> string { \"hello\" } }\nstruct W { n: int }\nimpl W { fn hello(self) -> string { \"w\" } }\nfn id<T>(x: T) -> T { x }\nfn main() {\n    imut a = lib.mk()\n    imut s = S { q: a[0], n: 1 }\n    import \"dup\"\n    println(id(s).q.who())\n}\n", "rejected"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aContestIsHeldWhereverTheCallRunsAndOnlyAgainstItsStruct(@TempDir Path dir) {
+        // dup's methods are known before any body is bound, so a call bound before
+        // its import, in a closure, an earlier function or beside a function that
+        // imports it later, is refused as 0.9.0 refused it. Only the struct a
+        // method is called on counts: W or S beside a contested P keep theirs.
+        return HELD_CASES.stream().map(c -> DynamicTest.dynamicTest(c[0], () -> {
+            Path project = Files.createDirectories(dir.resolve(c[0]));
+            Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+            Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+            Files.writeString(project.resolve("dup2.siyo"), "pub fn inner() { import \"dup\" }\n");
+            Files.writeString(project.resolve("main.siyo"), c[1]);
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                String where = c[0] + " " + mode + ": " + result.stdout() + " / " + result.stderr();
+                if (c[2].equals("rejected")) {
+                    assertEquals(1, result.exitCode(), where);
+                    assertEquals("", result.stdout(), where);
+                    assertTrue(result.stderr().contains("No matching method"), where);
+                } else {
+                    assertEquals(0, result.exitCode(), where);
+                    assertEquals(c[2], result.stdout(), where);
+                }
+            }
+        }));
+    }
+
+    @Test
+    void anAnnotatedValueKeepsZeroNinesRouteButNotGenericInference(@TempDir Path dir) throws Exception {
+        // An annotation is 0.9.0's route: b[0].who() runs as 0.9.0 ran it. A generic
+        // call over it is 0.10.0's inference, and fails as 0.9.0 did once P is contested.
+        Files.writeString(dir.resolve("lib.siyo"), TRANSPORT_LIB);
+        Files.writeString(dir.resolve("dup.siyo"), TRANSPORT_DUP);
+        String head = TRANSPORT_HEAD + "fn main() {\n    imut a: Array<P> = lib.mk()\n    imut p = a[0]\n";
+        Files.writeString(dir.resolve("plain.siyo"), head + "    imut b = [p]\n    println(b[0].who())\n}\n");
+        Files.writeString(dir.resolve("generic.siyo"), head + "    import \"dup\"\n    println(lib.id(p).who())\n}\n");
+        Files.writeString(dir.resolve("localGeneric.siyo"), head + "    import \"dup\"\n    println(id(p).who())\n}\n");
+        for (String mode : List.of("run", "interpret")) {
+            assertEquals("lib", CliParityTest.siyoc(dir, mode, dir.resolve("plain.siyo").toString()).stdout(), mode);
+            for (String file : List.of("generic.siyo", "localGeneric.siyo")) {
+                CliParityTest.Result result = CliParityTest.siyoc(dir, mode, dir.resolve(file).toString());
+                assertEquals(1, result.exitCode(), file + " " + mode + ": " + result.stdout());
+                assertTrue(result.stderr().contains("No matching method"), file + " " + mode + ": " + result.stderr());
+            }
+        }
     }
 
     @Test

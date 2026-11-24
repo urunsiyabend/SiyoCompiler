@@ -139,6 +139,9 @@ public class Binder {
             if (!isAllowedAtTopLevel(syntax)) {
                 _diagnostics.reportTopLevelNotAllowed(syntax.getSpan());
             }
+            // A file of one declaration: what its nested imports bring in is
+            // known before its body is bound, as for any other file.
+            if (!(syntax instanceof ImportStatementSyntax)) anticipateNestedImports(syntax);
             _atFileTopLevel = false; // recursive calls are nested, not top-level
         }
         BoundStatement result = bindStatementInternal(syntax);
@@ -254,6 +257,14 @@ public class Binder {
             }
         }
 
+        // What an import inside any function or lambda here will bring in is known
+        // before any body is bound (see ModuleHandler.anticipateImport).
+        if (wasFileTopLevel) {
+            for (StatementSyntax statementSyntax : syntax.getStatements()) {
+                if (!(statementSyntax instanceof ImportStatementSyntax)) anticipateNestedImports(statementSyntax);
+            }
+        }
+
         // What the names in this file's signatures mean: its tables before any
         // body, and so any import inside a function, is bound.
         if (wasFileTopLevel) _typeResolver.markDeclarationsComplete();
@@ -283,6 +294,69 @@ public class Binder {
         _scope = _scope.getParent();
         _moduleHandler.setScope(_scope);
         return new BoundBlockStatement(statements);
+    }
+
+    /**
+     * Finds every import nested in a declaration: in a function or method body, a
+     * lambda, a block, a match arm. Syntax nodes do not all list every child, so
+     * the walk follows each node's fields that hold syntax.
+     */
+    // The fields of a syntax class that may hold syntax, found once per class.
+    private static final ClassValue<List<java.lang.reflect.Field>> SYNTAX_FIELDS = new ClassValue<>() {
+        @Override
+        protected List<java.lang.reflect.Field> computeValue(Class<?> nodeClass) {
+            List<java.lang.reflect.Field> fields = new ArrayList<>();
+            for (Class<?> type = nodeClass; type != null && type != Object.class; type = type.getSuperclass()) {
+                for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                    Class<?> fieldType = field.getType();
+                    if (!codeanalysis.syntax.SyntaxNode.class.isAssignableFrom(fieldType)
+                            && !Iterable.class.isAssignableFrom(fieldType)
+                            && !fieldType.getPackageName().equals("codeanalysis.syntax")) {
+                        continue;
+                    }
+                    try {
+                        field.setAccessible(true);
+                        fields.add(field);
+                    } catch (RuntimeException ignored) {
+                        // A field that cannot be opened holds no import we could see.
+                    }
+                }
+            }
+            return List.copyOf(fields);
+        }
+    };
+
+    private void anticipateNestedImports(Object node) {
+        java.util.Set<Object> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        java.util.ArrayDeque<Object> pending = new java.util.ArrayDeque<>();
+        pending.add(node);
+        while (!pending.isEmpty()) {
+            Object next = pending.pop();
+            if (next == null || !seen.add(next)) continue;
+            if (next instanceof ImportStatementSyntax nested) {
+                _moduleHandler.anticipateImport(nested);
+                continue;
+            }
+            if (next instanceof Iterable<?> items) {
+                for (Object item : items) {
+                    if (item != null) pending.add(item);
+                }
+                continue;
+            }
+            if (next instanceof SyntaxToken || !(next instanceof codeanalysis.syntax.SyntaxNode
+                    || next.getClass().getPackageName().equals("codeanalysis.syntax"))) {
+                continue;
+            }
+            for (java.lang.reflect.Field field : SYNTAX_FIELDS.get(next.getClass())) {
+                try {
+                    Object value = field.get(next);
+                    if (value != null) pending.add(value);
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                    // A field that cannot be read holds no import we could see.
+                }
+            }
+        }
     }
 
     /**
@@ -541,7 +615,13 @@ public class Binder {
             }
         }
 
-        _typeResolver.stamp(variableSymbol, generation, syntax.getTypeAnnotation() == null);
+        // What the value was inferred from. A collection annotation names it afresh,
+        // as 0.9.0 did; a struct one never typed an erased value in 0.9.0, so the
+        // value keeps what it was inferred from.
+        if (syntax.getTypeAnnotation() == null || !TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())) {
+            variableSymbol.addProvenance(_typeResolver.provenanceOf(initializer));
+        }
+        _typeResolver.stamp(variableSymbol, generation, !variableSymbol.getProvenance().isEmpty());
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -655,8 +735,44 @@ public class Binder {
         BoundExpression result = bindExpressionInternal(syntax);
         if (result != null) {
             try { result.setSourceOffset(syntax.getSpan().getStart()); } catch (Exception ignored) {}
+            recordStoredProvenance(result);
         }
         return result;
+    }
+
+    /**
+     * A value stored into a variable, an element or field of one, or passed to a
+     * builtin with one first (push, insert, ...), adds what it was inferred from
+     * to that variable, which never loses it.
+     */
+    private void recordStoredProvenance(BoundExpression result) {
+        if (result instanceof BoundAssignmentExpression assignment) {
+            assignment.getVariable().addProvenance(_typeResolver.provenanceOf(assignment.getExpression()));
+        } else if (result instanceof BoundIndexAssignmentExpression store) {
+            VariableSymbol root = rootVariable(store.getTarget());
+            if (root != null) root.addProvenance(_typeResolver.provenanceOf(store.getValue()));
+        } else if (result instanceof BoundMemberAssignmentExpression store) {
+            VariableSymbol root = rootVariable(store.getTarget());
+            if (root != null) root.addProvenance(_typeResolver.provenanceOf(store.getValue()));
+        } else if (result instanceof BoundCallExpression call && BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getArguments().size() > 1) {
+            VariableSymbol root = rootVariable(call.getArguments().get(0));
+            if (root != null) {
+                for (int i = 1; i < call.getArguments().size(); i++) {
+                    root.addProvenance(_typeResolver.provenanceOf(call.getArguments().get(i)));
+                }
+            }
+        }
+    }
+
+    /** The variable an element or field access starts from: b in b[0].f. */
+    private static VariableSymbol rootVariable(BoundExpression target) {
+        while (true) {
+            if (target instanceof BoundVariableExpression v) return v.getVariable();
+            if (target instanceof BoundIndexExpression index) target = index.getTarget();
+            else if (target instanceof BoundMemberAccessExpression member) target = member.getTarget();
+            else return null;
+        }
     }
 
     /** Reports an expression with no value where one is needed: a void call, or an if with no tail values. */
@@ -1071,7 +1187,7 @@ public class Binder {
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
                 variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation,
-                        _typeResolver.isInferred(target));
+                        _typeResolver.provenanceOf(target));
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -1172,7 +1288,8 @@ public class Binder {
     private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
                                                                        codeanalysis.UnionSymbol targetUnion,
                                                                        String targetTypeName,
-                                                                       long generation, boolean inferred) {
+                                                                       long generation,
+                                                                       java.util.Set<Object> provenance) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1242,8 +1359,10 @@ public class Binder {
             // a plain float[] payload stays as 0.9.0 read it.
             if (!payloadTypeName.equals("object") && (!typeArguments.isEmpty() || namesADeclaredType(payloadTypeName))) {
                 binding.setDeclaredTypeName(payloadTypeName);
-                _typeResolver.stamp(binding, generation, inferred);
+                binding.addProvenance(provenance);
+                _typeResolver.stamp(binding, generation, !provenance.isEmpty());
             }
+            binding.addProvenance(provenance);
             bindings.add(binding);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
             if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
@@ -2348,6 +2467,17 @@ public class Binder {
      * @return The type name, or null when nothing is known about it.
      */
     private String typeNameOf(BoundExpression expr) {
+        String name = inferredTypeNameOf(expr);
+        // A value whose inferred roots meet a contested method is not named by a
+        // struct that contest puts at risk; an unrelated struct it holds still is.
+        if (name != null && !_typeResolver.uncontestedName(name)
+                && !_typeResolver.contestFree(_typeResolver.provenanceOf(expr))) {
+            return null;
+        }
+        return name;
+    }
+
+    private String inferredTypeNameOf(BoundExpression expr) {
         String declared = _typeResolver.declaredTypeNameOf(expr);
         if (declared != null) return declared;
         if (expr instanceof BoundLambdaExpression lambda) return signatureNameOf(lambda);
@@ -2387,9 +2517,10 @@ public class Binder {
             }
             return "Map<" + key + "," + value + ">";
         }
-        // What follows names a value by 0.9.0's routes, for inference alone. A call
-        // whose declared return type means something else here is not named by
-        // them either, so a generic call over it stays erased as in 0.9.0.
+        // What follows names a value by 0.9.0's routes, for inference alone. A
+        // value whose inferred identity no longer holds is not named by them
+        // either, so a generic call over it stays erased as in 0.9.0.
+        if (!_typeResolver.identityHolds(_typeResolver.provenanceOf(expr))) return null;
         if (expr instanceof BoundCallExpression call && !_typeResolver.returnOriginHolds(call.getFunction())) {
             return null;
         }
@@ -2492,11 +2623,13 @@ public class Binder {
         // Walking an Array<Array<T>> gives Array<T>s, whose elements are still Ts.
         String itemTypeName = walkedTypeName != null ? walkedTypeName
                 : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
+        // An item is what its collection was inferred from, named or not.
+        itemVar.addProvenance(_typeResolver.provenanceOf(originalCollection));
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
             // An element, a map key or a set element of a struct-derived collection.
             if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar, originalCollection);
-            _typeResolver.stamp(itemVar, generation, _typeResolver.isInferred(originalCollection));
+            _typeResolver.stamp(itemVar, generation, !itemVar.getProvenance().isEmpty());
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {
@@ -3441,12 +3574,12 @@ public class Binder {
         // Check for struct instance method: u.greet() → User.greet(u)
         if (target.getClassType() == SiyoStruct.class) {
             StructSymbol structType = _typeResolver.resolveStructType(target);
-            // A struct local whose type 0.10.0 inferred, and whose struct's methods
-            // here are no longer only its own, is not dispatched through it: its
-            // fields still read as tracked, but which method body runs could differ
-            // by backend. It fails as the erased value 0.9.0 had.
-            if (target instanceof BoundVariableExpression local && local.getVariable().isInferredType()
-                    && !_typeResolver.originHolds(local.getVariable())) {
+            // A value whose identity 0.10.0 inferred, from roots that no longer
+            // hold (see TypeResolver.provenanceOf), is not dispatched through it:
+            // its fields still read as tracked, but which method body runs could
+            // differ by backend. It fails as the erased value 0.9.0 had.
+            if (structType != null && _typeResolver.dispatchAtRisk(structType)
+                    && !_typeResolver.provenanceHolds(target)) {
                 structType = null;
             }
             if (structType != null) {
