@@ -229,13 +229,66 @@ changes some of these. `direct_map_null` (a missing key through a generic
   boundary with the symbol. A member read of a struct-derived value, `filter`,
   `pop`, an index, and a loop item that is an element, a map key or a set
   element all carry it. An exported variable keeps its type only when it is
-  struct-derived. Even then it crosses only when every struct the type
-  names is, in the importer, the very struct the exporter meant, so a library's
-  private `P` is never read as the importer's own `P`
-  (`anExportedTypeNamingAnotherModulesPrivateStructDoesNotCross`). Other
-  exported variables read as in 0.9.0. Re-exporting a struct-derived value
-  through a middle module drops its type conservatively: the importer gets the
-  compile error a plain exported value gives, never a split. Deferred.
+  struct-derived. Other exported variables read as in 0.9.0.
+
+  **Origin identity.** The final gate at 56a4a07 found two ways an imported
+  value was read as the importer's struct of the same name:
+
+  - A public `Row` held the exporter's private `P` in a field.
+    `lib.values[0].item.who()` silently ran the importer's own `P.who` on both
+    backends. The check at the time looked one level deep only.
+  - A later `import "other"` replaced the public `P` the value was made of, after
+    the import-time check had passed, and the read failed with a cast error.
+
+  An imported struct-derived variable now carries its exporter's struct, sum
+  type and interface tables. Where the value is used, after every import, the
+  compiler checks every type its name mentions, and every type their fields and
+  variant payloads mention in turn. The walk is cycle-safe, so recursive types
+  terminate, and the result is cached per variable. A type may not be a
+  *different* declaration of that name in the importer. Two things don't count
+  as a clash:
+
+  - a name the importer cannot write at all, such as a struct reached only
+    through a third module;
+  - a struct's own type parameter.
+
+  When the check fails, the value reads erased. Member access is rejected at
+  compile time ("does not have members"), and a method or interface call on it
+  fails on both backends. Another module's type is never read in its place.
+  When the check holds, the genuine exporter types are used, whatever the
+  import order.
+
+  `anImportedValueIsReadAsItsOriginsTypesOrRejected` covers ten cases, each on
+  both backends:
+  - the private bridge, by dispatch and by field;
+  - the later replacing import, and the reverse order, which reads lib's types;
+  - a public bridge through `import ... as L` and an alias;
+  - a recursive `Node`;
+  - a struct reachable only through a third module;
+  - a type parameter named like a local struct;
+  - a private interface;
+  - a private struct inside a private union payload.
+
+  **Inherited, not through this route.** Two cross-module paths still read a
+  value through the importer's type of the same name, exactly as 0.9.0 does
+  through an ordinary `pub fn` return. The first is binding a union variant's
+  payload by name, from a value whose type is unknown. The second is passing
+  such a value to a parameter typed with the importer's struct. This is the
+  same-name collision family (G12), and it needs module-qualified type
+  identity. Deferred. The same family covers three more routes, each of which
+  behaves the same way without module variables:
+  - a method's declared return type naming the exporter's private struct;
+  - a variant name matched through the importer's unrelated union;
+  - an interface method dispatched by simple struct name, when both modules
+    declare a struct of that name.
+
+  `anExportedTypeNamingAnotherModulesPrivateStructDoesNotCross` stays.
+
+  **Re-export.** A struct-derived value re-exported through a middle module
+  keeps its type when the type names only built-in containers and numbers
+  (`Array<Array<float>>`). One that names structs may be rejected, because the
+  middle module's struct table is checked, and a struct private to the first
+  module does not resolve there. Rejection is a compile error, never a split.
 
   An `if` or `match` whose every arm gives the same struct-derived type carries
   it. A set literal is named like array and map literals
@@ -251,7 +304,8 @@ changes some of these. `direct_map_null` (a missing key through a generic
 
   `aStructDerivedValueSurvivesEveryTransport` crosses the five shapes with five
   transports: exported module state, a plain-struct bridge, the bridge inside a
-  `for`, `pop`, map keys for the array shapes, and an `if`/`match`. 27 cases, each read through
+  `for`, `pop`, map keys for the array shapes, and an `if`/`match`. That is 28
+  cases: 5 shapes by 5 transports, plus map keys for the 3 array shapes. Each is read through
   two aliases on both backends. `anOrdinaryExportedOrPoppedValueStaysAsInZeroNine`
   (identical on 0.9.0) pins the baseline.
 

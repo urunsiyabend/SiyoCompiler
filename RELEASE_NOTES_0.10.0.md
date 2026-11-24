@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-2,937 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+2,947 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -142,7 +142,10 @@ covers every path. A value whose type came from a generic struct's argument
 (a field, a getter bound through a `Box`, and anything moved from one: a member
 read, even through a plain struct, an index, `filter`, `pop`, a variable, a loop
 item, map key or set element, an `if` or `match` of such values, an exported
-module variable whose structs are the same ones in the importer) keeps its
+module variable whose structs, checked transitively where it is used, are the
+very ones the exporter meant, including through fields, union payloads and
+interfaces; otherwise it reads erased and member access is rejected, never
+reinterpreted as another module's type) keeps its
 whole known type at every depth, through aliases and imports. Passing one to a
 function parameter or a plain struct field declared with a concrete type gives
 it that slot's type under 0.9.0's rules, as any value. Ordinary generic results otherwise stay erased. The one
@@ -218,6 +221,10 @@ Found by DataKit and left for later (see PAIN_POINTS.md):
 - **Small gaps:**
   - `toFloat` does not take a `long`, and unary minus is not defined for a
   `long` (`-x`): write `0L - x`. Numeric `as` is planned.
+- A value whose type is unknown, bound as a union payload or passed to a
+  parameter typed with a struct, is read through the importer's type of that
+  name, as in 0.9.0. When two modules declare one type name, the importer
+  cannot tell them apart.
 - A lambda parameter typed with a comma inside type arguments
   (`fn(x: Map<string, float>)`) is read as two parameters, as in 0.9.0.
   - `=> return x` is not a match arm. Write `=> { return x }`.
