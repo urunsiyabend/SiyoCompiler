@@ -290,7 +290,7 @@ generic pipeline functions. See `RELEASE_NOTES_0.10.0.md` and
 - **Stdlib.** `std/csv`, `io.readText`, `strings.formatFloat`, `strings.isFloat`.
 - **Not done, moved on:** interface default methods and bounds, `Empty { }`,
   numeric `as`, `siyoc fmt` and `siyoc check`. DataKit did not need them.
-- 3,135 tests pass, up from 2,743
+- 3,168 tests pass, up from 2,743
 
 ---
 

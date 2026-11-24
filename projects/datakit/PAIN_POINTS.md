@@ -646,6 +646,26 @@ changes some of these. `direct_map_null` (a missing key through a generic
     or closure call. 0.9.0 does not compile these. Such an annotation keeps the
     value's provenance. Over an ordinary call or a literal it starts afresh, as
     0.9.0 typed it, so `a: Array<P> = lib.mk()` keeps 0.9.0's route.
+  - **A collection annotation over a builtin 0.9.0 did not type as an array.**
+    0.9.0 typed a builtin's result as an array only in two cases: `filter` of
+    an array, and `pop` from a variable written as an array of arrays. It
+    failed with "does not have members" on these:
+    - `pop` over a literal, `a: Array<W> = pop([[w]])`, which the gate at
+      b270b85 found splitting;
+    - `pop` over an unannotated variable;
+    - `map`;
+    - a builtin over one of those.
+
+    The array these start from must be one 0.9.0 typed where it was declared:
+    from an array literal, or from an ordinary call returning an array. An
+    array annotated over another variable is not, and neither is `pop(..)`
+    seen through `filter`. Review found all four routes splitting before that
+    was tightened.
+
+    `aCollectionAnnotationOverABuiltinFollowsZeroNinesTyping` checks sixteen
+    compositions, plain and generic, against 0.9.0's own output. Where 0.9.0
+    fails, each is refused on both backends. Where it runs, each gives exactly
+    0.9.0's output per backend.
   - **A closure call's result.** Named from the closure's signature
     (`f = fn() -> W<P> { .. }; f().value.who()`), it carries that name as a
     root.
@@ -679,7 +699,12 @@ changes some of these. `direct_map_null` (a missing key through a generic
   `aLongChainOfPoppedGenericHoldersStaysWithinABoundedHeap` the `pop` chain with
   `-Xmx64m`. `aUnionOfStorageKeepsEachRootOnce`
   checks directly that a chain of 2,000 unions keeps 1,999 root entries in
-  total.
+  total. `storageKeepsFourThousandDistinctRootsOnceAcrossAliasesAndContainers`
+  checks a harder shape: 4,000 variables, each with its own root, aliased late,
+  every tenth held in a container, and a fresh one held by none. It keeps 4,000
+  entries, every alias and the container see all of them, a later root reaches
+  all of them, and the fresh one stays empty. A retired cell now drops its
+  collections rather than emptying them, so it keeps no capacity either.
 
   **A duplicate brought in at the top level contests nothing alone.** Review of
   this round found a false rejection. With `import "dup"` at the top level, a
