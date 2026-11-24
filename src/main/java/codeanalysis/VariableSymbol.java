@@ -225,6 +225,12 @@ public class VariableSymbol {
         mine._containers.remove(mine);
         mine._contents.remove(mine);
         mine._elementOf.remove(mine);
+        // The retired cell is only a link to its new root now: it keeps no roots
+        // or edges of its own, so a chain of aliases holds each root once.
+        theirs._roots.clear();
+        theirs._containers.clear();
+        theirs._contents.clear();
+        theirs._elementOf.clear();
         ProvenanceCell.flow(mine, theirRoots);
         for (ProvenanceCell container : theirContainers) ProvenanceCell.flow(container, myRoots);
     }
@@ -250,6 +256,7 @@ public class VariableSymbol {
     public boolean isGenericTypeInferred() { return _genericTypeInferred; }
 
     public void setGenericTypeInferred(boolean inferred) { _genericTypeInferred = inferred; }
+
 
     /** Whether a local's type name was inferred by 0.10.0 rather than written in an annotation. */
     public boolean isInferredType() { return _inferredType; }

@@ -1691,6 +1691,19 @@ fn main() {
 
     /** {name, program after the head, expected}: stores reached through calls, closures, loops and holders. */
     private static final List<String[]> ALIAS_ROUTES = List.of(
+            // 0.9.0 typed an element of a literal of struct literals, not of a
+            // literal holding a variable: pop([w]) is 0.10.0's typing of w's holder.
+            new String[]{"aCollectionAnnotationOverAnIf", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = [w]\n    imut b: Array<W<P>> = if true { a } else { a }\n    import \"dup\"\n    println(b[0].value.who())\n}\n", "rejected"},
+            new String[]{"aCollectionAnnotationOverAnElement", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = [w]\n    imut h = [a]\n    imut b: Array<W<P>> = h[0]\n    import \"dup\"\n    println(b[0].value.who())\n}\n", "rejected"},
+            new String[]{"aCollectionAnnotationOverAGenericCall", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = [w]\n    imut b: Array<W<P>> = id(a)\n    import \"dup\"\n    println(b[0].value.who())\n}\n", "rejected"},
+            new String[]{"aClosureCallsResultInALocal", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut f = fn() -> W<P> { w }\n    imut a = f()\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"aClosureCallsResultUsedDirectly", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut f = fn() -> W<P> { w }\n    import \"dup\"\n    println(f().value.who())\n}\n", "rejected"},
+            new String[]{"aClosureCallsResultWithNoCollision", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut f = fn() -> W<P> { w }\n    println(f().value.who())\n}\n", "lib"},
+            new String[]{"aGenericHolderPoppedFromALiteralOfACall", "fn mkw() -> W<P> { W { value: P { x: 0.0 } } }\nfn main() {\n    imut a = pop([mkw()])\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"aCollectionAnnotationOverAVariable", "fn main() {\n    imut a = [W { value: P { x: 0.0 } }]\n    imut b: Array<W<P>> = a\n    import \"dup\"\n    println(b[0].value.who())\n}\n", "rejected"},
+            new String[]{"anAliasOfAnAnnotatedAlias", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = [w]\n    imut a1 = a\n    imut b: Array<W<P>> = a1\n    imut c = b\n    import \"dup\"\n    println(c[0].value.who())\n}\n", "rejected"},
+            new String[]{"aGenericHolderPoppedFromALiteralOfIt", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = pop([w])\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
+            new String[]{"aGenericHolderPoppedThroughFilter", "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n    imut a = pop(filter([w], fn(x: W<P>) -> bool { true }))\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
             // 0.9.0 typed no local taken from a field or a generic call, and the
             // re-registration of lib's own who by a nested module changes nothing.
             new String[]{"aPlainStructLocalTakenFromAField", "struct PW { value: P }\nstruct H { w: PW }\nfn main() {\n    imut h = H { w: PW { value: P { x: 1.0 } } }\n    imut a = h.w\n    import \"dup\"\n    println(a.value.who())\n}\n", "rejected"},
@@ -1830,6 +1843,68 @@ fn main() {
                 assertTrue(result.stderr().contains("No matching method"), file + " " + mode + ": " + result.stderr());
             }
         }
+    }
+
+    @Test
+    void aLongChainOfGenericHolderAliasesStaysWithinABoundedHeap(@TempDir Path dir) throws Exception {
+        // 4,000 aliases of one W<P>: each union used to leave its retired cell
+        // holding every root so far, so the chain held 4,000 * 4,000 / 2 entries
+        // and ran out of 256 MB. 79348c0 runs it in 64 MB interpreted.
+        StringBuilder main = new StringBuilder(TRANSPORT_HEAD + "fn main() {\n    imut a0 = W { value: P { x: 1.0 } }\n");
+        for (int i = 1; i < 4000; i++) main.append("    imut a").append(i).append(" = a").append(i - 1).append("\n");
+        main.append("    println(a3999.value.who())\n}\n");
+        Files.writeString(dir.resolve("lib.siyo"), TRANSPORT_LIB);
+        Files.writeString(dir.resolve("main.siyo"), main.toString());
+        CliParityTest.Result interpreted = CliParityTest.siyoc(dir, Map.of("JAVA_TOOL_OPTIONS", "-Xmx64m"),
+                "interpret", dir.resolve("main.siyo").toString());
+        assertEquals("lib", interpreted.stdout(), interpreted.stderr());
+        // Compiled, the 4,000 locals of one method need more, as at 79348c0.
+        CliParityTest.Result compiled = CliParityTest.siyoc(dir, Map.of("JAVA_TOOL_OPTIONS", "-Xmx128m"),
+                "run", dir.resolve("main.siyo").toString());
+        assertEquals("lib", compiled.stdout(), compiled.stderr());
+    }
+
+    @Test
+    void aLongChainOfPoppedGenericHoldersStaysWithinABoundedHeap(@TempDir Path dir) throws Exception {
+        // a_i = pop([a_(i-1)]): each link is typed only by 0.10.0, and checked the
+        // same way as the one before, so the chain keeps one root, not one per link.
+        StringBuilder main = new StringBuilder(TRANSPORT_HEAD + "fn main() {\n    imut a0 = W { value: P { x: 1.0 } }\n");
+        for (int i = 1; i < 4000; i++) main.append("    imut a").append(i).append(" = pop([a").append(i - 1).append("])\n");
+        main.append("    println(a3999.value.who())\n}\n");
+        Files.writeString(dir.resolve("lib.siyo"), TRANSPORT_LIB);
+        Files.writeString(dir.resolve("main.siyo"), main.toString());
+        CliParityTest.Result interpreted = CliParityTest.siyoc(dir, Map.of("JAVA_TOOL_OPTIONS", "-Xmx64m"),
+                "interpret", dir.resolve("main.siyo").toString());
+        assertEquals("lib", interpreted.stdout(), interpreted.stderr());
+    }
+
+    @Test
+    void aUnionOfStorageKeepsEachRootOnce() throws Exception {
+        // A chain of aliases, each also given what the one before held: the cell
+        // a union retires is a link only, so the entries kept are the roots there
+        // are, not one copy per alias.
+        List<VariableSymbol> chain = new java.util.ArrayList<>();
+        for (int i = 0; i < 2000; i++) {
+            VariableSymbol variable = new VariableSymbol("a" + i, true, SiyoStruct.class);
+            if (i > 0) {
+                VariableSymbol previous = chain.get(i - 1);
+                java.util.Set<Object> roots = new java.util.LinkedHashSet<>(previous.getProvenance());
+                roots.add(previous);
+                variable.addProvenance(roots);
+                variable.shareStorageWith(previous);
+            }
+            chain.add(variable);
+        }
+        java.lang.reflect.Field cellField = VariableSymbol.class.getDeclaredField("_cell");
+        cellField.setAccessible(true);
+        java.lang.reflect.Field rootsField = cellField.getType().getDeclaredField("_roots");
+        rootsField.setAccessible(true);
+        long kept = 0;
+        for (VariableSymbol variable : chain) kept += ((java.util.Set<?>) rootsField.get(cellField.get(variable))).size();
+        int roots = chain.get(chain.size() - 1).getProvenance().size();
+        assertEquals(1999, roots);
+        assertEquals(roots, kept);
+        for (VariableSymbol variable : chain) assertEquals(roots, variable.getProvenance().size());
     }
 
     @Test

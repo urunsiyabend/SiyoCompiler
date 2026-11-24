@@ -557,9 +557,12 @@ public class TypeResolver {
             // type 0.10.0 inferred. Another local is not: what it was inferred from
             // already is, which keeps a container of many locals' values to the
             // few roots they share.
-            if (variable.getOriginStructs() != null
-                    && (variable.getOriginVersion() < 0 || variable.isGenericTypeInferred())) {
+            if (variable.getOriginStructs() != null && variable.getOriginVersion() < 0) {
                 roots.add(variable);
+            } else if (variable.getOriginStructs() != null && variable.isGenericTypeInferred()) {
+                // Locals of one type stamped in one generation pass the same check:
+                // one root for all of them, however many aliases or links there are.
+                roots.add(new LocalType(variable));
             }
             roots.addAll(variable.getProvenance());
             if (storage != null) {
@@ -597,6 +600,9 @@ public class TypeResolver {
                 }
             }
         } else if (expr instanceof BoundClosureCallExpression closureCall) {
+            // A closure call's result named from its signature is 0.10.0's typing.
+            String returned = declaredTypeNameOf(closureCall);
+            if (returned != null) roots.add(new GenericResult(returned));
             collectDerived(closureCall.getClosure(), roots, storage, next);
             if (storage != null) {
                 for (BoundExpression argument : closureCall.getArguments()) {
@@ -604,8 +610,10 @@ public class TypeResolver {
                 }
             }
         } else if (expr instanceof BoundArrayLiteralExpression array) {
+            literalElementRoot(array.getElements(), expr, roots);
             for (BoundExpression element : array.getElements()) collectHeld(element, roots, storage, next);
         } else if (expr instanceof BoundSetLiteralExpression set) {
+            literalElementRoot(set.getElements(), expr, roots);
             for (BoundExpression element : set.getElements()) collectHeld(element, roots, storage, next);
         } else if (expr instanceof BoundMapLiteralExpression map) {
             for (BoundExpression key : map.getKeys()) collectHeld(key, roots, storage, next);
@@ -654,6 +662,49 @@ public class TypeResolver {
         }
     }
 
+    /**
+     * A local whose struct type only 0.10.0 gave it, as a root: equal for every
+     * local of the same type stamped against the same tables at the same
+     * generation, since each passes exactly the check the first does.
+     */
+    private static final class LocalType {
+        final VariableSymbol representative;
+
+        LocalType(VariableSymbol representative) {
+            this.representative = representative;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof LocalType that
+                    && that.representative.getOriginStructs() == representative.getOriginStructs()
+                    && that.representative.getOriginVersion() == representative.getOriginVersion()
+                    && java.util.Objects.equals(that.representative.getDeclaredTypeName(),
+                            representative.getDeclaredTypeName());
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(System.identityHashCode(representative.getOriginStructs()),
+                    representative.getOriginVersion(), representative.getDeclaredTypeName());
+        }
+    }
+
+    /**
+     * A literal typed from elements that are not all struct literals: [w] names
+     * its elements' type, which 0.9.0 did not. That name is an inference whose
+     * structs must not be contested.
+     */
+    private void literalElementRoot(List<BoundExpression> elements, BoundExpression literal, java.util.Set<Object> roots) {
+        boolean allLiterals = true;
+        for (BoundExpression element : elements) {
+            if (!(element instanceof BoundStructLiteralExpression)) allLiterals = false;
+        }
+        if (allLiterals) return;
+        String name = declaredTypeNameOf(literal);
+        if (name != null) roots.add(new GenericResult(name));
+    }
+
     /** Whether every root of what an expression was inferred from still holds here, by identity and methods. */
     public boolean provenanceHolds(BoundExpression expr) {
         java.util.Set<Object> roots = provenanceOf(expr);
@@ -664,6 +715,7 @@ public class TypeResolver {
     public boolean identityHolds(java.util.Set<Object> roots) {
         for (Object root : roots) {
             if (root instanceof VariableSymbol variable && !originHolds(variable)) return false;
+            if (root instanceof LocalType local && !originHolds(local.representative)) return false;
             if (root instanceof FunctionSymbol function && !returnOriginHolds(function)) return false;
         }
         return true;
@@ -678,6 +730,7 @@ public class TypeResolver {
     public boolean contestFree(java.util.Set<Object> roots) {
         java.util.Set<String> contested = contestedNames();
         for (Object root : roots) {
+            if (root instanceof LocalType local) root = local.representative;
             if (root instanceof VariableSymbol variable && variable.getOriginStructs() != null
                     && !contested.isEmpty() && reaches(variable.getDeclaredTypeName(), List.of(),
                             variable.getOriginStructs(), variable.getOriginUnions(), variable.getOriginInterfaces(),

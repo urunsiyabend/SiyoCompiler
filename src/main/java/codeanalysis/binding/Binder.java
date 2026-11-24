@@ -625,7 +625,9 @@ public class Binder {
         // What the value was inferred from. A collection annotation names it afresh,
         // as 0.9.0 did; a struct one never typed an erased value in 0.9.0, so the
         // value keeps what it was inferred from.
-        if (syntax.getTypeAnnotation() == null || !TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())) {
+        // A collection annotation over a value only 0.10.0 typed restates that typing.
+        if (syntax.getTypeAnnotation() == null || !TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())
+                || typedOnlyBy010ForAnnotation(initializer)) {
             variableSymbol.addProvenance(_typeResolver.provenanceOf(initializer));
             shareStorage(variableSymbol, initializer);
         }
@@ -637,6 +639,18 @@ public class Binder {
             markGenericTypeInferred(variableSymbol);
         }
         if (syntax.getTypeAnnotation() == null) markStructTypeInferred(variableSymbol, initializer);
+        // 0.9.0 typed a collection annotation over an ordinary call or a literal,
+        // not over a variable, an element, an if or match, or a generic or closure
+        // call: b: Array<W> = a is typed only by 0.10.0.
+        if (syntax.getTypeAnnotation() != null && TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())
+                && typedOnlyBy010ForAnnotation(initializer) && variableSymbol.getOriginStructs() != null) {
+            String element = TypeResolver.elementTypeNameOf(syntax.getTypeAnnotation().getData());
+            if (element == null && syntax.getTypeAnnotation().getData().startsWith("Map<")) {
+                List<String> arguments = TypeResolver.typeArgumentsOf(syntax.getTypeAnnotation().getData());
+                element = arguments.size() == 2 ? arguments.get(1) : null;
+            }
+            if (element != null && _structTypes.containsKey(element)) variableSymbol.setGenericTypeInferred(true);
+        }
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -877,14 +891,46 @@ public class Binder {
     }
 
     /** Whether a value's type name comes from 0.10.0's inference rather than from what 0.9.0 typed. */
-    private static boolean typedOnlyBy010(BoundExpression value) {
+    private boolean typedOnlyBy010(BoundExpression value) {
         if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010(conversion.getExpression());
         if (value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
                 || value instanceof BoundMemberAccessExpression) {
             return true;
         }
-        return value instanceof BoundCallExpression call
-                && (call.getResultTypeName() != null || call.getFunction().getReturnOriginStructs() != null);
+        if (!(value instanceof BoundCallExpression call)) return false;
+        // A builtin over a literal of anything but struct literals (pop([w]),
+        // filter([w], f), pop([mk()])): 0.9.0 typed an element of a literal of
+        // struct literals only.
+        if (BuiltinFunctions.isBuiltin(call.getFunction())) {
+            for (BoundExpression argument : call.getArguments()) {
+                if (literalOfNonLiterals(argument)) return true;
+            }
+            return false;
+        }
+        return call.getResultTypeName() != null || call.getFunction().getReturnOriginStructs() != null;
+    }
+
+    /** Whether a collection annotation over this value types what 0.9.0 did not: see bindVariableDeclaration. */
+    private static boolean typedOnlyBy010ForAnnotation(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010ForAnnotation(conversion.getExpression());
+        return value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
+                || value instanceof BoundMemberAccessExpression || value instanceof BoundMatchExpression
+                || value instanceof BoundClosureCallExpression
+                || value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                        && !call.getFunction().getTypeParameters().isEmpty();
+    }
+
+    private static boolean literalOfNonLiterals(BoundExpression value) {
+        List<BoundExpression> elements = value instanceof BoundArrayLiteralExpression array ? array.getElements()
+                : value instanceof BoundSetLiteralExpression set ? set.getElements() : null;
+        if (elements == null) {
+            return value instanceof BoundCallExpression inner && BuiltinFunctions.isBuiltin(inner.getFunction())
+                    && inner.getArguments().stream().anyMatch(Binder::literalOfNonLiterals);
+        }
+        for (BoundExpression element : elements) {
+            if (!(element instanceof BoundStructLiteralExpression)) return true;
+        }
+        return false;
     }
 
     /** The variable an element or field access starts from: b in b[0].f. */
