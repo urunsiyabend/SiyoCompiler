@@ -570,17 +570,87 @@ changes some of these. `direct_map_null` (a missing key through a generic
     captured `p`. A fresh value pushed beside inferred ones, and one passed to
     `show(fresh, xs)`, still print `lib`.
 
-  **Not covered: a value a function fetches itself.** `fn put1(t: W<P>) {
-  t.value = lib.mk()[0] }` stores an inferred value its caller never sees, so
-  `put1(w)` then `w.value.who()` still splits, as at 79348c0. Seeing it needs
-  a summary of what each function stores.
+  **Inherited, identical to 0.9.0: a field typed `P` read after dup's import.**
+  Three routes still run lib's `who` compiled and dup's interpreted:
+  - **`put1`.** `fn put1(t: W<P>) { t.value = lib.mk()[0] }`, then `put1(w)`
+    and `w.value.who()`.
+  - **A closure.** Its body calls `w.value.who()`, bound before
+    `w.value = p`.
+  - **A loop.** It stores `p` on one pass and calls `w.value.who()` on the
+    next.
 
-  **Not covered: a read bound before the store.** A closure whose body calls
-  `w.value.who()`, or a loop that calls it on one pass and stores `p` on an
-  earlier one, is bound before the store that makes it unsafe. They still run
-  lib's method compiled and dup's interpreted, as at 79348c0. 0.9.0 failed
-  here, and 40f6f7f refused the loop case. Closing them needs every dispatch
-  re-checked once the whole file is bound.
+  They were listed here as gaps in the inference tracking. Checked against the
+  published 0.9.0 (02c2262), they are not:
+  - **0.9.0's own forms split identically.** With a plain `struct W { value:
+    P }` (0.9.0 cannot parse `W<T>`), 0.9.0 gives each route `lib` compiled and
+    `dup` interpreted. The exact `W<T>` programs fail to compile in 0.9.0 only
+    for the generic struct.
+  - **Inference plays no part.** With a fresh `P { x: 3.0 }` stored instead of
+    an inferred value, every route splits the same way. The field's type `P`
+    comes from the declaration or the literal, not from what 0.10.0 inferred.
+
+  It is the same-name dispatch of a contested `P` that 0.9.0 has wherever a
+  value is typed `P` by a declaration, as for a plain local `P { .. }`. Where
+  inference does decide the outcome, the value is refused: `w.value = p` then
+  `w.value.who()` fails on both backends, while the same program storing a
+  fresh `P` splits as 0.9.0 does.
+  `aFieldTypedPReadsTheSameWhetherItsValueWasInferredOrNot` pins the three
+  routes: on each backend, the inferred value gives exactly what the fresh one
+  gives.
+
+  Outcome of each formerly deferred route, compared with 0.9.0 (02c2262).
+  Outputs are compiled / interpreted. For 0.9.0, the plain-struct form is
+  shown, since 0.9.0 cannot parse `W<T>`:
+
+  | Route | 0.9.0 | Final |
+  |---|---|---|
+  | `put1` fetches `lib.mk()[0]` itself, nested `dup` | lib / dup | lib / dup (fresh `P`: same) |
+  | Closure reads `w.value`, store after | lib / dup | lib / dup (fresh `P`: same) |
+  | Loop stores, then reads on the next pass | lib / dup | lib / dup (fresh `P`: same) |
+  | A plain local `P { .. }` | lib / dup | lib / dup |
+  | Closure reads through `alias = w` | No matching method | No matching method |
+  | Direct `alias.value.who()` after the store | No matching method | No matching method |
+
+  **An alias of a generic struct.** 0.9.0 drops a plain struct's type when it
+  is aliased, so `imut alias = w` then `alias.value.who()` fails there. 0.10.0
+  keeps a generic struct's type through an alias. Through a contested `P`, that
+  split even for a fresh value until this round. A local whose generic struct
+  type 0.10.0 alone gave it is now a root. That covers an alias, an element or
+  field, a loop item, a payload, and a generic or imported call's inferred
+  result. Through a contested `P` it is refused, as 0.9.0 refuses the plain
+  alias. A struct literal, a call typed by its declared return, and a closure's
+  signature are typed as 0.9.0 typed them, and are unchanged.
+
+  The same holds for a plain struct local 0.9.0 did not type at all, such as
+  one taken from a field (`imut a = h.w`) or from a generic or imported call
+  (`id(W { .. })`, `lib.id(W { .. })`). Review found each of these splitting
+  where 0.9.0 failed. Each is now refused, as in 0.9.0. A plain struct element
+  of an annotated array, which 0.9.0 typed, is unchanged.
+
+  **A duplicate brought in at the top level contests nothing alone.** Review of
+  this round found a false rejection. With `import "dup"` at the top level, a
+  store `arr[0] = lib.mk()[0]` into an annotated `Array<P>` and then
+  `arr[0].who()` was refused, though 0.9.0 prints `lib` on both backends. The
+  same happened for a `Map<string, P>` and a generic field.
+
+  A duplicate a top-level import brings in is registered before anything runs,
+  the same for both backends: even 6864526, before any of these checks, prints
+  `lib` for both. A method now contests a struct only in three cases:
+  - **Another struct's method.** It comes from a file whose own struct of the
+    name is another struct.
+  - **The wrong body registered first.** It is declared twice, the struct's own
+    file being one declarer, and another file's was registered first, as when
+    lib does `import "other" as o` before its own `P`.
+  - **A later winner.** It is declared twice, and a body other than the first
+    registered can still win by name later: the file's own `impl`, or an
+    import nested in a function, whose module's impl methods are carried on the
+    module record.
+
+  A nested module that only re-exports lib's `P` re-registers lib's own `who`,
+  the body already winning. So `import "dup"` at the top level, beside a nested
+  import of a module that adds another method, still prints `lib`, as in 0.9.0.
+
+  Those programs print `lib` again on both backends.
 
   The cost is that a call bound before such an import in the same file is
   refused too, as 0.9.0 refused it. Which runs first is not known statically.

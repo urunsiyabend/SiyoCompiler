@@ -11,7 +11,7 @@ before being called a limitation, and what was the language's fault is fixed.
 The roadmap's interface and tooling items move to 0.11.0, since DataKit did
 not need them. The generic structs it did need are here.
 
-3,108 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
+3,121 tests pass, up from 2,743. DataKit is part of `mvn verify`: its CLI
 runs on both backends under a C locale against goldens, and against generated
 data checked by an RFC 4180 reader and aggregations written in Java from the
 README, independently of the app.
@@ -67,6 +67,8 @@ and `Map<string, Array<T>>` likewise. Only a bare `-> T` kept its type.
   refused once is not regained by rebuilding the value. An import inside any
   function counts from the start of its file, since the interpreter finds a
   method by name once it has run, whatever the order in which code was bound.
+  A method another module re-declares only at the top level is registered before
+  anything runs, the same for both backends, and contests nothing alone.
 
 **A payload keeps its written type name.** With `type R = T(Array<S>) | ...`,
 `T(xs) => xs[0].n` was rejected. A payload now carries its written type, and a
