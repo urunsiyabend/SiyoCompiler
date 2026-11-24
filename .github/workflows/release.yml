@@ -4,9 +4,20 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing tag to repackage (vMAJOR.MINOR.PATCH)'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+# The tag to package: the pushed tag, or the existing tag named on dispatch.
+# Steps read it only through this env var, after validating its format.
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
 jobs:
   build:
@@ -16,7 +27,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux-x64
             archive: tar.gz
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             archive: tar.gz
           - os: windows-latest
@@ -26,7 +37,31 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+    - name: Validate release tag
+      id: validate_tag
+      shell: bash
+      run: |
+        if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "::error::Release tag must be an existing vMAJOR.MINOR.PATCH tag"
+          exit 1
+        fi
+
     - uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ env.RELEASE_TAG }}
+
+    - name: Verify checked-out tag
+      id: verify_tag
+      shell: bash
+      run: |
+        TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}^{commit}")" || {
+          echo "::error::Release tag does not exist"
+          exit 1
+        }
+        if [ "$(git rev-parse HEAD)" != "$TAG_COMMIT" ]; then
+          echo "::error::Checked-out commit is not the release tag's commit"
+          exit 1
+        fi
 
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -38,7 +73,7 @@ jobs:
     - name: Extract version from tag
       id: version
       shell: bash
-      run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      run: echo "VERSION=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
     - name: Set Maven version
       shell: bash
@@ -108,11 +143,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Validate release tag
+      id: validate_tag
+      shell: bash
+      run: |
+        if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "::error::Release tag must be an existing vMAJOR.MINOR.PATCH tag"
+          exit 1
+        fi
+
     - uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ env.RELEASE_TAG }}
+
+    - name: Verify checked-out tag
+      id: verify_tag
+      shell: bash
+      run: |
+        TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}^{commit}")" || {
+          echo "::error::Release tag does not exist"
+          exit 1
+        }
+        if [ "$(git rev-parse HEAD)" != "$TAG_COMMIT" ]; then
+          echo "::error::Checked-out commit is not the release tag's commit"
+          exit 1
+        fi
 
     - name: Extract version from tag
       id: version
-      run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      run: echo "VERSION=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -174,7 +233,10 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ env.RELEASE_TAG }}
         name: Siyo ${{ steps.version.outputs.VERSION }}
+        draft: false
+        prerelease: false
         body_path: release-notes.md
         files: |
           dist/*
