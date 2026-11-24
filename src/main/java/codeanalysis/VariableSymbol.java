@@ -100,21 +100,143 @@ public class VariableSymbol {
 
     private long _originVersion = -1;
     private boolean _inferredType;
-    private java.util.Set<Object> _provenance = java.util.Set.of();
+    /**
+     * The provenance of the storage a variable's value may share with others'.
+     * Variables holding the same object (an alias, an element or field taken
+     * from one) share one cell. A value held inside another (in a literal, a
+     * field, a pushed element) feeds the container's cell, and never the
+     * reverse: what reaches the value is seen through the container, but a
+     * fresh value stored into a container does not take on what the container
+     * holds. Roots only grow, and each reaches a cell at most once.
+     */
+    private static final class ProvenanceCell {
+        private ProvenanceCell _parent;
+        private final java.util.Set<Object> _roots = new java.util.LinkedHashSet<>();
+        // Cells holding this one's object, and cells whose objects this one holds.
+        private final java.util.Set<ProvenanceCell> _containers =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        private final java.util.Set<ProvenanceCell> _contents =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        // Containers this cell's object was taken out of (an element, a field, a
+        // loop item): a store into it is a store into what they hold.
+        private final java.util.Set<ProvenanceCell> _elementOf =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+        ProvenanceCell find() {
+            ProvenanceCell cell = this;
+            while (cell._parent != null) cell = cell._parent;
+            ProvenanceCell step = this;
+            while (step != cell) {
+                ProvenanceCell next = step._parent;
+                step._parent = cell;
+                step = next;
+            }
+            return cell;
+        }
+
+        /** Adds roots here and to every cell holding this one, transitively. */
+        static void flow(ProvenanceCell start, java.util.Collection<Object> roots) {
+            java.util.ArrayDeque<ProvenanceCell> cells = new java.util.ArrayDeque<>();
+            java.util.ArrayDeque<java.util.List<Object>> carried = new java.util.ArrayDeque<>();
+            cells.add(start.find());
+            carried.add(new java.util.ArrayList<>(roots));
+            while (!cells.isEmpty()) {
+                ProvenanceCell cell = cells.pop().find();
+                java.util.List<Object> added = new java.util.ArrayList<>();
+                for (Object root : carried.pop()) {
+                    if (cell._roots.add(root)) added.add(root);
+                }
+                if (added.isEmpty()) continue;
+                for (ProvenanceCell container : cell._containers) {
+                    cells.add(container);
+                    carried.add(added);
+                }
+            }
+        }
+    }
+
+    private final ProvenanceCell _cell = new ProvenanceCell();
 
     /**
-     * What this variable's value was inferred from by 0.10.0: imported values,
-     * imported calls named from their declaration, and generic results (see
-     * TypeResolver.provenanceOf). It only grows: an assignment, a push or a
-     * stored field adds what was stored.
+     * What this variable's value, and anything stored into it or into storage it
+     * shares, was inferred from by 0.10.0: imported values, imported calls named
+     * from their declaration, and generic results (see TypeResolver.provenanceOf).
      */
-    public java.util.Set<Object> getProvenance() { return _provenance; }
+    public java.util.Set<Object> getProvenance() {
+        return java.util.Collections.unmodifiableSet(_cell.find()._roots);
+    }
 
     public void addProvenance(java.util.Set<Object> roots) {
-        if (roots.isEmpty() || _provenance.containsAll(roots)) return;
-        java.util.Set<Object> grown = new java.util.LinkedHashSet<>(_provenance);
-        grown.addAll(roots);
-        _provenance = grown;
+        if (roots.isEmpty()) return;
+        ProvenanceCell.flow(_cell, roots);
+        for (ProvenanceCell container : new java.util.ArrayList<>(_cell.find()._elementOf)) {
+            intoContents(container, roots);
+        }
+    }
+
+    /**
+     * Adds roots to what this variable holds deep inside: a store into a field
+     * or element of an object it holds, which may be any object stored into it.
+     */
+    public void addProvenanceToContents(java.util.Set<Object> roots) {
+        if (roots.isEmpty()) return;
+        intoContents(_cell, roots);
+        for (ProvenanceCell container : new java.util.ArrayList<>(_cell.find()._elementOf)) {
+            intoContents(container, roots);
+        }
+    }
+
+    private static void intoContents(ProvenanceCell start, java.util.Set<Object> roots) {
+        java.util.Set<ProvenanceCell> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        java.util.ArrayDeque<ProvenanceCell> pending = new java.util.ArrayDeque<>();
+        pending.add(start.find());
+        while (!pending.isEmpty()) {
+            ProvenanceCell cell = pending.pop().find();
+            if (!seen.add(cell)) continue;
+            ProvenanceCell.flow(cell, roots);
+            pending.addAll(cell._contents);
+        }
+    }
+
+    /**
+     * Records that this variable's object was taken out of {@code container}'s
+     * (an element, a field, a loop item, a call's result): it sees whatever the
+     * container does, and a store into it is a store into the container's contents.
+     */
+    public void elementOf(VariableSymbol container) {
+        container.heldIn(this);
+        ProvenanceCell mine = _cell.find();
+        ProvenanceCell theirs = container._cell.find();
+        if (mine != theirs) mine._elementOf.add(theirs);
+    }
+
+    /** Records that this variable holds the same object as {@code other}: one provenance for both. */
+    public void shareStorageWith(VariableSymbol other) {
+        ProvenanceCell mine = _cell.find();
+        ProvenanceCell theirs = other._cell.find();
+        if (mine == theirs) return;
+        java.util.List<Object> theirRoots = new java.util.ArrayList<>(theirs._roots);
+        java.util.List<Object> myRoots = new java.util.ArrayList<>(mine._roots);
+        java.util.List<ProvenanceCell> theirContainers = new java.util.ArrayList<>(theirs._containers);
+        theirs._parent = mine;
+        mine._containers.addAll(theirs._containers);
+        mine._contents.addAll(theirs._contents);
+        mine._elementOf.addAll(theirs._elementOf);
+        mine._containers.remove(mine);
+        mine._contents.remove(mine);
+        mine._elementOf.remove(mine);
+        ProvenanceCell.flow(mine, theirRoots);
+        for (ProvenanceCell container : theirContainers) ProvenanceCell.flow(container, myRoots);
+    }
+
+    /** Records that this variable's object is held inside {@code container}'s: what reaches it reaches that. */
+    public void heldIn(VariableSymbol container) {
+        ProvenanceCell held = _cell.find();
+        ProvenanceCell holder = container._cell.find();
+        if (held == holder) return;
+        held._containers.add(holder);
+        holder._contents.add(held);
+        ProvenanceCell.flow(holder, new java.util.ArrayList<>(held._roots));
     }
 
     /** Whether a local's type name was inferred by 0.10.0 rather than written in an annotation. */

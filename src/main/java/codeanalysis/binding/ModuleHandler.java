@@ -158,6 +158,12 @@ public class ModuleHandler {
         return moduleName;
     }
 
+    private final List<String> _importOrder = new ArrayList<>();
+    private boolean _root;
+
+    /** Marks the handler of the file being run, whose imports place modules in initialisation order. */
+    public void setRoot(boolean root) { _root = root; }
+
     // Modules an import inside a function will bring in, compiled ahead by
     // anticipateImport; a failed one maps to null and is reported once.
     private final Map<String, ModuleSymbol> _anticipated = new HashMap<>();
@@ -264,6 +270,11 @@ public class ModuleHandler {
                 return new BoundExpressionStatement(new BoundLiteralExpression(0));
             }
         }
+
+        // The order this file's imports were bound in is the order its modules
+        // are initialised in, whichever was compiled first.
+        if (!_importOrder.contains(moduleFilePath)) _importOrder.add(moduleFilePath);
+        if (_root && _registry != null) _registry.activate(moduleFilePath);
 
         // Register imported functions with qualified name: "moduleName.funcName"
         // For nested paths like "util/str", use the last segment as qualifier
@@ -715,6 +726,7 @@ public class ModuleHandler {
                     moduleBinder.getTypeResolver().declaredUnions(),
                     moduleBinder.getTypeResolver().declaredInterfaces(),
                     moduleBinder.getTypeResolver().declaredContested());
+            module.setImportOrder(List.copyOf(moduleBinder.getModuleHandler()._importOrder));
             module.setAnticipated(List.copyOf(moduleBinder.getModuleHandler()._anticipatedMethods),
                     List.copyOf(moduleBinder.getModuleHandler()._anticipatedStructs),
                     List.copyOf(moduleBinder.getModuleHandler()._anticipatedContested));

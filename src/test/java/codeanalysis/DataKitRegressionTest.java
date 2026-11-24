@@ -1640,6 +1640,126 @@ fn main() {
         }));
     }
 
+    // --- Gate at 79348c0: stores through aliases, and initialisation order -------
+
+    /** {name, declaration of w, a store of p into w, a use through the alias c}. */
+    private static final List<String[]> ALIAS_STORES = List.of(
+            new String[]{"field", "mut w = W { value: P { x: 0.0 } }", "w.value = p", "c.value.who()"},
+            new String[]{"index", "mut w = [P { x: 0.0 }]", "w[0] = p", "c[0].who()"},
+            new String[]{"map", "mut w = {\"k\": P { x: 0.0 }}", "w[\"k\"] = p", "c[\"k\"].who()"},
+            new String[]{"push", "mut w = [P { x: 0.0 }]", "push(w, p)", "c[1].who()"},
+            new String[]{"fieldRebuilt", "mut w = W { value: P { x: 0.0 } }", "w.value = p", "pop([c.value]).who()"},
+            new String[]{"aliasOfAlias", "mut w = W { value: P { x: 0.0 } }", "w.value = p", "d.value.who()"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aStoreIsSeenThroughEveryAliasTakenBeforeIt(@TempDir Path dir) {
+        // c is taken from w before p, inferred from lib.mk(), is stored into w.
+        // With dup imported, a method through c fails as through w; without it,
+        // both backends agree and none prints dup.
+        List<DynamicTest> tests = new java.util.ArrayList<>();
+        for (String[] c : ALIAS_STORES) {
+            for (boolean contested : List.of(true, false)) {
+                String name = c[0] + (contested ? "_dup" : "_clean");
+                String main = TRANSPORT_HEAD + "fn main() {\n    imut p = lib.mk()[0]\n    " + c[1]
+                        + "\n    imut c = w\n    imut d = c\n" + (contested ? "    import \"dup\"\n" : "")
+                        + "    " + c[2] + "\n    println(" + c[3] + ")\n}\n";
+                tests.add(DynamicTest.dynamicTest(name, () -> {
+                    Path project = Files.createDirectories(dir.resolve(name));
+                    Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+                    Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+                    Files.writeString(project.resolve("main.siyo"), main);
+                    List<CliParityTest.Result> results = new java.util.ArrayList<>();
+                    for (String mode : List.of("run", "interpret")) {
+                        results.add(CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString()));
+                    }
+                    String where = name + ": " + results.get(0).stdout() + " / " + results.get(1).stdout()
+                            + " / " + results.get(1).stderr();
+                    for (CliParityTest.Result result : results) {
+                        assertFalse(result.stdout().contains("dup"), where);
+                        if (contested) {
+                            assertEquals(1, result.exitCode(), where);
+                            assertTrue(result.stderr().contains("No matching method"), where);
+                        }
+                    }
+                    assertEquals(results.get(0).stdout(), results.get(1).stdout(), where);
+                    assertEquals(results.get(0).exitCode(), results.get(1).exitCode(), where);
+                }));
+            }
+        }
+        return tests.stream();
+    }
+
+    /** {name, program after the head, expected}: stores reached through calls, closures, loops and holders. */
+    private static final List<String[]> ALIAS_ROUTES = List.of(
+            new String[]{"aStoreByACallInADeclaration", "fn put(t: W<P>, q: P) -> int {\n    t.value = q\n    1\n}\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    import \"dup\"\n    imut n = put(w, p)\n    println(w.value.who())\n}\n", "rejected"},
+            new String[]{"aOneArgumentClosureThatCapturedTheValue", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut setter = fn(t: W<P>) { t.value = p }\n    import \"dup\"\n    setter(w)\n    println(w.value.who())\n}\n", "rejected"},
+            new String[]{"aCallThatCannotStoreIntoItsArgument", "fn show(q: P, xs: Array<P>) -> int { 1 }\nimport \"dup\"\nfn main() {\n    imut xs = lib.mk()\n    imut fresh = P { x: 2.0 }\n    show(fresh, xs)\n    println(fresh.who())\n}\n", "lib"},
+            new String[]{"storeThroughAParameter", "fn put(t: W<P>, q: P) { t.value = q }\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut alias = w\n    import \"dup\"\n    put(w, p)\n    println(alias.value.who())\n}\n", "rejected"},
+            new String[]{"anAliasReturnedByAFunction", "fn same(t: W<P>) -> W<P> { t }\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut alias = same(w)\n    import \"dup\"\n    w.value = p\n    println(alias.value.who())\n}\n", "rejected"},
+            new String[]{"anAliasReturnedByAClosure", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut get = fn() -> W<P> { w }\n    imut alias = get()\n    import \"dup\"\n    w.value = p\n    println(alias.value.who())\n}\n", "rejected"},
+            new String[]{"aStoreThroughALoopItem", "fn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut ws = [w]\n    import \"dup\"\n    for it in ws { it.value = p }\n    println(w.value.who())\n}\n", "rejected"},
+            new String[]{"aStoreThroughAHolder", "struct V<T> { inner: T }\nfn main() {\n    imut p = lib.mk()[0]\n    mut w = W { value: P { x: 0.0 } }\n    imut v = V { inner: w }\n    import \"dup\"\n    v.inner.value = p\n    println(w.value.who())\n}\n", "rejected"},
+            new String[]{"aFreshValuePushedBesideInferredOnes", "import \"dup\"\nfn main() {\n    mut list = lib.mk()\n    imut fresh = P { x: 2.0 }\n    push(list, fresh)\n    println(fresh.who())\n}\n", "lib"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aStoreReachesAliasesThroughCallsClosuresLoopsAndHolders(@TempDir Path dir) {
+        // A store made through a parameter, a loop item or a holder, or seen
+        // through an alias a function or closure handed back, reaches every alias;
+        // a fresh value stored beside inferred ones takes nothing from them.
+        return ALIAS_ROUTES.stream().map(c -> DynamicTest.dynamicTest(c[0], () -> {
+            Path project = Files.createDirectories(dir.resolve(c[0]));
+            Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+            Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+            Files.writeString(project.resolve("main.siyo"), TRANSPORT_HEAD + c[1]);
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                String where = c[0] + " " + mode + ": " + result.stdout() + " / " + result.stderr();
+                if (c[2].equals("rejected")) {
+                    assertEquals(1, result.exitCode(), where);
+                    assertEquals("", result.stdout(), where);
+                    assertTrue(result.stderr().contains("No matching method"), where);
+                } else {
+                    assertEquals(0, result.exitCode(), where);
+                    assertEquals(c[2], result.stdout(), where);
+                }
+            }
+        }));
+    }
+
+    /** {name, main, the exact output}: as 0.9.0 and 40f6f7f give it on both backends. */
+    private static final List<String[]> INIT_ORDERS = List.of(
+            new String[]{"flatUnused", "fn side() {\n    import \"a\"\n    import \"b\"\n}\nfn main() { println(\"MAIN\") }\n", "A\nB\nMAIN"},
+            new String[]{"flatCalled", "fn side() {\n    import \"a\"\n    import \"b\"\n}\nfn main() {\n    println(\"MAIN\")\n    side()\n}\n", "A\nB\nMAIN"},
+            new String[]{"nestedFirst", "fn side() {\n    if true { import \"a\" }\n    import \"b\"\n}\nfn main() { println(\"MAIN\") }\n", "A\nB\nMAIN"},
+            new String[]{"nestedSecond", "fn side() {\n    import \"a\"\n    if true { import \"b\" }\n}\nfn main() {\n    println(\"MAIN\")\n    side()\n}\n", "A\nB\nMAIN"},
+            new String[]{"lambdaFirst", "fn side() {\n    imut f = fn() { import \"a\" }\n    import \"b\"\n}\nfn main() { println(\"MAIN\") }\n", "A\nB\nMAIN"},
+            new String[]{"ifElse", "fn side() {\n    if true { import \"a\" } else { import \"b\" }\n    import \"c\"\n}\nfn main() {\n    println(\"MAIN\")\n    side()\n}\n", "A\nB\nC\nMAIN"},
+            new String[]{"deep", "fn side() {\n    if true {\n        if true { import \"a\" }\n        import \"b\"\n    }\n    import \"c\"\n}\nfn main() { println(\"MAIN\") }\n", "B\nA\nC\nMAIN"},
+            new String[]{"diamond", "import \"left\"\nfn side() { import \"right\" }\nfn main() { println(toString(left.ok())) }\n", "A\n1"},
+            new String[]{"transitive", "fn side() {\n    import \"c\"\n    import \"m\"\n}\nfn main() {\n    println(\"MAIN\")\n    side()\n}\n", "C\nA\nB\nM\nMAIN"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> modulesInitialiseInTheOrderTheirImportsAreBound(@TempDir Path dir) {
+        // Each module prints its letter as it initialises. Compiling a nested
+        // import ahead (to know what it brings in) must not change when it runs.
+        return INIT_ORDERS.stream().map(c -> DynamicTest.dynamicTest(c[0], () -> {
+            Path project = Files.createDirectories(dir.resolve(c[0]));
+            for (String letter : List.of("a", "b", "c")) {
+                Files.writeString(project.resolve(letter + ".siyo"), "fn seed() -> int {\n    println(\""
+                        + letter.toUpperCase() + "\")\n    1\n}\npub imut v = seed()\npub fn ok() -> int { v }\n");
+            }
+            Files.writeString(project.resolve("left.siyo"), "import \"a\"\npub fn ok() -> int { a.ok() }\n");
+            Files.writeString(project.resolve("right.siyo"), "import \"a\"\npub fn ok() -> int { a.ok() }\n");
+            Files.writeString(project.resolve("m.siyo"), "fn seed() -> int {\n    println(\"M\")\n    1\n}\n"
+                    + "pub imut v = seed()\npub fn g() {\n    if true { import \"a\" }\n    import \"b\"\n}\n");
+            Files.writeString(project.resolve("main.siyo"), c[1]);
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                assertEquals(c[2], result.stdout(), c[0] + " " + mode + ": " + result.stderr());
+            }
+        }));
+    }
+
     @Test
     void anAnnotatedValueKeepsZeroNinesRouteButNotGenericInference(@TempDir Path dir) throws Exception {
         // An annotation is 0.9.0's route: b[0].who() runs as 0.9.0 ran it. A generic

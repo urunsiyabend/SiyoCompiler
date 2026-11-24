@@ -463,11 +463,41 @@ public class TypeResolver {
      */
     public java.util.Set<Object> provenanceOf(BoundExpression expr) {
         java.util.Set<Object> roots = new java.util.LinkedHashSet<>();
-        collectProvenance(expr, roots, 0);
+        collectProvenance(expr, roots, null, 0);
         return roots;
     }
 
-    private void collectProvenance(BoundExpression expr, java.util.Set<Object> roots, int depth) {
+    /**
+     * The variables whose storage a value may share: the ones it is made of by
+     * the same steps as {@link #provenanceOf}, an alias, an element or field of
+     * one, a literal or builtin over one. A number, string or bool shares none.
+     */
+    public Storage storageOf(BoundExpression expr) {
+        Storage storage = new Storage();
+        collectProvenance(expr, new java.util.LinkedHashSet<>(), storage, 0);
+        return storage;
+    }
+
+    /**
+     * The variables a value may be the same object as ({@code same}: the variable
+     * itself, or an if or match of it), those whose objects it may be taken out
+     * of ({@code element}: an element, a field, a builtin, generic or ordinary
+     * call over one, a closure that captured one), and those whose objects it
+     * holds inside ({@code held}: in a literal).
+     */
+    public static final class Storage {
+        public final java.util.Set<VariableSymbol> same =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        public final java.util.Set<VariableSymbol> held =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        public final java.util.Set<VariableSymbol> element =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        private boolean inside;
+        private boolean derived;
+    }
+
+    private void collectProvenance(BoundExpression expr, java.util.Set<Object> roots,
+                                   Storage storage, int depth) {
         if (expr == null || depth > 64) return;
         // A number, a string or a bool carries no struct identity to regain.
         Class<?> type = expr.getClassType();
@@ -478,14 +508,25 @@ public class TypeResolver {
         int next = depth + 1;
         if (expr instanceof BoundVariableExpression v) {
             VariableSymbol variable = v.getVariable();
-            if (variable.getOriginStructs() != null && (variable.getOriginVersion() < 0 || variable.isInferredType())) {
-                roots.add(variable);
-            }
+            // An imported value is a root. A local is not: what it was inferred
+            // from already is, which keeps a container of many locals' values to
+            // the few roots they share.
+            if (variable.getOriginStructs() != null && variable.getOriginVersion() < 0) roots.add(variable);
             roots.addAll(variable.getProvenance());
+            if (storage != null) {
+                (storage.inside ? storage.held : storage.derived ? storage.element : storage.same).add(variable);
+            }
         } else if (expr instanceof BoundIndexExpression index) {
-            collectProvenance(index.getTarget(), roots, next);
+            collectDerived(index.getTarget(), roots, storage, next);
         } else if (expr instanceof BoundMemberAccessExpression member) {
-            collectProvenance(member.getTarget(), roots, next);
+            collectDerived(member.getTarget(), roots, storage, next);
+        } else if (expr instanceof BoundLambdaExpression lambda) {
+            // A closure may hand back what it captured, or store into it.
+            if (storage != null) {
+                for (VariableSymbol captured : lambda.getCapturedVariables()) {
+                    collectDerived(new BoundVariableExpression(captured), new java.util.LinkedHashSet<>(), storage, next);
+                }
+            }
         } else if (expr instanceof BoundCallExpression call) {
             FunctionSymbol function = call.getFunction();
             if (call.getResultTypeName() != null) roots.add(new GenericResult(call.getResultTypeName()));
@@ -498,30 +539,69 @@ public class TypeResolver {
             // A builtin or a generic function hands back what it was given; an
             // ordinary function's result is what its declaration says.
             if (BuiltinFunctions.isBuiltin(function) || !function.getTypeParameters().isEmpty()) {
-                for (BoundExpression argument : call.getArguments()) collectProvenance(argument, roots, next);
+                for (BoundExpression argument : call.getArguments()) collectDerived(argument, roots, storage, next);
+            } else if (storage != null) {
+                // An ordinary function's result is what its declaration says, but
+                // it may be an argument, or held in one.
+                for (BoundExpression argument : call.getArguments()) {
+                    collectDerived(argument, new java.util.LinkedHashSet<>(), storage, next);
+                }
             }
         } else if (expr instanceof BoundClosureCallExpression closureCall) {
-            collectProvenance(closureCall.getClosure(), roots, next);
+            collectDerived(closureCall.getClosure(), roots, storage, next);
+            if (storage != null) {
+                for (BoundExpression argument : closureCall.getArguments()) {
+                    collectDerived(argument, new java.util.LinkedHashSet<>(), storage, next);
+                }
+            }
         } else if (expr instanceof BoundArrayLiteralExpression array) {
-            for (BoundExpression element : array.getElements()) collectProvenance(element, roots, next);
+            for (BoundExpression element : array.getElements()) collectHeld(element, roots, storage, next);
         } else if (expr instanceof BoundSetLiteralExpression set) {
-            for (BoundExpression element : set.getElements()) collectProvenance(element, roots, next);
+            for (BoundExpression element : set.getElements()) collectHeld(element, roots, storage, next);
         } else if (expr instanceof BoundMapLiteralExpression map) {
-            for (BoundExpression key : map.getKeys()) collectProvenance(key, roots, next);
-            for (BoundExpression value : map.getValues()) collectProvenance(value, roots, next);
+            for (BoundExpression key : map.getKeys()) collectHeld(key, roots, storage, next);
+            for (BoundExpression value : map.getValues()) collectHeld(value, roots, storage, next);
         } else if (expr instanceof BoundStructLiteralExpression struct) {
-            for (BoundExpression value : struct.getFieldValues().values()) collectProvenance(value, roots, next);
+            for (BoundExpression value : struct.getFieldValues().values()) collectHeld(value, roots, storage, next);
         } else if (expr instanceof BoundUnionLiteralExpression union) {
-            for (BoundExpression argument : union.getArguments()) collectProvenance(argument, roots, next);
+            for (BoundExpression argument : union.getArguments()) collectHeld(argument, roots, storage, next);
         } else if (expr instanceof BoundMatchExpression match) {
-            collectProvenance(match.getTarget(), roots, next);
-            for (var arm : match.getArms()) collectProvenance(arm.body(), roots, next);
+            collectProvenance(match.getTarget(), roots, storage, next);
+            for (var arm : match.getArms()) collectProvenance(arm.body(), roots, storage, next);
         } else if (expr instanceof BoundConversionExpression conversion) {
-            collectProvenance(conversion.getExpression(), roots, next);
+            collectProvenance(conversion.getExpression(), roots, storage, next);
         } else if (expr instanceof BoundCastExpression cast) {
-            collectProvenance(cast.getExpression(), roots, next);
+            collectProvenance(cast.getExpression(), roots, storage, next);
         } else if (expr instanceof BoundAssignmentExpression assignment) {
-            collectProvenance(assignment.getExpression(), roots, next);
+            collectProvenance(assignment.getExpression(), roots, storage, next);
+        }
+    }
+
+    /** Walks what a value is taken out of: its variables' objects hold the value, not are it. */
+    private void collectDerived(BoundExpression expr, java.util.Set<Object> roots, Storage storage, int depth) {
+        if (storage == null || storage.derived || storage.inside) {
+            collectProvenance(expr, roots, storage, depth);
+            return;
+        }
+        storage.derived = true;
+        try {
+            collectProvenance(expr, roots, storage, depth);
+        } finally {
+            storage.derived = false;
+        }
+    }
+
+    /** Walks a value held inside a literal: its variables are held in the result, not the result itself. */
+    private void collectHeld(BoundExpression expr, java.util.Set<Object> roots, Storage storage, int depth) {
+        if (storage == null || storage.inside) {
+            collectProvenance(expr, roots, storage, depth);
+            return;
+        }
+        storage.inside = true;
+        try {
+            collectProvenance(expr, roots, storage, depth);
+        } finally {
+            storage.inside = false;
         }
     }
 
@@ -620,6 +700,98 @@ public class TypeResolver {
      */
     public boolean uncontestedName(String typeName) {
         return uncontested(new java.util.HashSet<>(java.util.Arrays.asList(typeName.split("[^A-Za-z0-9_]+"))));
+    }
+
+    private static final java.util.Set<String> SCALAR_TYPE_NAMES =
+            java.util.Set.of("int", "long", "float", "double", "bool", "string", "char");
+
+    /**
+     * Whether a value of type {@code held} could be stored somewhere inside a
+     * value of type {@code holder}: in a field, an element or a payload, at any
+     * depth through the structs those reach. A function given both may then
+     * have stored one into the other. A struct of only numbers and strings holds
+     * no other value; a slot of unknown, erased or parameter type might hold any.
+     */
+    public boolean canHold(String holder, String held) {
+        if (holder == null || held == null) return true;
+        java.util.Set<String> heldWords = new java.util.HashSet<>();
+        for (String word : held.split("[^A-Za-z0-9_]+")) {
+            if (!word.isEmpty() && !SCALAR_TYPE_NAMES.contains(word)) heldWords.add(word);
+        }
+        if (heldWords.isEmpty()) return false;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.ArrayDeque<String> pending = new java.util.ArrayDeque<>(slotsOf(canonicalTypeName(holder)));
+        if (pending.isEmpty() && !knownType(holder)) return true;
+        while (!pending.isEmpty()) {
+            String slot = canonicalTypeName(pending.pop());
+            if (!seen.add(slot)) continue;
+            if (slot.equals("object") || !knownType(slot)) return true;
+            for (String word : slot.split("[^A-Za-z0-9_]+")) {
+                if (heldWords.contains(word)) return true;
+            }
+            pending.addAll(slotsOf(slot));
+        }
+        return false;
+    }
+
+    /** Whether every name in a type is a scalar or a type this file knows. */
+    private boolean knownType(String typeName) {
+        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
+            if (word.isEmpty() || SCALAR_TYPE_NAMES.contains(word)) continue;
+            if (word.equals("Array") || word.equals("Map") || word.equals("Set") || word.equals("List")) continue;
+            if (!_structTypes.containsKey(word) && !_unionTypes.containsKey(word) && !_interfaceTypes.containsKey(word)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The types a value of this type holds directly: its fields, elements or payloads. */
+    private List<String> slotsOf(String typeName) {
+        List<String> slots = new java.util.ArrayList<>();
+        if (typeName.endsWith("[]")) {
+            slots.add(typeName.substring(0, typeName.length() - 2));
+            return slots;
+        }
+        String base = genericBaseName(typeName);
+        String declared = base != null ? base : typeName;
+        List<String> arguments = base != null ? typeArgumentsOf(typeName) : List.of();
+        if (declared.equals("Array") || declared.equals("Set") || declared.equals("List") || declared.equals("Map")) {
+            slots.addAll(arguments);
+            return slots;
+        }
+        StructSymbol struct = _structTypes.get(declared);
+        if (struct != null) {
+            Map<String, String> bindings = new HashMap<>();
+            for (int i = 0; i < struct.getTypeParameters().size() && i < arguments.size(); i++) {
+                bindings.put(struct.getTypeParameters().get(i), arguments.get(i));
+            }
+            for (String field : struct.getFieldNames()) {
+                String fieldType = struct.getFieldTypeName(field);
+                if (fieldType == null) {
+                    slots.add("object");
+                    continue;
+                }
+                String bound = substitute(fieldType, struct.getTypeParameters(), bindings);
+                // A parameter with no argument holds anything.
+                slots.add(struct.getTypeParameters().contains(bound) ? "object" : bound);
+            }
+            return slots;
+        }
+        UnionSymbol union = _unionTypes.get(declared);
+        if (union != null) {
+            Map<String, String> bindings = new HashMap<>();
+            for (int i = 0; i < union.getTypeParameters().size() && i < arguments.size(); i++) {
+                bindings.put(union.getTypeParameters().get(i), arguments.get(i));
+            }
+            for (UnionSymbol.Variant variant : union.getVariants().values()) {
+                for (String payload : variant.getPayloadTypeNames()) {
+                    String bound = substitute(payload, union.getTypeParameters(), bindings);
+                    slots.add(union.getTypeParameters().contains(bound) ? "object" : bound);
+                }
+            }
+        }
+        return slots;
     }
 
     /** Whether a written type is an array, map or set, which 0.9.0 typed a value by. */

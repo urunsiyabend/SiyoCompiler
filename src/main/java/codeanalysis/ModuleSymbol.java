@@ -112,6 +112,13 @@ public class ModuleSymbol {
     private java.util.List<String[]> _anticipatedStructs = java.util.List.of();
 
     public java.util.List<String[]> getAnticipatedMethods() { return _anticipatedMethods; }
+
+    private java.util.List<String> _importOrder = java.util.List.of();
+
+    /** The modules this module's import statements bound, in the order they were bound. */
+    public java.util.List<String> getImportOrder() { return _importOrder; }
+
+    public void setImportOrder(java.util.List<String> importOrder) { _importOrder = importOrder; }
     public java.util.List<String[]> getAnticipatedStructs() { return _anticipatedStructs; }
 
     private java.util.List<StructSymbol> _anticipatedContested = java.util.List.of();

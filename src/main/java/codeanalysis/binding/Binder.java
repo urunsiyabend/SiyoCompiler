@@ -87,6 +87,7 @@ public class Binder {
         Binder binder = new Binder(parentScope);
         binder._moduleHandler.setRegistry(registry);
         binder._moduleHandler.setFilePath(filePath);
+        binder._moduleHandler.setRoot(true);
         if (!enforceTopLevel) binder._atFileTopLevel = false;
         BoundStatement statement = binder.bindStatement(syntax.getStatement());
         Iterable<FunctionSymbol> functions = binder._scope.getDeclaredFunctions();
@@ -328,6 +329,10 @@ public class Binder {
     };
 
     private void anticipateNestedImports(Object node) {
+        // Found in any order, compiled in the order the binder would have reached
+        // them, which is their order in the source: a module runs its top level
+        // when it is first compiled, so the order is observable.
+        List<ImportStatementSyntax> found = new ArrayList<>();
         java.util.Set<Object> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         java.util.ArrayDeque<Object> pending = new java.util.ArrayDeque<>();
         pending.add(node);
@@ -335,7 +340,7 @@ public class Binder {
             Object next = pending.pop();
             if (next == null || !seen.add(next)) continue;
             if (next instanceof ImportStatementSyntax nested) {
-                _moduleHandler.anticipateImport(nested);
+                found.add(nested);
                 continue;
             }
             if (next instanceof Iterable<?> items) {
@@ -357,6 +362,8 @@ public class Binder {
                 }
             }
         }
+        found.sort(java.util.Comparator.comparingInt(nested -> nested.getSpan().getStart()));
+        for (ImportStatementSyntax nested : found) _moduleHandler.anticipateImport(nested);
     }
 
     /**
@@ -620,6 +627,7 @@ public class Binder {
         // value keeps what it was inferred from.
         if (syntax.getTypeAnnotation() == null || !TypeResolver.namesACollection(syntax.getTypeAnnotation().getData())) {
             variableSymbol.addProvenance(_typeResolver.provenanceOf(initializer));
+            shareStorage(variableSymbol, initializer);
         }
         _typeResolver.stamp(variableSymbol, generation, !variableSymbol.getProvenance().isEmpty());
         return new BoundVariableDeclaration(variableSymbol, initializer);
@@ -747,22 +755,93 @@ public class Binder {
      */
     private void recordStoredProvenance(BoundExpression result) {
         if (result instanceof BoundAssignmentExpression assignment) {
+            // The variable now is the value: an alias of what it aliases.
             assignment.getVariable().addProvenance(_typeResolver.provenanceOf(assignment.getExpression()));
+            shareStorage(assignment.getVariable(), assignment.getExpression());
         } else if (result instanceof BoundIndexAssignmentExpression store) {
             VariableSymbol root = rootVariable(store.getTarget());
-            if (root != null) root.addProvenance(_typeResolver.provenanceOf(store.getValue()));
+            if (root != null) store(root, store.getValue(), !(store.getTarget() instanceof BoundVariableExpression));
         } else if (result instanceof BoundMemberAssignmentExpression store) {
             VariableSymbol root = rootVariable(store.getTarget());
-            if (root != null) root.addProvenance(_typeResolver.provenanceOf(store.getValue()));
+            if (root != null) store(root, store.getValue(), !(store.getTarget() instanceof BoundVariableExpression));
+        } else if (result instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getArguments().size() > 1) {
+            // A function may store any argument into another: put(w, p) is w.value = p.
+            storeArgumentsIntoEachOther(call.getArguments());
+        } else if (result instanceof BoundClosureCallExpression call && !call.getArguments().isEmpty()) {
+            List<BoundExpression> values = new ArrayList<>(call.getArguments());
+            values.add(call.getClosure());
+            storeArgumentsIntoEachOther(values);
         } else if (result instanceof BoundCallExpression call && BuiltinFunctions.isBuiltin(call.getFunction())
                 && call.getArguments().size() > 1) {
             VariableSymbol root = rootVariable(call.getArguments().get(0));
             if (root != null) {
-                for (int i = 1; i < call.getArguments().size(); i++) {
-                    root.addProvenance(_typeResolver.provenanceOf(call.getArguments().get(i)));
-                }
+                boolean deep = !(call.getArguments().get(0) instanceof BoundVariableExpression);
+                for (int i = 1; i < call.getArguments().size(); i++) store(root, call.getArguments().get(i), deep);
             }
         }
+    }
+
+    /**
+     * A call may store any of its values into a slot of an argument that can
+     * hold it: put(w, p) may be w.value = p. A closure called counts as one of
+     * its values, since it may store what it captured. An argument whose type
+     * holds only numbers and strings, or nothing of the stored value's type,
+     * receives nothing.
+     */
+    private void storeArgumentsIntoEachOther(List<BoundExpression> arguments) {
+        for (int i = 0; i < arguments.size(); i++) {
+            VariableSymbol root = rootVariable(arguments.get(i));
+            if (root == null) continue;
+            String holder = storageTypeNameOf(arguments.get(i));
+            for (int j = 0; j < arguments.size(); j++) {
+                if (i == j || !_typeResolver.canHold(holder, storageTypeNameOf(arguments.get(j)))) continue;
+                store(root, arguments.get(j), !(arguments.get(i) instanceof BoundVariableExpression));
+            }
+        }
+    }
+
+    /** The type a value is known to have, for what it can hold; null when unknown. */
+    private String storageTypeNameOf(BoundExpression value) {
+        if (value instanceof BoundLambdaExpression) return null;
+        String declared = _typeResolver.declaredTypeNameOf(value);
+        if (declared != null) return declared;
+        if (value.getClassType() == SiyoStruct.class) {
+            StructSymbol struct = _typeResolver.resolveStructType(value);
+            if (struct != null) return struct.getName();
+        }
+        if (value.getClassType() == SiyoArray.class) {
+            StructSymbol element = _typeResolver.resolveStructTypeFromCollection(value);
+            if (element != null) return "Array<" + element.getName() + ">";
+        }
+        return null;
+    }
+
+    /**
+     * A value stored into a variable's storage: the variable now holds what the
+     * value was inferred from, and shares storage with what the value shares,
+     * so every alias of either sees it.
+     */
+    private void store(VariableSymbol into, BoundExpression value, boolean deep) {
+        java.util.Set<Object> roots = _typeResolver.provenanceOf(value);
+        // Into an object it holds: that object may be anything stored into it.
+        if (deep) into.addProvenanceToContents(roots);
+        else into.addProvenance(roots);
+        TypeResolver.Storage storage = _typeResolver.storageOf(value);
+        for (VariableSymbol held : storage.same) if (held != into) held.heldIn(into);
+        for (VariableSymbol held : storage.element) if (held != into) held.heldIn(into);
+        for (VariableSymbol held : storage.held) if (held != into) held.heldIn(into);
+    }
+
+    /**
+     * A variable now holding a value: the same object as what the value is an
+     * alias, element or field of, and the holder of what a literal in it holds.
+     */
+    private void shareStorage(VariableSymbol variable, BoundExpression value) {
+        TypeResolver.Storage storage = _typeResolver.storageOf(value);
+        for (VariableSymbol shared : storage.same) if (shared != variable) variable.shareStorageWith(shared);
+        for (VariableSymbol container : storage.element) if (container != variable) variable.elementOf(container);
+        for (VariableSymbol held : storage.held) if (held != variable) held.heldIn(variable);
     }
 
     /** The variable an element or field access starts from: b in b[0].f. */
@@ -788,6 +867,8 @@ public class Binder {
 
     private BoundExpression bindExpressionWithTypeHint(ExpressionSyntax syntax, codeanalysis.syntax.SyntaxToken typeAnnotation) {
         BoundExpression result = bindExpressionInternal(syntax);
+        // An initializer is an expression like any other: a call in it may store.
+        if (result != null) recordStoredProvenance(result);
         if (result instanceof BoundArrayLiteralExpression arr && arr.getElements().isEmpty() && typeAnnotation != null) {
             String typeName = typeAnnotation.getData();
             // Both T[] and Array<T> name their element; taking Array<T> itself
@@ -1187,7 +1268,7 @@ public class Binder {
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
                 variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation,
-                        _typeResolver.provenanceOf(target));
+                        _typeResolver.provenanceOf(target), _typeResolver.storageOf(target));
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -1289,7 +1370,8 @@ public class Binder {
                                                                        codeanalysis.UnionSymbol targetUnion,
                                                                        String targetTypeName,
                                                                        long generation,
-                                                                       java.util.Set<Object> provenance) {
+                                                                       java.util.Set<Object> provenance,
+                                                                       TypeResolver.Storage storage) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1363,6 +1445,9 @@ public class Binder {
                 _typeResolver.stamp(binding, generation, !provenance.isEmpty());
             }
             binding.addProvenance(provenance);
+            for (VariableSymbol shared : storage.same) binding.elementOf(shared);
+            for (VariableSymbol container : storage.element) binding.elementOf(container);
+            for (VariableSymbol held : storage.held) held.heldIn(binding);
             bindings.add(binding);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
             if (payloadStruct != null) _typeResolver.trackStructType(binding, payloadStruct);
@@ -2625,6 +2710,11 @@ public class Binder {
                 : TypeResolver.elementTypeNameOf(_typeResolver.declaredTypeNameOf(collection));
         // An item is what its collection was inferred from, named or not.
         itemVar.addProvenance(_typeResolver.provenanceOf(originalCollection));
+        // An item is taken out of its collection.
+        TypeResolver.Storage collectionStorage = _typeResolver.storageOf(originalCollection);
+        for (VariableSymbol container : collectionStorage.same) itemVar.elementOf(container);
+        for (VariableSymbol container : collectionStorage.element) itemVar.elementOf(container);
+        for (VariableSymbol held : collectionStorage.held) held.heldIn(itemVar);
         if (itemTypeName != null) {
             itemVar.setDeclaredTypeName(itemTypeName);
             // An element, a map key or a set element of a struct-derived collection.
