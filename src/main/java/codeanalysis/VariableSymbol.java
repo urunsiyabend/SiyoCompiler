@@ -99,6 +99,12 @@ public class VariableSymbol {
     }
 
     private long _originVersion = -1;
+    private boolean _inferredType;
+
+    /** Whether a local's type name was inferred by 0.10.0 rather than written in an annotation. */
+    public boolean isInferredType() { return _inferredType; }
+
+    public void setInferredType(boolean inferred) { _inferredType = inferred; }
 
     /** The generation of this file's tables a local variable's types were captured in; -1 for an exporter's. */
     public long getOriginVersion() { return _originVersion; }

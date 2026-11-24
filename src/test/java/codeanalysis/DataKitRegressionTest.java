@@ -1471,6 +1471,11 @@ fn main() {
             new NestedCase("loopAndFieldLocalBeforeNestedImport", "import \"lib\"\nstruct W<T> { v: T }\n"
                     + "fn main() {\n    imut w = W { v: lib.values }\n    imut b = w.v\n    imut p = b[0]\n"
                     + "    import \"other\"\n    for q in b { println(q.who()) }\n}\n", "|rejected"),
+            // A struct local taken from it: its method before the import is lib's,
+            // after it refused rather than dispatched by name.
+            new NestedCase("structLocalMethodBeforeAndAfterNestedImport", "import \"lib\"\n"
+                    + "fn main() {\n    imut a = lib.values\n    imut p = a[0]\n    println(p.who())\n"
+                    + "    import \"other\"\n    println(p.who())\n}\n", "lib|rejected"),
             // An import inside the very statement that gives a local its type, in a
             // lambda bound after the value: a declaration, a loop's collection and a
             // match's target. The names mean what they meant before the statement.
@@ -1520,6 +1525,20 @@ fn main() {
     }
 
     @Test
+    void aStructLocalsFieldStillReadsAsTrackedAfterANestedImport(@TempDir Path dir) throws Exception {
+        // Refusing the local's methods must not erase its field reads: p.x + 1
+        // on an erased value would be read at int compiled against other's P.
+        Files.writeString(dir.resolve("lib.siyo"), LIB_P);
+        Files.writeString(dir.resolve("other.siyo"), "pub struct P { x: int }\n");
+        Files.writeString(dir.resolve("main.siyo"), "import \"lib\"\nfn main() {\n    imut a = lib.values\n"
+                + "    imut p = a[0]\n    import \"other\"\n    println(toString(p.x + 1))\n}\n");
+        for (String mode : List.of("run", "interpret")) {
+            CliParityTest.Result result = CliParityTest.siyoc(dir, mode, dir.resolve("main.siyo").toString());
+            assertEquals("2.5", result.stdout(), mode + ": " + result.stderr());
+        }
+    }
+
+    @Test
     void anImportInsideTheExportersOwnFunctionDoesNotChangeWhatItsValueMeans(@TempDir Path dir) throws Exception {
         // lib's own function imports other, replacing lib's P in lib's tables after
         // `values` was declared. The importer, which never names other, must not
@@ -1534,6 +1553,88 @@ fn main() {
             assertFalse(result.stdout().contains("other"), where);
             assertTrue(result.exitCode() == 0 ? result.stdout().equals("lib") : result.stdout().isEmpty(), where);
         }
+    }
+
+    // --- An exporter's own nested import and a return type 0.10.0 now infers -------
+
+    private static final String RETURN_LIB = "pub struct Box<T> { value: T }\npub struct P { x: float }\nimpl P { fn who(self) -> string { \"lib\" } }\npub fn mk() -> Array<P> { [P { x: 1.5 }] }\npub fn mkp() -> P { P { x: 1.5 } }\npub fn boxed() -> Box<Array<P>> { Box { value: [P { x: 1.5 }] } }\npub fn id<T>(t: T) -> T { t }\npub interface Named { fn name() -> string }\nimpl Named for P { fn name(self) -> string { \"named-lib\" } }\n";
+
+    /**
+     * {@code side}: lib's own function imports other; {@code top}: lib imports other
+     * before its own P; {@code unrelated}: lib's function imports a module with no P.
+     */
+    private record ReturnCase(String name, String libSide, String main, String expected) {
+    }
+
+    private static final List<ReturnCase> RETURN_CASES = List.of(
+            new ReturnCase("unannotatedReturn", "side", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("indexedCall", "side", "import \"lib\"\nfn main() { println(lib.mk()[0].who()) }\n", "rejected"),
+            new ReturnCase("genericStructReturn", "side", "import \"lib\"\nfn main() {\n    imut b = lib.boxed()\n    println(b.value[0].who())\n}\n", "rejected"),
+            new ReturnCase("genericCallOverAStructReturn", "side", "import \"lib\"\nfn main() { println(lib.id(lib.mkp()).who()) }\n", "rejected"),
+            new ReturnCase("localGenericCallOverAStructReturn", "side", "import \"lib\"\nfn id<T>(t: T) -> T { t }\nfn main() { println(id(lib.mkp()).who()) }\n", "rejected"),
+            new ReturnCase("importerImportsOtherFirst", "none", "import \"other\"\nimport \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("importerImportsOtherAfter", "none", "import \"lib\"\nimport \"other\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("importersOwnStructOfTheName", "none", "import \"lib\"\nstruct P { z: int }\nimpl P { fn who(self) -> string { \"main\" } }\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("exporterImportsOtherBeforeItsOwnP", "top", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("unannotatedReturnNoSideImport", "none", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "lib"),
+            new ReturnCase("genericStructReturnNoSideImport", "none", "import \"lib\"\nfn main() {\n    imut b = lib.boxed()\n    println(b.value[0].who())\n}\n", "lib"),
+            new ReturnCase("genericCallOverAStructReturnNoSideImport", "none", "import \"lib\"\nfn main() { println(lib.id(lib.mkp()).who()) }\n", "lib"),
+            new ReturnCase("unannotatedReturnUnrelatedSideImport", "unrelated", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who())\n}\n", "lib"),
+            new ReturnCase("annotatedReturnNoSideImport", "none", "import \"lib\"\nfn main() {\n    imut a: Array<P> = lib.mk()\n    println(a[0].who())\n}\n", "lib"),
+            new ReturnCase("aFieldOnlyStructOfTheNameImportedFirst", "none", "import \"third\"\nimport \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(toString(a[0].x) + \" \" + a[0].who())\n}\n", "1.5 lib"),
+            // Another file adding a method to lib's P clashes with nothing; implementing
+            // one lib already has does, since the backends may pick different bodies.
+            // An annotated local is 0.9.0's route and is held only to what changed.
+            new ReturnCase("aDuplicateImplOfLibsPHere", "none", "import \"lib\"\nimpl Named for P { fn name(self) -> string { \"main-named\" } }\nfn main() {\n    imut a = lib.mk()\n    println(a[0].name())\n}\n", "rejected"),
+            new ReturnCase("aMethodAddedToLibsPHere", "none", "import \"lib\"\nimpl P { fn mine(self) -> string { \"main-ext\" } }\nfn main() {\n    imut a = lib.mk()\n    println(a[0].who() + \" \" + a[0].mine())\n}\n", "lib main-ext"),
+            new ReturnCase("anAnnotatedLocalBesideADuplicateImplAcrossAnImport", "none", "import \"lib\"\nimpl Named for P { fn name(self) -> string { \"main-named\" } }\nfn main() {\n    imut a: Array<P> = lib.mk()\n    import \"fourth\"\n    println(a[0].who())\n}\n", "lib"),
+            // A module imported here found lib's P contested, so it is contested here:
+            // xx's zed reached lib's P through mid, and dupmod's refused who is found
+            // by name in the interpreter.
+            new ReturnCase("aMiddleModuleWhereAnotherPsMethodReachesLibsP", "none", "import \"mid\"\nimport \"lib\"\nfn main() {\n    imut a = lib.mk()\n    println(a[0].zed())\n}\n", "rejected"),
+            new ReturnCase("aModuleRedeclaringLibsMethodImportedNested", "none", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    import \"dupmod\"\n    println(a[0].who())\n}\n", "rejected"),
+            new ReturnCase("aStructLocalOfItBeforeThatImport", "none", "import \"lib\"\nfn main() {\n    imut a = lib.mk()\n    imut p = a[0]\n    import \"dupmod\"\n    println(p.who())\n}\n", "rejected"),
+            // 0.9.0 read these through the replaced P too; unchanged.
+            new ReturnCase("zeroNineStructReturn", "side", "import \"lib\"\nfn main() { println(lib.mkp().who()) }\n", "other"),
+            new ReturnCase("zeroNineAnnotatedReturn", "side", "import \"lib\"\nfn main() {\n    imut a: Array<P> = lib.mk()\n    println(a[0].who())\n}\n", "other"));
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> anInferredReturnTypeNeverReadsATypeTheExportersOwnImportReplaced(@TempDir Path dir) {
+        // 0.9.0 left lib.mk()'s Array<P> erased, so a[0].who() failed. 0.10.0 names
+        // it, and after lib's side() replaced lib's P with other's it ran other's
+        // method. It is now erased again in that case, and named otherwise.
+        return RETURN_CASES.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
+            Path project = Files.createDirectories(dir.resolve(c.name()));
+            String lib = switch (c.libSide()) {
+                case "side" -> RETURN_LIB + "fn side() { import \"other\" }\n";
+                case "unrelated" -> RETURN_LIB + "fn side() { import \"fourth\" }\n";
+                case "top" -> "import \"other\" as o\n" + RETURN_LIB;
+                default -> RETURN_LIB;
+            };
+            Files.writeString(project.resolve("lib.siyo"), lib);
+            Files.writeString(project.resolve("other.siyo"), OTHER_P);
+            // A P with no methods; a module declaring no P.
+            Files.writeString(project.resolve("third.siyo"), "pub struct P { x: float }\n");
+            Files.writeString(project.resolve("fourth.siyo"), "pub struct Q { y: int }\n");
+            Files.writeString(project.resolve("xx.siyo"),
+                    "pub struct P { y: int }\nimpl P { fn zed(self) -> string { \"xx\" } }\n");
+            Files.writeString(project.resolve("mid.siyo"), "import \"xx\"\nimport \"lib\"\npub fn one() -> int { 1 }\n");
+            Files.writeString(project.resolve("dupmod.siyo"),
+                    "import \"lib\"\nimpl P { fn who(self) -> string { \"dup\" } }\n");
+            Files.writeString(project.resolve("main.siyo"), c.main());
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                String where = c.name() + " " + mode + ": " + result.stdout() + " / " + result.stderr();
+                if (c.expected().equals("rejected")) {
+                    assertEquals(1, result.exitCode(), where);
+                    assertEquals("", result.stdout(), where);
+                    assertTrue(result.stderr().contains("No matching method"), where);
+                } else {
+                    assertEquals(0, result.exitCode(), where);
+                    assertEquals(c.expected(), result.stdout(), where);
+                }
+            }
+        }));
     }
 
     @Test

@@ -126,10 +126,10 @@ public class TypeResolver {
             return elementTypeNameOf(declaredTypeNameOf(call.getArguments().get(0)));
         }
         if (expr instanceof BoundCallExpression generic && generic.getResultTypeName() != null) {
-            return generic.getResultTypeName();
+            return returnOriginHolds(generic.getFunction()) ? generic.getResultTypeName() : null;
         }
         if (expr instanceof BoundCallExpression call && call.getFunction().getTypeParameters().isEmpty()) {
-            return call.getFunction().getDeclaredReturnTypeName();
+            return returnOriginHolds(call.getFunction()) ? call.getFunction().getDeclaredReturnTypeName() : null;
         }
         return null;
     }
@@ -252,15 +252,45 @@ public class TypeResolver {
         Map<String, OriginCheck> byName = _originChecked.computeIfAbsent(var.getOriginStructs(),
                 k -> new HashMap<>());
         String name = var.getDeclaredTypeName() == null ? "" : var.getDeclaredTypeName();
-        OriginCheck cached = byName.get(name);
+        // A name 0.10.0 inferred is also held to contested methods; one written in
+        // an annotation, 0.9.0's route, only to what changed.
+        boolean inferred = var.getOriginVersion() < 0 || var.isInferredType();
+        String key = inferred ? name : name + " (annotated)";
+        OriginCheck cached = byName.get(key);
         if (cached != null && cached.stillHolds()) return cached.holds;
         // An imported value is checked against its exporter's fixed tables in every
         // generation after an import, so its check keeps the names it consulted and
         // is redone only when one of them changed. A local's stamp is checked in few
         // generations, and keeps nothing.
         java.util.Set<String> consulted = var.getOriginVersion() < 0 ? new java.util.HashSet<>() : null;
-        boolean holds = checkOrigin(var, consulted);
-        byName.put(name, new OriginCheck(_version.value(), holds, consulted));
+        boolean holds = checkOrigin(name, List.of(), var.getOriginStructs(), var.getOriginUnions(),
+                var.getOriginInterfaces(), inferred, java.util.Set.of(), consulted);
+        byName.put(key, new OriginCheck(_version.value(), holds, consulted));
+        return holds;
+    }
+
+    /**
+     * Whether an imported function's declared return type means here what it
+     * meant where the function was declared, by the same check as an imported
+     * value. 0.10.0 names a call's result from that declaration (0.9.0 left an
+     * imported call's {@code Array<P>} erased); when a name in it now means a
+     * different declaration here, such as after an import inside the exporter's
+     * own function replaced its {@code P}, the result is left erased as 0.9.0
+     * left it, never read as the other type. The function's own type
+     * parameters are not type names.
+     */
+    boolean returnOriginHolds(FunctionSymbol function) {
+        Map<String, StructSymbol> structs = function.getReturnOriginStructs();
+        String name = function.getDeclaredReturnTypeName();
+        if (structs == null || name == null) return true;
+        Map<String, OriginCheck> byName = _originChecked.computeIfAbsent(structs, k -> new HashMap<>());
+        String key = name + " " + function.getTypeParameters();
+        OriginCheck cached = byName.get(key);
+        if (cached != null && cached.stillHolds()) return cached.holds;
+        java.util.Set<String> consulted = new java.util.HashSet<>();
+        boolean holds = checkOrigin(name, function.getTypeParameters(), structs, function.getReturnOriginUnions(),
+                function.getReturnOriginInterfaces(), true, function.getReturnOriginContested(), consulted);
+        byName.put(key, new OriginCheck(_version.value(), holds, consulted));
         return holds;
     }
 
@@ -301,6 +331,99 @@ public class TypeResolver {
                             Map<String, InterfaceSymbol> interfaces) {
     }
 
+    private Snapshot _declared;
+    private java.util.Set<String> _declaredContested = java.util.Set.of();
+
+    // For each struct name and method, the files that declared that method here,
+    // whether or not the declaration won. Struct tables keep the latest
+    // declaration of a name, method tables the first, and the interpreter finds
+    // a method by name, so after `import "other"` then `import "lib"` the struct
+    // P is lib's and P.who may be other's, as in 0.9.0.
+    private final Map<String, Map<String, java.util.Set<String>>> _methodModules = new HashMap<>();
+
+    /** Records that {@code module} declared a method {@code Struct.name} here. */
+    public void recordMethod(String qualifiedName, String module) {
+        int dot = qualifiedName.indexOf('.');
+        if (dot <= 0 || module == null) return;
+        String struct = qualifiedName.substring(0, dot);
+        // A new declarer can change what a name means here, so it is a change like any other.
+        if (_methodModules.computeIfAbsent(struct, k -> new HashMap<>())
+                .computeIfAbsent(qualifiedName.substring(dot + 1), k -> new java.util.HashSet<>()).add(module)) {
+            _version.bump(struct);
+        }
+    }
+
+    // Structs an imported module found contested, as its declarations stood. Its
+    // methods reach here too, by inheritance or by name in the interpreter.
+    private final java.util.Set<StructSymbol> _importedContested =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    /** Records that a module imported here found its struct {@code struct} contested. */
+    public void recordImportedContested(String name, StructSymbol struct) {
+        if (struct != null && _importedContested.add(struct)) _version.bump(name);
+    }
+
+    /**
+     * Whether a struct of this name here may run another declaration's methods:
+     * two files declared one of its methods, or two files declared a struct of
+     * the name and a method of it here is not the current struct's file's. The
+     * backends may then dispatch the method differently, so a name 0.10.0 infers
+     * (an imported value's, an imported call's result) is not trusted through
+     * it. Methods another file adds to the one struct of a name, or a second
+     * struct of the name with no methods, clash with nothing. A local's names,
+     * re-checked after an import, are held to what changed since, not to this.
+     */
+    private boolean methodsContested(String name, StructSymbol here) {
+        if (here != null && _importedContested.contains(here)) return true;
+        Map<String, java.util.Set<String>> methods = _methodModules.get(name);
+        if (methods == null || here == null) return false;
+        java.util.Set<String> declarers = new java.util.HashSet<>();
+        for (StructSymbol declared : _structTypes.everHeld(name)) declarers.add(declared.getOriginModule());
+        boolean twoStructs = declarers.size() > 1;
+        for (java.util.Set<String> modules : methods.values()) {
+            if (modules.size() > 1) return true;
+            if (twoStructs && !modules.contains(here.getOriginModule())) return true;
+        }
+        return false;
+    }
+
+    /** The struct names whose methods were contested as this file's declarations stood. */
+    public java.util.Set<String> declaredContested() {
+        return _declaredContested;
+    }
+
+    /** Records this file's tables as its top-level imports and declarations left them. */
+    public void markDeclarationsComplete() {
+        _declared = snapshotAt(_version.value());
+        java.util.Set<String> contested = new java.util.HashSet<>();
+        for (String name : _structTypes.keySet()) {
+            if (methodsContested(name, _structTypes.get(name))) contested.add(name);
+        }
+        _declaredContested = contested;
+    }
+
+    /** This file's structs as its declarations left them; null before they are complete. */
+    public Map<String, StructSymbol> declaredStructs() { return _declared == null ? null : _declared.structs(); }
+    public Map<String, UnionSymbol> declaredUnions() { return _declared == null ? null : _declared.unions(); }
+    public Map<String, InterfaceSymbol> declaredInterfaces() { return _declared == null ? null : _declared.interfaces(); }
+
+    private Snapshot snapshotAt(long generation) {
+        return _snapshots.computeIfAbsent(generation, g -> new Snapshot(
+                _structTypes.asOf(g), _unionTypes.asOf(g), _interfaceTypes.asOf(g)));
+    }
+
+    /**
+     * Whether a loop item or payload taken from {@code source} has an inferred
+     * type: only one taken from a variable written with an annotation has not.
+     */
+    public boolean isInferred(BoundExpression source) {
+        if (source instanceof BoundVariableExpression v && v.getVariable().getOriginStructs() != null
+                && v.getVariable().getOriginVersion() >= 0) {
+            return v.getVariable().isInferredType();
+        }
+        return true;
+    }
+
     /** The generation this file's type tables are at; see {@link #stamp}. */
     public long generation() {
         return _version.value();
@@ -313,25 +436,26 @@ public class TypeResolver {
      * inside that very statement, may make a name mean something else; the
      * variable is then checked against what it meant, as an imported value is
      * checked against its exporter, and reads erased if any name changed. An
-     * imported variable keeps its exporter's tables.
+     * imported variable keeps its exporter's tables. {@code inferred} says the
+     * name was not written in an annotation, so contested methods count too.
      */
-    public void stamp(VariableSymbol var, long generation) {
+    public void stamp(VariableSymbol var, long generation, boolean inferred) {
         if (var.getOriginStructs() != null || var.getDeclaredTypeName() == null) return;
-        Snapshot snapshot = _snapshots.computeIfAbsent(generation, g -> new Snapshot(
-                _structTypes.asOf(g), _unionTypes.asOf(g), _interfaceTypes.asOf(g)));
+        var.setInferredType(inferred);
+        Snapshot snapshot = snapshotAt(generation);
         var.setOriginStructs(snapshot.structs());
         var.setOriginTypes(snapshot.unions(), snapshot.interfaces());
         var.setOriginVersion(generation);
     }
 
-    private boolean checkOrigin(VariableSymbol var, java.util.Set<String> consulted) {
-        Map<String, StructSymbol> structs = var.getOriginStructs();
-        Map<String, UnionSymbol> unions = var.getOriginUnions();
-        Map<String, InterfaceSymbol> interfaces = var.getOriginInterfaces();
+    private boolean checkOrigin(String typeName, List<String> typeParameters, Map<String, StructSymbol> structs,
+                                Map<String, UnionSymbol> unions, Map<String, InterfaceSymbol> interfaces,
+                                boolean inferred, java.util.Set<String> theirContested,
+                                java.util.Set<String> consulted) {
         java.util.Set<Object> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         // Each pending type name with the type parameters in scope where it was written.
         java.util.ArrayDeque<Map.Entry<String, List<String>>> pending = new java.util.ArrayDeque<>();
-        pending.add(Map.entry(var.getDeclaredTypeName() == null ? "" : var.getDeclaredTypeName(), List.of()));
+        pending.add(Map.entry(typeName, typeParameters));
         while (!pending.isEmpty()) {
             Map.Entry<String, List<String>> next = pending.pop();
             for (String word : next.getKey().split("[^A-Za-z0-9_]+")) {
@@ -344,6 +468,11 @@ public class TypeResolver {
                 if (_structTypes.get(word) != null && _structTypes.get(word) != theirStruct) return false;
                 if (_unionTypes.get(word) != null && _unionTypes.get(word) != theirUnion) return false;
                 if (_interfaceTypes.get(word) != null && _interfaceTypes.get(word) != theirInterface) return false;
+                // The same struct, but its methods here, or where it was declared,
+                // are another declaration's.
+                if (inferred && (methodsContested(word, _structTypes.get(word)) || theirContested.contains(word))) {
+                    return false;
+                }
                 if (theirStruct != null && visited.add(theirStruct)) {
                     for (String field : theirStruct.getFieldNames()) {
                         String fieldType = theirStruct.getFieldTypeName(field);
@@ -881,7 +1010,7 @@ public class TypeResolver {
             return resolveStructTypeFromCollection(popped.getArguments().get(0));
         }
         if (target instanceof BoundCallExpression generic && generic.getClassType() == SiyoStruct.class
-                && generic.getResultTypeName() != null) {
+                && generic.getResultTypeName() != null && returnOriginHolds(generic.getFunction())) {
             StructSymbol st = _structTypes.get(erasedTypeName(generic.getResultTypeName()));
             if (st != null) return st;
         }
@@ -919,7 +1048,8 @@ public class TypeResolver {
             StructSymbol structType = getArrayStructElementType(varExpr.getVariable());
             if (structType != null) return structType;
         }
-        if (collection instanceof BoundCallExpression generic && generic.getResultTypeName() != null) {
+        if (collection instanceof BoundCallExpression generic && generic.getResultTypeName() != null
+                && returnOriginHolds(generic.getFunction())) {
             String elementName = elementTypeNameOf(generic.getResultTypeName());
             StructSymbol elemStruct = elementName != null ? _structTypes.get(erasedTypeName(elementName)) : null;
             if (elemStruct != null) return elemStruct;

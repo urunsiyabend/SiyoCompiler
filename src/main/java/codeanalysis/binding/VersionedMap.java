@@ -77,6 +77,15 @@ class VersionedMap<K, V> extends LinkedHashMap<K, V> {
         };
     }
 
+    /** Every value this table has held under a key, oldest first. */
+    List<V> everHeld(Object key) {
+        List<V> values = new ArrayList<>();
+        for (Change<V> change : _history.getOrDefault(key, List.of())) {
+            if (change.value() != null) values.add(change.value());
+        }
+        return values;
+    }
+
     private void record(Object key, V value) {
         _version.bump(key);
         _history.computeIfAbsent(key, k -> new ArrayList<>()).add(new Change<>(_version.value(), value));

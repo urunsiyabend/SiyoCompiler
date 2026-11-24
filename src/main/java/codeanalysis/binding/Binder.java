@@ -242,6 +242,7 @@ public class Binder {
                 }
                 StructSymbol symbol = new StructSymbol(name, fields, fieldTypeNames);
                 symbol.setActor(true);
+                symbol.setOriginModule(_moduleHandler.getFilePath());
                 _structTypes.put(name, symbol);
             } else if (statementSyntax instanceof InterfaceDeclarationSyntax interfaceSyntax) {
                 registerInterfaceDeclaration(interfaceSyntax);
@@ -252,6 +253,10 @@ public class Binder {
                 }
             }
         }
+
+        // What the names in this file's signatures mean: its tables before any
+        // body, and so any import inside a function, is bound.
+        if (wasFileTopLevel) _typeResolver.markDeclarationsComplete();
 
         // Which structs implement which interface is settled before any body is
         // bound. A function that takes an interface may be written above the
@@ -536,7 +541,7 @@ public class Binder {
             }
         }
 
-        _typeResolver.stamp(variableSymbol, generation);
+        _typeResolver.stamp(variableSymbol, generation, syntax.getTypeAnnotation() == null);
         return new BoundVariableDeclaration(variableSymbol, initializer);
     }
 
@@ -1065,7 +1070,8 @@ public class Binder {
             BoundMatchExpression.BoundVariantPattern variant = null;
             boolean openedScope = false;
             if (arm.isVariantPattern()) {
-                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation);
+                variant = bindVariantPattern(arm, targetUnion, _typeResolver.declaredTypeNameOf(target), generation,
+                        _typeResolver.isInferred(target));
                 if (variant != null) {
                     coveredVariants.add(variant.variantName());
                     _scope = new BoundScope(_scope);
@@ -1166,7 +1172,7 @@ public class Binder {
     private BoundMatchExpression.BoundVariantPattern bindVariantPattern(MatchArmSyntax arm,
                                                                        codeanalysis.UnionSymbol targetUnion,
                                                                        String targetTypeName,
-                                                                       long generation) {
+                                                                       long generation, boolean inferred) {
         String variantName = arm.getVariantName().getData();
         codeanalysis.UnionSymbol union;
         if (arm.getVariantTypeName() != null) {
@@ -1236,7 +1242,7 @@ public class Binder {
             // a plain float[] payload stays as 0.9.0 read it.
             if (!payloadTypeName.equals("object") && (!typeArguments.isEmpty() || namesADeclaredType(payloadTypeName))) {
                 binding.setDeclaredTypeName(payloadTypeName);
-                _typeResolver.stamp(binding, generation);
+                _typeResolver.stamp(binding, generation, inferred);
             }
             bindings.add(binding);
             StructSymbol payloadStruct = _structTypes.get(payloadTypeName);
@@ -2381,6 +2387,12 @@ public class Binder {
             }
             return "Map<" + key + "," + value + ">";
         }
+        // What follows names a value by 0.9.0's routes, for inference alone. A call
+        // whose declared return type means something else here is not named by
+        // them either, so a generic call over it stays erased as in 0.9.0.
+        if (expr instanceof BoundCallExpression call && !_typeResolver.returnOriginHolds(call.getFunction())) {
+            return null;
+        }
         Class<?> type = expr.getClassType();
         if (type == SiyoStruct.class) {
             StructSymbol struct = _typeResolver.resolveStructType(expr);
@@ -2484,7 +2496,7 @@ public class Binder {
             itemVar.setDeclaredTypeName(itemTypeName);
             // An element, a map key or a set element of a struct-derived collection.
             if (_typeResolver.isStructDerived(originalCollection)) _typeResolver.markStructDerived(itemVar, originalCollection);
-            _typeResolver.stamp(itemVar, generation);
+            _typeResolver.stamp(itemVar, generation, _typeResolver.isInferred(originalCollection));
             String innerName = TypeResolver.elementTypeNameOf(itemTypeName);
             Class<?> innerType = _typeResolver.lookupType(innerName);
             if (elementType == SiyoArray.class && innerType != null) {
@@ -3429,6 +3441,14 @@ public class Binder {
         // Check for struct instance method: u.greet() → User.greet(u)
         if (target.getClassType() == SiyoStruct.class) {
             StructSymbol structType = _typeResolver.resolveStructType(target);
+            // A struct local whose type 0.10.0 inferred, and whose struct's methods
+            // here are no longer only its own, is not dispatched through it: its
+            // fields still read as tracked, but which method body runs could differ
+            // by backend. It fails as the erased value 0.9.0 had.
+            if (target instanceof BoundVariableExpression local && local.getVariable().isInferredType()
+                    && !_typeResolver.originHolds(local.getVariable())) {
+                structType = null;
+            }
             if (structType != null) {
                 String qualifiedName = structType.getName() + "." + methodName;
                 if (_scope.tryLookupFunction(qualifiedName)) {

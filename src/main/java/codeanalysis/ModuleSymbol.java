@@ -93,6 +93,29 @@ public class ModuleSymbol {
     public void setUnions(Map<String, UnionSymbol> unions) {
         _unions = unions;
     }
+
+    // The module's tables as its top-level imports and declarations left them,
+    // before any function body (and any import inside one) was bound: what the
+    // names in its functions' signatures mean.
+    private Map<String, StructSymbol> _declaredStructs;
+    private Map<String, UnionSymbol> _declaredUnions;
+    private Map<String, InterfaceSymbol> _declaredInterfaces;
+    private java.util.Set<String> _declaredContested = java.util.Set.of();
+
+    public Map<String, StructSymbol> getDeclaredStructs() { return _declaredStructs; }
+    public Map<String, UnionSymbol> getDeclaredUnions() { return _declaredUnions; }
+    public Map<String, InterfaceSymbol> getDeclaredInterfaces() { return _declaredInterfaces; }
+
+    /** Struct names whose methods here came from another declaration than the struct's. */
+    public java.util.Set<String> getDeclaredContested() { return _declaredContested; }
+
+    public void setDeclaredTables(Map<String, StructSymbol> structs, Map<String, UnionSymbol> unions,
+                                  Map<String, InterfaceSymbol> interfaces, java.util.Set<String> contested) {
+        _declaredContested = contested == null ? java.util.Set.of() : contested;
+        _declaredStructs = structs;
+        _declaredUnions = unions;
+        _declaredInterfaces = interfaces;
+    }
     public BoundBlockStatement getTopLevelBlock() { return _topLevelBlock; }
 
     /**

@@ -13,6 +13,12 @@ public class StructSymbol {
     private final LinkedHashMap<String, String> _fieldTypeNames;
     private boolean _isActor = false;
     private List<String> _typeParameters = List.of();
+    private String _originModule;
+
+    /** The file that declared this struct, which its own methods come from. */
+    public String getOriginModule() { return _originModule; }
+
+    public void setOriginModule(String module) { _originModule = module; }
 
     public StructSymbol(String name, LinkedHashMap<String, Class<?>> fields) {
         this(name, fields, new LinkedHashMap<>());

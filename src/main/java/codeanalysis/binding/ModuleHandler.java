@@ -230,6 +230,10 @@ public class ModuleHandler {
             // works its result type out from what the declaration wrote.
             importedFunc.setTypeParameters(func.getTypeParameters());
             importedFunc.setDeclaredReturnTypeName(func.getDeclaredReturnTypeName());
+            // The names its return type is written with mean the exporter's types
+            // as declared, whatever an import inside one of its functions did later.
+            importedFunc.setReturnOrigin(module.getDeclaredStructs(), module.getDeclaredUnions(),
+                    module.getDeclaredInterfaces(), module.getDeclaredContested());
             _scope.tryDeclareFunction(importedFunc);
             BoundBlockStatement body = module.getFunctionBodies().get(func);
             if (body != null) {
@@ -256,9 +260,17 @@ public class ModuleHandler {
             inherited.setOriginModule(source.getOriginModule());
             inherited.setTypeParameters(source.getTypeParameters());
             inherited.setDeclaredReturnTypeName(source.getDeclaredReturnTypeName());
+            if (source.getReturnOriginStructs() != null) {
+                inherited.setReturnOrigin(source.getReturnOriginStructs(), source.getReturnOriginUnions(),
+                        source.getReturnOriginInterfaces(), source.getReturnOriginContested());
+            } else {
+                inherited.setReturnOrigin(module.getDeclaredStructs(), module.getDeclaredUnions(),
+                        module.getDeclaredInterfaces(), module.getDeclaredContested());
+            }
             if (_scope.tryDeclareFunction(inherited) && entry.getValue() != null) {
                 _functionBodies.put(inherited, entry.getValue());
             }
+            _typeResolver.recordMethod(source.getName(), source.getOriginModule());
         }
 
         // Module-level variables are exported as module.name, reading the static
@@ -285,6 +297,14 @@ public class ModuleHandler {
                 continue;
             }
             _structTypes.put(entry.getKey(), entry.getValue());
+        }
+
+        // A struct the module found contested is contested here too: its methods
+        // came with it, and the interpreter finds the refused ones by name.
+        for (String name : module.getDeclaredContested()) {
+            if (module.getDeclaredStructs() != null) {
+                _typeResolver.recordImportedContested(name, module.getDeclaredStructs().get(name));
+            }
         }
 
         // A struct-derived value's type travels with the exporter's own tables, as
@@ -351,6 +371,7 @@ public class ModuleHandler {
                 importedImpl.setJvmMethodName(func.getName().replace('.', '$'));
                 importedImpl.setOriginModule(func.getOriginModule());
                 _scope.tryDeclareFunction(importedImpl);
+                _typeResolver.recordMethod(func.getName(), func.getOriginModule());
                 BoundBlockStatement body = module.getFunctionBodies().get(func);
                 if (body != null) {
                     _functionBodies.put(importedImpl, body);
@@ -615,6 +636,10 @@ public class ModuleHandler {
             module.setUnions(new java.util.LinkedHashMap<>(moduleBinder.getModuleHandler().getUnionTypes()));
             module.setInterfaces(new java.util.LinkedHashMap<>(
                     moduleBinder.getTypeResolver().getInterfaceTypes()));
+            module.setDeclaredTables(moduleBinder.getTypeResolver().declaredStructs(),
+                    moduleBinder.getTypeResolver().declaredUnions(),
+                    moduleBinder.getTypeResolver().declaredInterfaces(),
+                    moduleBinder.getTypeResolver().declaredContested());
             module.setVariables(collectTopLevelVariables(topLevelBlock, className));
             module.setInheritedMethods(collectInheritedMethods(moduleBinder, structs));
             module.setImportedClassNames(
@@ -750,6 +775,7 @@ public class ModuleHandler {
         }
         StructSymbol struct = new StructSymbol(name, fields, fieldTypeNames);
         struct.setTypeParameters(syntax.getTypeParameters());
+        struct.setOriginModule(_filePath);
         _structTypes.put(name, struct);
     }
 
@@ -801,6 +827,7 @@ public class ModuleHandler {
                 }
             }
             _scope.tryDeclareFunction(func);
+            _typeResolver.recordMethod(qualifiedName, _filePath);
         }
     }
 
