@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1323,5 +1324,99 @@ fn main() {
             assertEquals(1, result.exitCode(), mode);
             assertTrue(result.stderr().contains("does not have members"), mode + ": " + result.stderr());
         }
+    }
+
+    // --- Final gate at 56a4a07: an imported value keeps its origin's identity -----
+
+    private static final String LIB_HEAD = "struct Box<T> { value: T }\nfn g<T>(b: Box<T>) -> T { b.value }\n";
+
+    /** One import-identity case: the modules, and either the expected output or that access is rejected. */
+    private record IdentityCase(String name, Map<String, String> modules, String expected) {
+    }
+
+    private static final List<IdentityCase> IDENTITY_CASES = List.of(
+            // A public Row whose field is the exporter's private P, beside the importer's own P.
+            new IdentityCase("privateBridgeDispatch", Map.of(
+                    "lib.siyo", LIB_HEAD + "struct P { x: float }\nimpl P { fn who(self) -> string { \"lib\" } }\n"
+                            + "pub struct Row { item: P }\npub imut values = g(Box { value: [Row { item: P { x: 1.5 } }] })\n",
+                    "main.siyo", "import \"lib\"\nstruct P { x: float }\nimpl P { fn who(self) -> string { \"main\" } }\n"
+                            + "fn main() {\n    imut a = lib.values\n    println(a[0].item.who())\n}\n"), null),
+            new IdentityCase("privateBridgeField", Map.of(
+                    "lib.siyo", LIB_HEAD + "struct P { x: float }\npub struct Row { item: P }\n"
+                            + "pub imut values = g(Box { value: [Row { item: P { x: 1.5 } }] })\n",
+                    "main.siyo", "import \"lib\"\nstruct P { x: string, y: int }\n"
+                            + "fn main() {\n    imut a = lib.values\n    imut b = a\n    println(b[0].item.x)\n}\n"), null),
+            // A later import replaces the public P the exported value was made of.
+            new IdentityCase("laterImportReplaces", Map.of(
+                    "lib.siyo", LIB_HEAD + "pub struct P { x: float }\npub imut values = g(Box { value: [P { x: 1.5 }] })\n",
+                    "other.siyo", "pub struct P { x: int }\npub fn one() -> int { 1 }\n",
+                    "main.siyo", "import \"lib\"\nimport \"other\"\n"
+                            + "fn main() {\n    imut a = lib.values\n    println(toString(a[0].x * 2))\n}\n"), null),
+            // The same two imports the other way round: lib's P is the one here, so it reads as lib's.
+            new IdentityCase("earlierImportReplaced", Map.of(
+                    "lib.siyo", LIB_HEAD + "pub struct P { x: float }\npub imut values = g(Box { value: [P { x: 1.5 }] })\n",
+                    "other.siyo", "pub struct P { x: int }\npub fn one() -> int { 1 }\n",
+                    "main.siyo", "import \"other\"\nimport \"lib\"\n"
+                            + "fn main() {\n    imut a = lib.values\n    println(toString(a[0].x * 2))\n}\n"), "3.0"),
+            // Public structs all the way down, through an aliased import: the genuine lib types.
+            new IdentityCase("publicBridgeAliasedImport", Map.of(
+                    "lib.siyo", LIB_HEAD + "pub struct P { x: float }\nimpl P { fn who(self) -> string { \"lib\" } }\n"
+                            + "pub struct Row { item: P }\npub imut values = g(Box { value: [Row { item: P { x: 1.5 } }] })\n",
+                    "main.siyo", "import \"lib\" as L\n"
+                            + "fn main() {\n    imut a = L.values\n    imut b = a\n"
+                            + "    println(toString(b[0].item.x * 2) + \" \" + b[0].item.who())\n}\n"), "3.0 lib"),
+            // A recursive public type: checking identity terminates.
+            new IdentityCase("recursiveType", Map.of(
+                    "lib.siyo", LIB_HEAD + "pub struct Node { v: float, kids: Array<Node> }\n"
+                            + "pub imut values = g(Box { value: [Node { v: 1.5, kids: [Node { v: 2.5, kids: [] }] }] })\n",
+                    "main.siyo", "import \"lib\"\n"
+                            + "fn main() {\n    imut a = lib.values\n    println(toString(a[0].kids[0].v * 2))\n}\n"), "5.0"),
+            // A struct the importer cannot write at all, reached through a third module: no clash.
+            new IdentityCase("unnameableStructThroughAThirdModule", Map.of(
+                    "shapes.siyo", "pub struct P { x: float }\npub fn one() -> int { 1 }\n",
+                    "lib.siyo", "import \"shapes\"\n" + LIB_HEAD + "pub struct Row { item: P, n: int }\n"
+                            + "pub imut values = g(Box { value: [Row { item: P { x: 1.5 }, n: 4 }] })\n",
+                    "main.siyo", "import \"lib\"\nfn main() {\n    imut a = lib.values\n    println(toString(a[0].n))\n}\n"), "4"),
+            // A struct's own type parameter is not a type name, whatever this module declares.
+            new IdentityCase("typeParameterNamedLikeAStruct", Map.of(
+                    "lib.siyo", LIB_HEAD + "pub struct Wrap<A> { inner: A, tag: string }\n"
+                            + "pub imut values = g(Box { value: [Wrap { inner: 1.5, tag: \"t\" }] })\n",
+                    "main.siyo", "import \"lib\"\nstruct A { z: int }\n"
+                            + "fn main() {\n    imut a = lib.values\n    println(a[0].tag + \" \" + toString(a[0].inner * 2.0))\n}\n"), "t 3.0"),
+            // The exporter's private interface beside the importer's own of that name.
+            new IdentityCase("privateInterface", Map.of(
+                    "lib.siyo", LIB_HEAD + "interface Shape { fn area() -> int }\nstruct Sq { s: int }\n"
+                            + "impl Shape for Sq { fn area(self) -> int { self.s * self.s } }\n"
+                            + "fn mk() -> Array<Shape> { [Sq { s: 3 }] }\npub imut values = g(Box { value: mk() })\n",
+                    "main.siyo", "import \"lib\"\ninterface Shape { fn area() -> int }\nstruct Sq { s: int }\n"
+                            + "impl Shape for Sq { fn area(self) -> int { 7 } }\n"
+                            + "fn main() {\n    imut a = lib.values\n    for s in a { println(toString(s.area())) }\n}\n"), null),
+            // The exporter's private P inside a private sum type inside a public Row.
+            new IdentityCase("privateStructInAUnionPayload", Map.of(
+                    "lib.siyo", LIB_HEAD + "struct P { x: float }\nimpl P { fn who(self) -> string { \"lib\" } }\n"
+                            + "type V = Has(P) | No\npub struct Row { v: V }\n"
+                            + "pub imut values = g(Box { value: [Row { v: Has(P { x: 1.5 }) }] })\n",
+                    "main.siyo", "import \"lib\"\nstruct P { x: float }\nimpl P { fn who(self) -> string { \"main\" } }\n"
+                            + "type V = Has(P) | No\n"
+                            + "fn main() {\n    imut a = lib.values\n"
+                            + "    match a[0].v { Has(p) => println(p.who()), No => println(\"no\") }\n}\n"), null));
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> anImportedValueIsReadAsItsOriginsTypesOrRejected(@TempDir Path dir) {
+        return IDENTITY_CASES.stream().map(c -> DynamicTest.dynamicTest(c.name(), () -> {
+            Path project = Files.createDirectories(dir.resolve(c.name()));
+            for (var module : c.modules().entrySet()) Files.writeString(project.resolve(module.getKey()), module.getValue());
+            for (String mode : List.of("run", "interpret")) {
+                CliParityTest.Result result = CliParityTest.siyoc(project, mode, project.resolve("main.siyo").toString());
+                if (c.expected() != null) {
+                    assertEquals(c.expected(), result.stdout(), mode + ": " + result.stderr());
+                } else {
+                    // Rejected, at compile time or where the value is first used: never another
+                    // module's type read or dispatched in its place, so nothing is printed.
+                    assertEquals(1, result.exitCode(), mode + ": " + result.stdout());
+                    assertEquals("", result.stdout(), mode);
+                }
+            }
+        }));
     }
 }

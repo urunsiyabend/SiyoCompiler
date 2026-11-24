@@ -75,6 +75,9 @@ public class TypeResolver {
      */
     public String declaredTypeNameOf(BoundExpression expr) {
         if (expr instanceof BoundVariableExpression varExpr) {
+            // An imported value whose structs mean something else here has no
+            // usable type name: it reads erased, and a member read is rejected.
+            if (!originHolds(varExpr.getVariable())) return null;
             return varExpr.getVariable().getDeclaredTypeName();
         }
         if (expr instanceof BoundIndexExpression indexExpr) {
@@ -225,6 +228,61 @@ public class TypeResolver {
         return common;
     }
 
+    /**
+     * Whether an imported variable's type name means, here, exactly what it meant
+     * in the module that exported it. Every struct, sum type and interface the
+     * name mentions, and every one their fields and variant payloads mention in
+     * turn (cycle-safe), must not be a different declaration here: a library's
+     * private P, or a public P a later import replaced, is never read as the
+     * type of that name here. A name this module cannot write at all cannot be
+     * mistaken, and a struct's own type parameters are not type names. Checked
+     * where the value is used, after every import, once per variable. A local
+     * variable holds trivially.
+     */
+    boolean originHolds(VariableSymbol var) {
+        if (var.getOriginStructs() == null) return true;
+        return _originChecked.computeIfAbsent(var, this::checkOrigin);
+    }
+
+    private final Map<VariableSymbol, Boolean> _originChecked = new java.util.IdentityHashMap<>();
+
+    private boolean checkOrigin(VariableSymbol var) {
+        Map<String, StructSymbol> structs = var.getOriginStructs();
+        Map<String, UnionSymbol> unions = var.getOriginUnions();
+        Map<String, InterfaceSymbol> interfaces = var.getOriginInterfaces();
+        java.util.Set<Object> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        // Each pending type name with the type parameters in scope where it was written.
+        java.util.ArrayDeque<Map.Entry<String, List<String>>> pending = new java.util.ArrayDeque<>();
+        pending.add(Map.entry(var.getDeclaredTypeName() == null ? "" : var.getDeclaredTypeName(), List.of()));
+        while (!pending.isEmpty()) {
+            Map.Entry<String, List<String>> next = pending.pop();
+            for (String word : next.getKey().split("[^A-Za-z0-9_]+")) {
+                if (word.isEmpty() || next.getValue().contains(word)) continue;
+                StructSymbol theirStruct = structs.get(word);
+                UnionSymbol theirUnion = unions.get(word);
+                InterfaceSymbol theirInterface = interfaces.get(word);
+                // A different declaration of this name here is a mismatch; none at all is not.
+                if (_structTypes.get(word) != null && _structTypes.get(word) != theirStruct) return false;
+                if (_unionTypes.get(word) != null && _unionTypes.get(word) != theirUnion) return false;
+                if (_interfaceTypes.get(word) != null && _interfaceTypes.get(word) != theirInterface) return false;
+                if (theirStruct != null && visited.add(theirStruct)) {
+                    for (String field : theirStruct.getFieldNames()) {
+                        String fieldType = theirStruct.getFieldTypeName(field);
+                        if (fieldType != null) pending.add(Map.entry(fieldType, theirStruct.getTypeParameters()));
+                    }
+                }
+                if (theirUnion != null && visited.add(theirUnion)) {
+                    for (UnionSymbol.Variant variant : theirUnion.getVariants().values()) {
+                        for (String payload : variant.getPayloadTypeNames()) {
+                            pending.add(Map.entry(payload, theirUnion.getTypeParameters()));
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     public void markStructDerived(VariableSymbol var) {
         var.setStructDerived(true);
     }
@@ -252,7 +310,9 @@ public class TypeResolver {
             boolean carries = call.getFunction() == BuiltinFunctions.FILTER || call.getFunction() == BuiltinFunctions.POP;
             return carries && !call.getArguments().isEmpty() && isStructDerived(call.getArguments().get(0));
         }
-        if (expr instanceof BoundVariableExpression variable) return variable.getVariable().isStructDerived();
+        if (expr instanceof BoundVariableExpression variable) {
+            return variable.getVariable().isStructDerived() && originHolds(variable.getVariable());
+        }
         // An if or match whose every arm gives the same struct-derived value type.
         if (expr instanceof BoundMatchExpression match) return commonArmTypeName(match) != null;
         if (expr instanceof BoundIndexExpression index) return isStructDerived(index.getTarget());
@@ -359,7 +419,8 @@ public class TypeResolver {
      */
     public InterfaceSymbol resolveInterfaceElementType(BoundExpression collection) {
         if (!(collection instanceof BoundVariableExpression varExpr)) return null;
-        String elementName = elementTypeNameOf(varExpr.getVariable().getDeclaredTypeName());
+        // Through declaredTypeNameOf, so an imported value is read in its exporter's terms.
+        String elementName = elementTypeNameOf(declaredTypeNameOf(varExpr));
         return elementName == null ? null : _interfaceTypes.get(elementName);
     }
 

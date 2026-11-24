@@ -83,6 +83,33 @@ public class VariableSymbol {
      * @return The declared type name, or null.
      */
     private boolean _structDerived;
+    private java.util.Map<String, StructSymbol> _originStructs;
+
+    /**
+     * For a variable imported from another module, the structs its exporter
+     * could name, so its type name is read in the exporter's terms rather than
+     * by whatever those names mean where it is used. Null for a local variable.
+     */
+    public java.util.Map<String, StructSymbol> getOriginStructs() {
+        return _originStructs;
+    }
+
+    public void setOriginStructs(java.util.Map<String, StructSymbol> originStructs) {
+        _originStructs = originStructs;
+    }
+
+    private java.util.Map<String, UnionSymbol> _originUnions = java.util.Map.of();
+    private java.util.Map<String, InterfaceSymbol> _originInterfaces = java.util.Map.of();
+
+    /** The sum types and interfaces the exporter could name, beside its structs. */
+    public java.util.Map<String, UnionSymbol> getOriginUnions() { return _originUnions; }
+
+    public java.util.Map<String, InterfaceSymbol> getOriginInterfaces() { return _originInterfaces; }
+
+    public void setOriginTypes(java.util.Map<String, UnionSymbol> unions, java.util.Map<String, InterfaceSymbol> interfaces) {
+        _originUnions = unions == null ? java.util.Map.of() : unions;
+        _originInterfaces = interfaces == null ? java.util.Map.of() : interfaces;
+    }
 
     /**
      * Whether this variable's type came from a generic struct's type argument,

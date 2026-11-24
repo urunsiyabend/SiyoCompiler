@@ -287,15 +287,16 @@ public class ModuleHandler {
             _structTypes.put(entry.getKey(), entry.getValue());
         }
 
-        // A struct-derived value's type travels with it, once the structs it names
-        // are known here and are the ones the exporter meant; any other exported
-        // variable is reached as 0.9.0 reached it.
+        // A struct-derived value's type travels with the exporter's own struct
+        // table. Whether those names still mean the same structs here is checked
+        // where the value is used (TypeResolver.originHolds), after every import,
+        // so a later import replacing a name cannot be missed.
         for (var export : structDerivedExports.entrySet()) {
             VariableSymbol source = export.getValue();
-            if (namesTheSameStructs(source.getDeclaredTypeName(), module.getStructs())) {
-                export.getKey().setDeclaredTypeName(source.getDeclaredTypeName());
-                export.getKey().setStructDerived(true);
-            }
+            export.getKey().setDeclaredTypeName(source.getDeclaredTypeName());
+            export.getKey().setStructDerived(true);
+            export.getKey().setOriginStructs(module.getStructs());
+            export.getKey().setOriginTypes(module.getUnions(), module.getInterfaces());
         }
 
         // Register imported enums so EnumName.Member remains usable across modules.
@@ -663,23 +664,6 @@ public class ModuleHandler {
             variables.putIfAbsent(name, variable);
         }
         return variables;
-    }
-
-    /**
-     * Whether every struct a type name mentions is, in this module, the very
-     * struct the exporting module meant: a library's private P must not be read
-     * as this module's own P.
-     */
-    private boolean namesTheSameStructs(String typeName, Map<String, StructSymbol> exporters) {
-        if (typeName == null) return false;
-        for (String word : typeName.split("[^A-Za-z0-9_]+")) {
-            if (word.isEmpty()) continue;
-            StructSymbol theirs = exporters.get(word);
-            StructSymbol ours = _structTypes.get(word);
-            if (theirs != null && ours != theirs) return false;
-            if (theirs == null && ours != null) return false;
-        }
-        return true;
     }
 
     // --- Registration (first pass) ---
