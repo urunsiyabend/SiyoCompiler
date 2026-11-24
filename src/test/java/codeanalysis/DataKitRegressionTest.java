@@ -1899,6 +1899,9 @@ fn main() {
             new String[]{"filterOfAPoppedArray", "    imut xs: Array<Array<AW>> = [[w]]\n    imut a: Array<AW> = filter(pop(xs), fn(x: AW) -> bool { true })\n", "rejected"},
             new String[]{"popOfAnAnnotationOverAVariable", "    imut a0 = [[w]]\n    imut xs: Array<Array<AW>> = a0\n    imut a: Array<AW> = pop(xs)\n", "rejected"},
             new String[]{"popOfAnAnnotatedAlias", "    imut xs: Array<Array<AW>> = [[w]]\n    imut x2: Array<Array<AW>> = xs\n    imut a: Array<AW> = pop(x2)\n", "rejected"},
+            new String[]{"filterOfAFilteredVariable", "    imut xs = filter([w], fn(x: AW) -> bool { true })\n    imut a: Array<AW> = filter(xs, fn(x: AW) -> bool { true })\n", "lib|dup"},
+            new String[]{"filterOfAnAnnotatedFilteredVariable", "    imut xs: Array<AW> = filter([w], fn(x: AW) -> bool { true })\n    imut a: Array<AW> = filter(xs, fn(x: AW) -> bool { true })\n", "lib|dup"},
+            new String[]{"popOfAnAnnotatedFilteredNested", "    imut xs: Array<Array<AW>> = filter([[w]], fn(x: Array<AW>) -> bool { true })\n    imut a: Array<AW> = pop(xs)\n", "lib|dup"},
             new String[]{"filterOfAnUnannotatedLiteralVariable", "    imut a0 = [w]\n    imut a: Array<AW> = filter(a0, fn(x: AW) -> bool { true })\n", "lib|dup"});
 
     @TestFactory

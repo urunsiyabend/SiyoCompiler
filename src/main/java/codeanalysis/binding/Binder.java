@@ -640,8 +640,11 @@ public class Binder {
             markGenericTypeInferred(variableSymbol);
         }
         if (syntax.getTypeAnnotation() == null) markStructTypeInferred(variableSymbol, initializer);
-        variableSymbol.setZeroNineArray(initializer instanceof BoundArrayLiteralExpression
-                || ordinaryArrayCall(initializer));
+        // 0.9.0 typed an array where it was made: a literal, an ordinary call, or
+        // filter of an array it typed. A variable alone is not one: 0.9.0 dropped
+        // an annotation over a variable.
+        variableSymbol.setZeroNineArray(!(initializer instanceof BoundVariableExpression)
+                && zeroNineArrayValue(initializer));
         // 0.9.0 typed a collection annotation over an ordinary call or a literal,
         // not over a variable, an element, an if or match, or a generic or closure
         // call: b: Array<W> = a is typed only by 0.10.0.
