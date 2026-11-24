@@ -497,6 +497,7 @@ public class Binder {
         VariableSymbol variableSymbol = new VariableSymbol(name, isReadOnly, variableType);
         if (annotation != null) {
             variableSymbol.setDeclaredTypeName(annotation.getData());
+            variableSymbol.setAnnotated(true);
             // A struct-derived value under an annotation: the variable holds what
             // the annotation says, and its aliases do too. Reads stay checked.
             if (_typeResolver.isStructDerived(initializer)) _typeResolver.markStructDerived(variableSymbol, initializer);
@@ -639,6 +640,8 @@ public class Binder {
             markGenericTypeInferred(variableSymbol);
         }
         if (syntax.getTypeAnnotation() == null) markStructTypeInferred(variableSymbol, initializer);
+        variableSymbol.setZeroNineArray(initializer instanceof BoundArrayLiteralExpression
+                || ordinaryArrayCall(initializer));
         // 0.9.0 typed a collection annotation over an ordinary call or a literal,
         // not over a variable, an element, an if or match, or a generic or closure
         // call: b: Array<W> = a is typed only by 0.10.0.
@@ -913,11 +916,52 @@ public class Binder {
     /** Whether a collection annotation over this value types what 0.9.0 did not: see bindVariableDeclaration. */
     private static boolean typedOnlyBy010ForAnnotation(BoundExpression value) {
         if (value instanceof BoundConversionExpression conversion) return typedOnlyBy010ForAnnotation(conversion.getExpression());
+        if (value instanceof BoundCallExpression call && BuiltinFunctions.isBuiltin(call.getFunction())) {
+            // 0.9.0 honoured it over a builtin only when that builtin's result was
+            // an array by 0.9.0's own typing.
+            return !zeroNineArray(call);
+        }
         return value instanceof BoundVariableExpression || value instanceof BoundIndexExpression
                 || value instanceof BoundMemberAccessExpression || value instanceof BoundMatchExpression
                 || value instanceof BoundClosureCallExpression
-                || value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
-                        && !call.getFunction().getTypeParameters().isEmpty();
+                || value instanceof BoundCallExpression call && !call.getFunction().getTypeParameters().isEmpty();
+    }
+
+    /**
+     * Whether 0.9.0 typed this value as an array: a literal, a variable or an
+     * ordinary call of array class, filter over such an array, or pop of an
+     * element from a variable written as an array of arrays. pop over a literal
+     * or over an unannotated variable, map, and a builtin over those gave 0.9.0
+     * an erased value.
+     */
+    private static boolean zeroNineArray(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return zeroNineArray(conversion.getExpression());
+        if (value instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.POP) {
+            // An element popped from a variable 0.9.0 typed, written as an array of arrays.
+            return !call.getArguments().isEmpty()
+                    && call.getArguments().get(0) instanceof BoundVariableExpression held
+                    && held.getVariable().isZeroNineArray() && held.getVariable().isAnnotated()
+                    && TypeResolver.namesACollection(String.valueOf(
+                            TypeResolver.elementTypeNameOf(held.getVariable().getDeclaredTypeName())));
+        }
+        return zeroNineArrayValue(value);
+    }
+
+    /** An array 0.9.0 typed as one and kept through filter: not a popped element. */
+    private static boolean zeroNineArrayValue(BoundExpression value) {
+        if (value instanceof BoundConversionExpression conversion) return zeroNineArrayValue(conversion.getExpression());
+        if (value instanceof BoundArrayLiteralExpression) return true;
+        if (value instanceof BoundVariableExpression variable) return variable.getVariable().isZeroNineArray();
+        if (value instanceof BoundCallExpression call && call.getFunction() == BuiltinFunctions.FILTER) {
+            return !call.getArguments().isEmpty() && zeroNineArrayValue(call.getArguments().get(0));
+        }
+        return ordinaryArrayCall(value);
+    }
+
+    /** An ordinary call of array class, local or imported: typed by its declared return in 0.9.0. */
+    private static boolean ordinaryArrayCall(BoundExpression value) {
+        return value instanceof BoundCallExpression call && !BuiltinFunctions.isBuiltin(call.getFunction())
+                && call.getFunction().getTypeParameters().isEmpty() && value.getClassType() == SiyoArray.class;
     }
 
     private static boolean literalOfNonLiterals(BoundExpression value) {

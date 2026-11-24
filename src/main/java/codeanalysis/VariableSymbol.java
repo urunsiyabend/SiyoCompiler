@@ -111,15 +111,15 @@ public class VariableSymbol {
      */
     private static final class ProvenanceCell {
         private ProvenanceCell _parent;
-        private final java.util.Set<Object> _roots = new java.util.LinkedHashSet<>();
+        private java.util.Set<Object> _roots = new java.util.LinkedHashSet<>();
         // Cells holding this one's object, and cells whose objects this one holds.
-        private final java.util.Set<ProvenanceCell> _containers =
+        private java.util.Set<ProvenanceCell> _containers =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        private final java.util.Set<ProvenanceCell> _contents =
+        private java.util.Set<ProvenanceCell> _contents =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         // Containers this cell's object was taken out of (an element, a field, a
         // loop item): a store into it is a store into what they hold.
-        private final java.util.Set<ProvenanceCell> _elementOf =
+        private java.util.Set<ProvenanceCell> _elementOf =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
         ProvenanceCell find() {
@@ -227,10 +227,12 @@ public class VariableSymbol {
         mine._elementOf.remove(mine);
         // The retired cell is only a link to its new root now: it keeps no roots
         // or edges of its own, so a chain of aliases holds each root once.
-        theirs._roots.clear();
-        theirs._containers.clear();
-        theirs._contents.clear();
-        theirs._elementOf.clear();
+        // Nothing reaches a retired cell but through find(), so its collections are
+        // dropped, not just emptied: they would keep their capacity otherwise.
+        theirs._roots = java.util.Set.of();
+        theirs._containers = java.util.Set.of();
+        theirs._contents = java.util.Set.of();
+        theirs._elementOf = java.util.Set.of();
         ProvenanceCell.flow(mine, theirRoots);
         for (ProvenanceCell container : theirContainers) ProvenanceCell.flow(container, myRoots);
     }
@@ -246,6 +248,19 @@ public class VariableSymbol {
     }
 
     private boolean _genericTypeInferred;
+    private boolean _annotated;
+
+    /** Whether this variable was declared with a written type annotation. */
+    public boolean isAnnotated() { return _annotated; }
+
+    public void setAnnotated(boolean annotated) { _annotated = annotated; }
+
+    private boolean _zeroNineArray;
+
+    /** Whether 0.9.0 typed this variable as an array where it was declared: from an array literal or an ordinary call. */
+    public boolean isZeroNineArray() { return _zeroNineArray; }
+
+    public void setZeroNineArray(boolean array) { _zeroNineArray = array; }
 
     /**
      * Whether 0.10.0 gave this local a generic struct type from something other

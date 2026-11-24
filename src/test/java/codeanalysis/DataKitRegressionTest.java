@@ -1878,6 +1878,104 @@ fn main() {
         assertEquals("lib", interpreted.stdout(), interpreted.stderr());
     }
 
+    /**
+     * {name, declaration of a with AW for the element type, 0.9.0's output}: a
+     * collection annotation over builtin results, nested. "rejected" where 0.9.0
+     * fails ("does not have members"); otherwise run|interpret as 0.9.0 gives it.
+     */
+    private static final List<String[]> ANNOTATED_BUILTINS = List.of(
+            new String[]{"popNested", "    imut a: Array<AW> = pop([[w]])\n", "rejected"},
+            new String[]{"popNestedLiterals", "    imut a: Array<AW> = pop([[W { value: P { x: 0.0 } }]])\n", "rejected"},
+            new String[]{"popOfFilterNested", "    imut a: Array<AW> = pop(filter([[w]], fn(x: Array<AW>) -> bool { true }))\n", "rejected"},
+            new String[]{"popOfUnannotatedNested", "    imut xs = [[w]]\n    imut a: Array<AW> = pop(xs)\n", "rejected"},
+            new String[]{"filterOfPopNested", "    imut a: Array<AW> = filter(pop([[w]]), fn(x: AW) -> bool { true })\n", "rejected"},
+            new String[]{"mapOfLiteral", "    imut a: Array<AW> = map([w], fn(x: AW) -> AW { x })\n", "rejected"},
+            new String[]{"filterOfLiteral", "    imut a: Array<AW> = filter([w], fn(x: AW) -> bool { true })\n", "lib|dup"},
+            new String[]{"filterOfStructLiterals", "    imut a: Array<AW> = filter([W { value: P { x: 0.0 } }], fn(x: AW) -> bool { true })\n", "lib|dup"},
+            new String[]{"filterOfAnnotatedVariable", "    imut xs: Array<AW> = [w]\n    imut a: Array<AW> = filter(xs, fn(x: AW) -> bool { true })\n", "lib|dup"},
+            new String[]{"popOfAnnotatedNested", "    imut xs: Array<Array<AW>> = [[w]]\n    imut a: Array<AW> = pop(xs)\n", "lib|dup"},
+            new String[]{"literal", "    imut a: Array<AW> = [w]\n", "lib|dup"},
+            new String[]{"filterOfAnAnnotationOverAVariable", "    imut a0 = [w]\n    imut b: Array<AW> = a0\n    imut a: Array<AW> = filter(b, fn(x: AW) -> bool { true })\n", "rejected"},
+            new String[]{"filterOfAPoppedArray", "    imut xs: Array<Array<AW>> = [[w]]\n    imut a: Array<AW> = filter(pop(xs), fn(x: AW) -> bool { true })\n", "rejected"},
+            new String[]{"popOfAnAnnotationOverAVariable", "    imut a0 = [[w]]\n    imut xs: Array<Array<AW>> = a0\n    imut a: Array<AW> = pop(xs)\n", "rejected"},
+            new String[]{"popOfAnAnnotatedAlias", "    imut xs: Array<Array<AW>> = [[w]]\n    imut x2: Array<Array<AW>> = xs\n    imut a: Array<AW> = pop(x2)\n", "rejected"},
+            new String[]{"filterOfAnUnannotatedLiteralVariable", "    imut a0 = [w]\n    imut a: Array<AW> = filter(a0, fn(x: AW) -> bool { true })\n", "lib|dup"});
+
+    @TestFactory
+    java.util.stream.Stream<DynamicTest> aCollectionAnnotationOverABuiltinFollowsZeroNinesTyping(@TempDir Path dir) {
+        // 0.9.0 honoured a collection annotation over a builtin only where that
+        // builtin's result was an array by its own typing: filter of an array,
+        // pop of an element from a variable written as an array of arrays. pop
+        // over a literal or an unannotated variable, map, and builtins over those
+        // gave it an erased value it could not read members of. Each composition
+        // here gives, for the plain struct and the generic one, what 0.9.0 gives
+        // the plain one: refused where 0.9.0 failed, its own output where it ran.
+        List<DynamicTest> tests = new java.util.ArrayList<>();
+        for (String[] c : ANNOTATED_BUILTINS) {
+            for (boolean generic : List.of(false, true)) {
+                String name = c[0] + (generic ? "_generic" : "_plain");
+                String struct = generic ? "struct W<T> { value: T }\n" : "struct W { value: P }\n";
+                String main = "import \"lib\"\n" + struct + "fn main() {\n    imut w = W { value: P { x: 0.0 } }\n"
+                        + c[1].replace("AW", generic ? "W<P>" : "W")
+                        + "    import \"dup\"\n    println(a[0].value.who())\n}\n";
+                tests.add(DynamicTest.dynamicTest(name, () -> {
+                    Path project = Files.createDirectories(dir.resolve(name));
+                    Files.writeString(project.resolve("lib.siyo"), TRANSPORT_LIB);
+                    Files.writeString(project.resolve("dup.siyo"), TRANSPORT_DUP);
+                    Files.writeString(project.resolve("main.siyo"), main);
+                    String[] expected = c[2].split("\\|");
+                    List<String> modes = List.of("run", "interpret");
+                    for (int m = 0; m < 2; m++) {
+                        CliParityTest.Result result = CliParityTest.siyoc(project, modes.get(m),
+                                project.resolve("main.siyo").toString());
+                        String where = name + " " + modes.get(m) + ": " + result.stdout() + " / " + result.stderr();
+                        if (c[2].equals("rejected")) {
+                            assertEquals(1, result.exitCode(), where);
+                            assertEquals("", result.stdout(), where);
+                        } else {
+                            assertEquals(expected[m], result.stdout(), where);
+                        }
+                    }
+                }));
+            }
+        }
+        return tests.stream();
+    }
+
+    @Test
+    void storageKeepsFourThousandDistinctRootsOnceAcrossAliasesAndContainers() throws Exception {
+        // 4,000 variables, each with a root of its own, each aliased to the one
+        // before after taking its root (a late alias), with a container holding
+        // every tenth, and a fresh variable held by none: every alias sees all
+        // 4,000 roots, each kept once in the merged cell; the container sees what
+        // it holds and more; the fresh one sees nothing.
+        java.lang.reflect.Field cellField = VariableSymbol.class.getDeclaredField("_cell");
+        cellField.setAccessible(true);
+        java.lang.reflect.Field rootsField = cellField.getType().getDeclaredField("_roots");
+        rootsField.setAccessible(true);
+        VariableSymbol container = new VariableSymbol("box", true, SiyoArray.class);
+        VariableSymbol fresh = new VariableSymbol("fresh", true, SiyoStruct.class);
+        List<VariableSymbol> chain = new java.util.ArrayList<>();
+        for (int i = 0; i < 4000; i++) {
+            VariableSymbol variable = new VariableSymbol("a" + i, true, SiyoStruct.class);
+            variable.addProvenance(java.util.Set.of("root" + i));
+            if (i > 0) variable.shareStorageWith(chain.get(i - 1));
+            if (i % 10 == 0) variable.heldIn(container);
+            chain.add(variable);
+        }
+        long kept = 0;
+        for (VariableSymbol variable : chain) kept += ((java.util.Set<?>) rootsField.get(cellField.get(variable))).size();
+        assertEquals(4000, kept);
+        for (VariableSymbol variable : chain) assertEquals(4000, variable.getProvenance().size());
+        assertEquals(4000, container.getProvenance().size());
+        assertTrue(fresh.getProvenance().isEmpty());
+        // A late addition through any alias reaches all of them and the container.
+        chain.get(17).addProvenance(java.util.Set.of("late"));
+        assertTrue(chain.get(3999).getProvenance().contains("late"));
+        assertTrue(container.getProvenance().contains("late"));
+        assertTrue(fresh.getProvenance().isEmpty());
+    }
+
     @Test
     void aUnionOfStorageKeepsEachRootOnce() throws Exception {
         // A chain of aliases, each also given what the one before held: the cell
